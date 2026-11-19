@@ -5,7 +5,10 @@ import { FakeCookieJar, RedirectSignal, routeFetch, user } from "@/lib/test-help
 
 const { jar } = vi.hoisted(() => ({ jar: { current: null as unknown } }));
 
-vi.mock("next/headers", () => ({ cookies: async () => jar.current }));
+vi.mock("next/headers", () => ({
+  cookies: async () => jar.current,
+  headers: async () => new Headers(),
+}));
 vi.mock("next/navigation", async () => {
   const { RedirectSignal: Signal } = await import("@/lib/test-helpers");
   return {
@@ -58,7 +61,7 @@ describe("panel home", () => {
 
     const page = decoded(renderToStaticMarkup(await PanelHome()));
 
-    expect(page).toContain("Welcome, Sam<");
+    expect(page).toMatch(/<h1[^>]*>Welcome, Sam<\/h1>/); // the page's one h1 (pre-QA, axe)
     expect(page).not.toContain("staff.probe@example.com");
   });
 

@@ -156,4 +156,17 @@ describe("apiPost", () => {
     expect(init?.body).toBeUndefined();
     expect(new Headers(init?.headers).has("Content-Type")).toBe(false);
   });
+
+  it("answers undefined for an accepted call without a body (202 or 204)", async () => {
+    for (const status of [202, 204]) {
+      fetchMock.mockResolvedValueOnce(new Response(null, { status }));
+      const answer = await apiPost("/v1/waitlist", {
+        zip_code: "00000",
+        email: "a@example.com",
+        locale: "en",
+        source: "web",
+      });
+      expect(answer, String(status)).toBeUndefined();
+    }
+  });
 });

@@ -1,4 +1,5 @@
-"""refunds: a dispute's refund staff abandoned once Stripe shows none (#434)
+"""refunds: a dispute's refund staff abandoned once Stripe shows none (#434); transfers: the
+initiation boundary and the reversal flag (#450 round 4)
 
 Revision ID: 49fad9f10ec9
 Revises: e1bd2d8588e7
@@ -18,6 +19,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 TABLE = "refunds"
+TRANSFERS = "transfers"
 # Final names (op.f): the metadata's naming convention must not prefix them again.
 STATUS_CHECK = "ck_refunds_refund_status"
 STRIPE_STATUS_CHECK = "ck_refunds_created_has_stripe_status"
@@ -64,6 +66,23 @@ def upgrade() -> None:
         unique=True,
         postgresql_where=sa.text("dispute_id IS NOT NULL AND status <> 'abandoned'"),
     )
+    # The transfer's initiation boundary (#450 round 4): when the current attempt passed its
+    # last hold check, under the job's lock, right before the transfer create (NULL: not yet);
+    # and when a late refund found a transfer that may already be issued (staff reverse it by
+    # hand, docs/stripe-money.md; never cleared by the code). NULL for every existing row; the
+    # previous code never reads or writes them.
+    op.add_column(
+        TRANSFERS, sa.Column("create_started_at", sa.DateTime(timezone=True), nullable=True)
+    )
+    op.add_column(
+        TRANSFERS, sa.Column("needs_reversal_at", sa.DateTime(timezone=True), nullable=True)
+    )
+    # When an attempt first crossed that boundary (#450 round 5): Stripe may hold a transfer of
+    # the job from then on, whatever later attempts do. Never cleared by the code.
+    op.add_column(
+        TRANSFERS,
+        sa.Column("create_may_have_been_issued_at", sa.DateTime(timezone=True), nullable=True),
+    )
 
 
 def downgrade() -> None:
@@ -87,6 +106,23 @@ def downgrade() -> None:
             f"{held} refund rows hold a payout for reconciliation: reconcile and clear them "
             "(docs/stripe-money.md) before downgrading."
         )
+    # Dropping the marker, or the evidence that a create may have been issued, would lose the
+    # record a late refund needs to tell staff a payout may have to be reversed.
+    flagged = bind.execute(
+        sa.text(
+            "SELECT count(*) FROM transfers WHERE needs_reversal_at IS NOT NULL"
+            " OR create_may_have_been_issued_at IS NOT NULL"
+        )
+    ).scalar_one()
+    if flagged:
+        raise RuntimeError(
+            f"{flagged} transfers hold a reversal flag or the evidence of a create that may have "
+            "been issued: the previous schema cannot hold them. Take a backup and settle them by "
+            "hand (docs/stripe-money.md) before downgrading."
+        )
+    op.drop_column(TRANSFERS, "create_may_have_been_issued_at")
+    op.drop_column(TRANSFERS, "needs_reversal_at")
+    op.drop_column(TRANSFERS, "create_started_at")
     op.drop_index(op.f(CURRENT_INDEX), table_name=TABLE)
     op.drop_column(TABLE, "late_refund_seen_at")
     op.drop_column(TABLE, "last_error_definitive")

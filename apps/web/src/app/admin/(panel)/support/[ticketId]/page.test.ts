@@ -5,12 +5,19 @@ import { FakeCookieJar, RedirectSignal, routeFetch } from "@/lib/test-helpers";
 
 const { jar } = vi.hoisted(() => ({ jar: { current: null as unknown } }));
 
-vi.mock("next/headers", () => ({ cookies: async () => jar.current }));
+vi.mock("next/headers", () => ({
+  cookies: async () => jar.current,
+  headers: async () => new Headers(),
+}));
 vi.mock("next/navigation", async () => {
   const { RedirectSignal: Signal } = await import("@/lib/test-helpers");
   return {
     redirect: (url: string) => {
       throw new Signal(url);
+    },
+    // A missing record answers 404 (not-found.tsx, #494).
+    notFound: () => {
+      throw new Error("NEXT_NOT_FOUND");
     },
   };
 });
@@ -119,14 +126,10 @@ describe("support ticket page", () => {
     expect(pressed(page)).toEqual({ Open: "false", "In progress": "false", Closed: "true" });
   });
 
-  it("says so when the ticket does not exist", async () => {
+  it("answers 404 when the ticket does not exist (#494)", async () => {
     api(() => Response.json({ error: { code: "ticket_not_found" } }, { status: 404 }));
 
-    const page = await render();
-
-    expect(page).toContain("This ticket doesn't exist.");
-    expect(page).toContain('href="/admin/support"');
-    expect(page).not.toContain("<button");
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
   it.each(["not-a-uuid", "..", "%2e%2e", `${TICKET_ID}/../..`])(
@@ -134,9 +137,7 @@ describe("support ticket page", () => {
     async (ticketId) => {
       fetchMock.mockImplementation(routeFetch({ "/v1/auth/me": () => me("agent") }));
 
-      const page = await render(ticketId);
-
-      expect(page).toContain("This ticket doesn't exist.");
+      await expect(render(ticketId)).rejects.toThrow("NEXT_NOT_FOUND");
       expect(fetchMock.mock.calls.map(([input]) => new URL(String(input)).pathname)).toEqual([
         "/v1/auth/me",
       ]);

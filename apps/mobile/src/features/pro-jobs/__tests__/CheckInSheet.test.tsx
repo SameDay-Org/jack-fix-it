@@ -4,7 +4,14 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import { router } from "expo-router";
-import { AccessibilityInfo, AppState, Linking, Platform, type AppStateStatus } from "react-native";
+import {
+  AccessibilityInfo,
+  AppState,
+  Keyboard,
+  Linking,
+  Platform,
+  type AppStateStatus,
+} from "react-native";
 
 import { ApiError, apiPost, NetworkError, type ErrorHeaders } from "@/api";
 import { dismissToast, toastStore } from "@/components/ui/toast";
@@ -201,6 +208,21 @@ describe("CheckInSheet", () => {
     await type(ARRIVAL_CODE);
     expect(codeField().props.value).toBe(ARRIVAL_CODE);
     expect(isDisabled("check-in-submit")).toBe(false);
+  });
+
+  it("the keyboard goes down once the fourth digit is in, so Check in is in view (#477)", async () => {
+    const dismiss = jest.spyOn(Keyboard, "dismiss");
+    await open();
+
+    await type("482");
+    expect(dismiss).not.toHaveBeenCalled();
+    await type(ARRIVAL_CODE);
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    // A fix after that (a cell tapped, a digit deleted and typed again) asks once more.
+    await type(ARRIVAL_CODE.slice(0, 3));
+    await type(ARRIVAL_CODE);
+    expect(dismiss).toHaveBeenCalledTimes(2);
+    dismiss.mockRestore();
   });
 
   it("with the location allowed, it finds the position, posts the code with it pinned to the session and closes once", async () => {

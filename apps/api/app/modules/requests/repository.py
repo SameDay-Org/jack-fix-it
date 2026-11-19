@@ -146,6 +146,22 @@ class ServiceRequestRepository:
         )
         return list((await self._session.scalars(statement)).all())
 
+    async def stale_pending_media(
+        self, before: datetime, limit: int
+    ) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """(request id, media id) of the media rows still pending that were attached before
+        `before` (#473), oldest first, at most `limit`."""
+        statement = (
+            select(RequestMedia.request_id, RequestMedia.id)
+            .where(
+                RequestMedia.safe_status == MediaSafeStatus.PENDING,
+                RequestMedia.created_at < before,
+            )
+            .order_by(RequestMedia.created_at, RequestMedia.id)
+            .limit(limit)
+        )
+        return [(parent, row) for parent, row in await self._session.execute(statement)]
+
     async def fail_pending_media(self, media_ids: Collection[uuid.UUID]) -> list[uuid.UUID]:
         """Marks those of the media rows still pending failed (#173); the ids it changed."""
         statement = (
@@ -191,6 +207,41 @@ class ServiceRequestRepository:
     def media_keys_among(keys: Collection[str]) -> Select[str]:
         """The file keys among `keys` that request media hold, for another module's query."""
         return select(RequestMedia.file_key).where(RequestMedia.file_key.in_(keys))
+
+    async def undispatched(
+        self,
+        dispatched: Select[uuid.UUID],
+        statuses: Collection[RequestStatus],
+        *,
+        created_after: datetime,
+        limit: int,
+        category_ids: Collection[uuid.UUID] | None,
+        address_ids: Select[uuid.UUID] | None,
+        after: tuple[datetime, uuid.UUID] | None,
+    ) -> list[tuple[uuid.UUID, uuid.UUID, datetime]]:
+        """(id, address_id, created_at) of up to `limit` requests in `statuses` with a category
+        (among `category_ids` when given), at an address in `address_ids` when given, created
+        after `created_after`, whose id is not in `dispatched`, oldest first by (created_at,
+        id), after `after` when given. Every filter is in the statement, before the limit."""
+        statement = select(
+            ServiceRequest.id, ServiceRequest.address_id, ServiceRequest.created_at
+        ).where(
+            ServiceRequest.status.in_(statuses),
+            ServiceRequest.category_id.is_not(None),
+            ServiceRequest.created_at >= created_after,
+            ServiceRequest.id.not_in(dispatched),
+        )
+        if category_ids is not None:
+            statement = statement.where(ServiceRequest.category_id.in_(category_ids))
+        if address_ids is not None:
+            statement = statement.where(ServiceRequest.address_id.in_(address_ids))
+        if after is not None:
+            statement = statement.where(
+                tuple_(ServiceRequest.created_at, ServiceRequest.id) > tuple_(*after)
+            )
+        statement = statement.order_by(ServiceRequest.created_at, ServiceRequest.id).limit(limit)
+        rows = (await self._session.execute(statement)).all()
+        return [(row.id, row.address_id, row.created_at) for row in rows]
 
     @staticmethod
     def ids_with_status(statuses: Collection[RequestStatus]) -> Select[uuid.UUID]:

@@ -74,6 +74,14 @@ class JobPhotoRows:
         return await JobPhotoRepository(session).fail_pending(row_ids)
 
 
+async def stale_pending_photos(
+    session: AsyncSession, before: datetime, limit: int
+) -> list[tuple[uuid.UUID, uuid.UUID]]:
+    """(job id, photo id) of the photos still waiting for their safe copy since before
+    `before`, oldest first: for the sweep (app.modules.media.resweep, #473)."""
+    return await JobPhotoRepository(session).stale_pending(before, limit)
+
+
 async def enqueue_photo_sanitize(
     queue: JobQueue, job_id: uuid.UUID, photo_ids: Sequence[uuid.UUID], timeout_seconds: float
 ) -> bool:

@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
+import { PixelRatio } from "react-native";
 import { useReducedMotion, withTiming } from "react-native-reanimated";
 
 import { tokens } from "@/theme";
 
-import { Milestones } from "../Milestones";
+import { Milestones, sharedLabelMultiplier } from "../Milestones";
 
 jest.mock("react-native-reanimated", () => {
   const actual =
@@ -130,5 +131,70 @@ describe("Milestones", () => {
 
     expect(withTiming).not.toHaveBeenCalled();
     expect(scales()).toEqual([1, 1, 0]);
+  });
+});
+
+// #486: each label shrank on its own at font scale 2, so "On the way" was drawn smaller than
+// "Working" and "Done" next to it.
+describe("Milestones at large text", () => {
+  const layout = (width: number) => ({
+    nativeEvent: { layout: { x: 0, y: 0, width, height: 18 } },
+  });
+  const caps = () =>
+    [1, 2, 3].map(
+      (n) => screen.getByTestId(`milestones-label-${n}`).props.maxFontSizeMultiplier as unknown,
+    );
+  const hidden = { includeHiddenElements: true };
+
+  it("shares the largest cap at which the widest label fits, on a whole pixel", () => {
+    // 13 dp at density 1 is 13 px unscaled; the widest label (60 of a 72 dp column) fits 15.6 px.
+    const cap = sharedLabelMultiplier(72, [60, 40, 30], 13, 1) as number;
+    expect(Math.ceil(13 * cap)).toBe(15);
+    // At density 2: 26 px unscaled, 31.2 px fit, 31 px drawn.
+    expect(Math.ceil(26 * (sharedLabelMultiplier(72, [60, 40, 30], 13, 2) as number))).toBe(31);
+  });
+
+  it("is never under 1, which React Native ignores, and waits for every measure", () => {
+    expect(sharedLabelMultiplier(50, [60, 40], 13, 1)).toBe(1);
+    expect(sharedLabelMultiplier(0, [60, 40], 13, 1)).toBeUndefined();
+    expect(sharedLabelMultiplier(72, [60, undefined], 13, 1)).toBeUndefined();
+    expect(sharedLabelMultiplier(72, [60, 0], 13, 1)).toBeUndefined();
+    expect(sharedLabelMultiplier(72, [], 13, 1)).toBeUndefined();
+  });
+
+  it("gives every label the same cap once the column and the labels are measured", async () => {
+    await render(ui(1));
+    expect(caps()).toEqual([undefined, undefined, undefined]);
+
+    await act(async () => {
+      await fireEvent(screen.getByTestId("milestones-label-1"), "layout", layout(96));
+      for (const [index, width] of [64, 48, 32].entries()) {
+        await fireEvent(
+          screen.getByTestId(`milestones-measure-${index + 1}`, hidden),
+          "layout",
+          layout(width),
+        );
+      }
+    });
+
+    const shared = sharedLabelMultiplier(
+      96,
+      [64, 48, 32],
+      tokens.fontSize.footnote.size,
+      PixelRatio.get(),
+    );
+    expect(shared).toBeGreaterThan(1);
+    expect(caps()).toEqual([shared, shared, shared]);
+  });
+
+  it("measures each label unscaled and out of reach of assistive technology", async () => {
+    await render(ui(1));
+
+    for (const [index, text] of LABELS.entries()) {
+      const measure = screen.getByTestId(`milestones-measure-${index + 1}`, hidden);
+      expect(measure.props.children).toBe(text);
+      expect(measure.props.allowFontScaling).toBe(false);
+      expect(screen.queryByTestId(`milestones-measure-${index + 1}`)).toBeNull();
+    }
   });
 });

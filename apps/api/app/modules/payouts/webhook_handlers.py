@@ -30,6 +30,7 @@ from typing import Final
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.stripe_connect import AccountReader, worker_stripe_connect
+from app.modules.dispatch.kicks import RedispatchKick
 from app.modules.notifications.events import push_payouts_enabled
 from app.modules.payouts.service import store_payouts_enabled
 from app.modules.pros.service import ConnectedPro, ProService
@@ -78,7 +79,8 @@ async def announce(
     queue: JobQueue,
     timeout_seconds: float,
 ) -> None:
-    """After the worker's commit: the change logged, and the approved pro told payouts are on."""
+    """After the worker's commit: the change logged, and the approved pro told payouts are on
+    and queued a re-dispatch of the requests no pro could take (#478)."""
     logger.info(
         "payouts_enabled_changed",
         extra={"pro_id": str(pro.account.profile_id), "payouts_enabled": enabled},
@@ -89,6 +91,9 @@ async def announce(
             pro_user_id=pro.user_id,
             stripe_event_id=stripe_event_id,
             timeout_seconds=timeout_seconds,
+        )
+        await RedispatchKick(queue, timeout_seconds).after_commit(
+            pro.account.profile_id, "payouts_enabled"
         )
 
 

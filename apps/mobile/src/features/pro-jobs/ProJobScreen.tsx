@@ -2,12 +2,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { router, useIsFocused, useLocalSearchParams } from "expo-router";
 import type { TFunction } from "i18next";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Linking, ScrollView, Text, useWindowDimensions, View } from "react-native";
+import { Linking, RefreshControl, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { sessionGeneration } from "@/api";
+import { sessionGeneration, useSessionGeneration } from "@/api";
 import {
   Button,
   IconTile,
@@ -22,6 +22,7 @@ import {
 import { announce } from "@/components/ui/focus";
 import { BackButton } from "@/features/auth/components/BackButton";
 import { ChatEntry } from "@/features/chat";
+import { proDisputeKey } from "@/features/disputes/api";
 import { ReportedProblem } from "@/features/disputes/ReportedProblem";
 import { useInForeground } from "@/features/jobs/api";
 import { categoryLabel, categoryTileProps, formatTimeOfDay } from "@/features/opportunities/format";
@@ -32,13 +33,13 @@ import { formatLocale, formatMoneyExact } from "@/features/quotes/format";
 import { useGuardedPush } from "@/features/quotes/navigation";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
 import { RateEntry } from "@/features/reviews";
-import { bubbleShadow, continuousCorners } from "@/theme";
+import { bubbleShadow, continuousCorners, tokens } from "@/theme";
 
 import { isJobGone, startJob, stepFailure, useProJob, useSingleFlight } from "./api";
 import { reportStepFailure } from "./failure";
 import { addressLines, addressText, customerName, dayLabel, mapsUrl, whenLabel } from "./format";
 import { JobPhotoSection } from "./JobPhotoSection";
-import { jobStep, STEP_TONE, type JobStep, type ProJob } from "./phase";
+import { jobChip, jobStep, type JobStep, type ProJob } from "./phase";
 import { followJob, isSharedStep, sharingConfig, SharingNote } from "./sharing";
 import { useJobDone, type DoneState } from "./useJobDone";
 import { useJobPhotos, type JobPhotos as KindPhotos } from "./useJobPhotos";
@@ -141,6 +142,7 @@ export function ProJobScreen() {
   // Locked, done and cancelled have nothing to act on: no dock.
   const docked = data !== undefined && !gone && DOCKED_STEPS.includes(jobStep(data));
   useAnnounceStep(data);
+  const pull = usePullToRefresh(id, data?.status === "disputed", refetch);
   // A refetch that finds the job past the way (cancelled, checked in elsewhere) ends its sharing.
   useEffect(() => {
     if (data) void followJob(data);
@@ -149,7 +151,17 @@ export function ProJobScreen() {
   return (
     // With the action dock, the dock pads the bottom safe area itself (its white runs to the edge).
     <Screen bar="light" edges={docked ? [] : undefined} testID="pro-job-screen">
-      <ScrollView contentContainerClassName="flex-grow px-4 pb-6">
+      <ScrollView
+        contentContainerClassName="flex-grow px-4 pb-6"
+        refreshControl={
+          <RefreshControl
+            refreshing={pull.pulling}
+            onRefresh={() => void pull.refresh()}
+            tintColor={tokens.colors["navy-900"]}
+            colors={[tokens.colors["navy-900"]]}
+          />
+        }
+      >
         <View className="pb-4 pt-2">
           <BackButton fallbackHref="/" />
         </View>
@@ -263,7 +275,33 @@ function guideText(t: TFunction, job: ProJob, step: Exclude<JobStep, "locked">):
   if (step === "done" && job.status === "completed") {
     return t("proJobs.screen.guide.waiting", { name });
   }
+  // Staff resolved a report and closed the job: the pro did not call it off (#472).
+  if (step === "closed" && job.status === "refunded") {
+    return t("proJobs.screen.guide.closedAfterReport");
+  }
   return t(`proJobs.screen.guide.${step}`, { name });
+}
+
+/**
+ * Pull to refresh (#469): the job, and its report while one is open, asked again now. A failure
+ * shows where a refetch's does (the notice above the hero, the report's own retry).
+ */
+function usePullToRefresh(jobId: string, reported: boolean, refetch: () => Promise<unknown>) {
+  const client = useQueryClient();
+  const generation = useSessionGeneration();
+  const [pulling, setPulling] = useState(false);
+  const refresh = async () => {
+    setPulling(true);
+    try {
+      await Promise.all([
+        refetch(),
+        reported ? client.refetchQueries({ queryKey: proDisputeKey(jobId, generation) }) : null,
+      ]);
+    } finally {
+      setPulling(false);
+    }
+  };
+  return { pulling, refresh };
 }
 
 function JobHero({ job, now }: { job: ProJob; now: number }) {
@@ -286,8 +324,8 @@ function JobHero({ job, now }: { job: ProJob; now: number }) {
     <View className="gap-4" testID="pro-job-hero">
       <View className="flex-row">
         <StatusBadge
-          label={t(`proJobs.status.${step}`)}
-          tone={STEP_TONE[step]}
+          label={t(`proJobs.status.${jobChip(job).label}`)}
+          tone={jobChip(job).tone}
           testID="pro-job-status"
         />
       </View>

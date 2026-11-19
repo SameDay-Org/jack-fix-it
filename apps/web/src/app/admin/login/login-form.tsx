@@ -5,6 +5,8 @@ import { useActionState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 
+import { RETURN_PARAM } from "@/lib/return-path";
+
 import { login, type LoginError, type LoginState } from "./actions";
 
 export type LoginFormText = {
@@ -17,13 +19,17 @@ export type LoginFormText = {
 
 const initialState: LoginState = { error: null, email: "" };
 
-/** The form posts to the login server action; the tokens never reach this component. */
-export function LoginForm({ text }: { text: LoginFormText }) {
+/**
+ * The form posts to the login server action; the tokens never reach this component. `returnTo`
+ * is the panel page to open after sign-in (already validated; the action checks it again).
+ */
+export function LoginForm({ text, returnTo }: { text: LoginFormText; returnTo: string | null }) {
   const [state, action, pending] = useActionState(login, initialState);
   const error = state.error ? text.errors[state.error] : null;
 
   return (
     <form action={action} className="flex flex-col gap-4" noValidate>
+      {returnTo ? <input type="hidden" name={RETURN_PARAM} value={returnTo} /> : null}
       <div className="flex flex-col gap-2">
         <Label htmlFor="email">{text.email}</Label>
         <Input

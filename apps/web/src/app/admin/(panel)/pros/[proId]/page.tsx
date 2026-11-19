@@ -1,5 +1,6 @@
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import type { TFunction } from "i18next";
 
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +50,10 @@ function controlText(t: TFunction): Omit<DecisionControlText, "label" | "approve
     reasonHint: t("admin.pros.detail.decision.reasonHint", { max: REASON_MAX_LENGTH }),
     saving: t("admin.pros.detail.decision.saving"),
     saved: t("admin.pros.detail.decision.saved"),
+    decided: {
+      approved: t("admin.pros.detail.decision.decided.approved"),
+      rejected: t("admin.pros.detail.decision.decided.rejected"),
+    },
     errors: {
       reason_required: t("admin.pros.detail.errors.reason_required", { max: REASON_MAX_LENGTH }),
       not_found: t("admin.pros.detail.errors.not_found"),
@@ -65,24 +70,45 @@ function controlText(t: TFunction): Omit<DecisionControlText, "label" | "approve
  * review buttons while it is pending. The link is a short-lived URL the API signed for this
  * page view: it opens without a referrer, and neither the page nor the API answer is cached.
  */
+/** The pro's name, the heading that takes the focus after a decision on the pro (#463). */
+const PRO_HEADING = "pro-name";
+
+/** A current document's heading: it takes the focus after a decision on the document (#463). */
+function documentHeadingId(documentId: string): string {
+  return `document-${documentId}`;
+}
+
 function DocumentRow({
   pro,
   document,
   now,
   locale,
   t,
+  reviewable,
 }: {
   pro: Pro;
   document: ProDocument;
   now: Date;
   locale: string;
   t: TFunction;
+  /** A current document (its decision control and focusable heading); earlier ones are not. */
+  reviewable: boolean;
 }) {
   const type = t(`admin.pros.documentType.${document.doc_type}`);
   return (
     <li className="flex flex-col gap-3 rounded-md border border-gray-500/30 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="font-semibold">{type}</span>
+        {reviewable ? (
+          <h3
+            id={documentHeadingId(document.id)}
+            tabIndex={-1}
+            className="rounded-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-green-700"
+          >
+            {type}
+          </h3>
+        ) : (
+          <span className="font-semibold">{type}</span>
+        )}
         <StatusBadge status={document.status}>
           {t(`admin.pros.documentStatus.${document.status}`)}
         </StatusBadge>
@@ -125,10 +151,13 @@ function DocumentRow({
         {t("admin.pros.detail.viewFile", { type })}
         <ExternalLink aria-hidden className="size-4" />
       </a>
-      {document.status === "pending" ? (
+      {/* Mounted once decided too: it keeps announcing the decision and hands the focus to the
+          document's heading (#463). */}
+      {reviewable ? (
         <DecisionControl
           action={reviewDocument.bind(null, pro.id, document.id)}
-          offered={DECISIONS}
+          offered={document.status === "pending" ? DECISIONS : []}
+          focusAfter={documentHeadingId(document.id)}
           text={{
             ...controlText(t),
             label: t("admin.pros.detail.reviewLabel", { type }),
@@ -154,6 +183,8 @@ export default async function ProPage({ params }: { params: Promise<{ proId: str
   const t = await getT(locale);
   const { proId } = await params;
   const pro = isUuid(proId) ? await loadPro(await staffAuth(), proId) : "not_found";
+  // A pro that does not exist answers 404, with its own heading (not-found.tsx, #494).
+  if (pro === "not_found") notFound();
   const now = new Date();
 
   return (
@@ -165,11 +196,7 @@ export default async function ProPage({ params }: { params: Promise<{ proId: str
         <ArrowLeft aria-hidden className="size-4" />
         {t("admin.pros.detail.back")}
       </Link>
-      {pro === "not_found" ? (
-        <Card>
-          <p className="font-semibold">{t("admin.pros.detail.notFound")}</p>
-        </Card>
-      ) : pro === "error" ? (
+      {pro === "error" ? (
         <Card role="alert">
           <p className="font-semibold text-danger">{t("admin.pros.detail.loadError")}</p>
         </Card>
@@ -177,7 +204,11 @@ export default async function ProPage({ params }: { params: Promise<{ proId: str
         <>
           <Card className="flex flex-col gap-6">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h1 className="text-2xl font-bold break-words">
+              <h1
+                id={PRO_HEADING}
+                tabIndex={-1}
+                className="rounded-sm text-2xl font-bold break-words outline-none focus-visible:ring-2 focus-visible:ring-green-700"
+              >
                 {pro.legal_name ?? pro.name ?? t("admin.pros.noName")}
               </h1>
               <StatusBadge status={pro.verification_status}>
@@ -281,6 +312,7 @@ export default async function ProPage({ params }: { params: Promise<{ proId: str
                     now={now}
                     locale={locale}
                     t={t}
+                    reviewable
                   />
                 ))}
               </ul>
@@ -301,6 +333,7 @@ export default async function ProPage({ params }: { params: Promise<{ proId: str
                       now={now}
                       locale={locale}
                       t={t}
+                      reviewable={false}
                     />
                   ))}
                 </ul>
@@ -333,6 +366,7 @@ export default async function ProPage({ params }: { params: Promise<{ proId: str
             <DecisionControl
               action={decidePro.bind(null, pro.id)}
               offered={DECISIONS.filter((decision) => decision !== pro.verification_status)}
+              focusAfter={PRO_HEADING}
               confirmApproval
               text={{
                 ...controlText(t),

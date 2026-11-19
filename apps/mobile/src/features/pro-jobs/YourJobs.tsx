@@ -12,7 +12,7 @@ import { continuousCorners } from "@/theme";
 
 import { proJobHref, useProJobs } from "./api";
 import { customerName, dayLabel } from "./format";
-import { jobStep, STEP_TONE, type ProJob } from "./phase";
+import { jobChip, type ProJob } from "./phase";
 
 // Shown to sighted users only: the row's label already says it all.
 const VISUAL_ONLY = {
@@ -35,7 +35,7 @@ type RowText = {
 function rowText(t: TFunction, job: ProJob, now: number): RowText {
   const locale = formatLocale();
   const at = Date.parse(job.scheduled_start_at);
-  const status = t(`proJobs.status.${jobStep(job)}`);
+  const status = t(`proJobs.status.${jobChip(job).label}`);
   const time = formatTimeOfDay(at, locale);
   const when = t("proJobs.when", { day: dayLabel(t, at, now, locale), time });
   const category = categoryLabel(t, job.category);
@@ -95,11 +95,7 @@ export function JobRow({ job, now, onPress }: JobRowProps) {
             <Text className="text-headline text-navy-900" testID={`${testID}-time`}>
               {text.time}
             </Text>
-            <StatusBadge
-              label={text.status}
-              tone={STEP_TONE[jobStep(job)]}
-              testID={`${testID}-status`}
-            />
+            <StatusBadge label={text.status} tone={jobChip(job).tone} testID={`${testID}-status`} />
           </View>
           <Text className="text-callout text-navy-900" testID={`${testID}-category`}>
             {text.category}
@@ -116,7 +112,7 @@ export function JobRow({ job, now, onPress }: JobRowProps) {
 }
 
 /** A row-shaped placeholder: the date leaf, the time beside a pill, two lines under them. */
-function JobRowSkeleton() {
+export function JobRowSkeleton() {
   const { t } = useTranslation();
   return (
     <Card>
@@ -152,8 +148,12 @@ export function YourJobs({ testID = "your-jobs" }: { testID?: string }) {
       <Text accessibilityRole="header" className="text-headline text-navy-900">
         {t("proJobs.yourJobs.title")}
       </Text>
+      {/* A key per state: the placeholder and the empty card are both accessible Views in this
+          slot, and Android keeps a removed contentDescription on a reused view, so without the
+          keys the empty card would still be announced as "Loading your jobs" (#470). */}
       {data === undefined && shownError === null ? (
         <View
+          key="loading"
           accessible
           accessibilityRole="progressbar"
           accessibilityLabel={t("proJobs.yourJobs.loading")}
@@ -173,6 +173,7 @@ export function YourJobs({ testID = "your-jobs" }: { testID?: string }) {
         />
       ) : data.length === 0 ? (
         <View
+          key="empty"
           accessible
           style={continuousCorners}
           className="gap-1 rounded-lg bg-navy-900/5 p-4"

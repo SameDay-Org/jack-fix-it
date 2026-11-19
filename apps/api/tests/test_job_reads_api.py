@@ -59,6 +59,8 @@ CUSTOMER_KEYS = {
     "tax_cents",
     "customer_total_cents",
     "cancellation",
+    "dispute_status",
+    "dispute_resolution",
     "unread_messages",
     "tip",
 }
@@ -78,6 +80,7 @@ PRO_KEYS = {
     "confirm_by",
     "photos",
     "pro_payout_cents",
+    "pro_receives_cents",
     "payout",
     "cancellation",
     "unread_messages",

@@ -207,7 +207,11 @@ export function jobText(
     case "attention":
       return { headline: t("jobs.headline.attention"), support: t("jobs.support.attention") };
     case "cancelled":
-      return { headline: t("jobs.headline.cancelled"), support: t("jobs.support.cancelled") };
+      // Refunded shows as cancelled (glossary), but the job was not called off: the customer's
+      // report was resolved and the payment went back (#472).
+      return job.status === "refunded"
+        ? { headline: t("jobs.headline.refunded"), support: t("jobs.support.refunded") }
+        : { headline: t("jobs.headline.cancelled"), support: t("jobs.support.cancelled") };
   }
 }
 
@@ -366,6 +370,7 @@ function timelineLabel(t: TFunction, entry: JobTimelineEntry): string | null {
         case "disputed":
           return t("jobs.timeline.disputed");
         case "refunded":
+          return t("jobs.timeline.refunded");
         case "cancelled":
           return t("jobs.timeline.cancelled");
         default:

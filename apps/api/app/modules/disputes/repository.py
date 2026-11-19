@@ -70,6 +70,27 @@ class DisputeRepository:
         )
         return (await self._session.scalar(statement)) is not None
 
+    async def outcomes_of_jobs(
+        self, job_ids: Collection[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, DisputeStatus, DisputeResolution | None, int | None, int | None]]:
+        """(job id, status, resolution, pro_release_cents, customer_refund_cents) of the
+        dispute of each job among `job_ids` that has one, in one statement (#472, #488)."""
+        if not job_ids:
+            return []
+        statement = select(
+            Dispute.job_id,
+            Dispute.status,
+            Dispute.resolution,
+            Dispute.pro_release_cents,
+            Dispute.customer_refund_cents,
+        ).where(Dispute.job_id.in_(job_ids))
+        return [
+            (job_id, status, resolution, release, refund)
+            for job_id, status, resolution, release, refund in await self._session.execute(
+                statement
+            )
+        ]
+
     async def released_of_job(self, job_id: uuid.UUID) -> Dispute | None:
         """The job's dispute when an admin resolved it with a release, full or partial (#76)."""
         statement = (
@@ -191,6 +212,22 @@ class DisputePhotoRepository:
     async def add_all(self, photos: Collection[DisputePhoto]) -> None:
         self._session.add_all(photos)
         await self._session.flush()
+
+    async def stale_pending(
+        self, before: datetime, limit: int
+    ) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """(dispute id, photo id) of the photos still pending that were attached before
+        `before` (#473), oldest first, at most `limit`."""
+        statement = (
+            select(DisputePhoto.dispute_id, DisputePhoto.id)
+            .where(
+                DisputePhoto.safe_status == MediaSafeStatus.PENDING,
+                DisputePhoto.created_at < before,
+            )
+            .order_by(DisputePhoto.created_at, DisputePhoto.id)
+            .limit(limit)
+        )
+        return [(parent, photo) for parent, photo in await self._session.execute(statement)]
 
     async def pending(
         self, dispute_id: uuid.UUID, photo_ids: Collection[uuid.UUID]
