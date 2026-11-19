@@ -812,7 +812,11 @@
           "reasonLabel": "Motivo",
           "reasonHint": "El profesional puede leerlo. Hasta {{max}} caracteres.",
           "saving": "Guardando…",
-          "saved": "Guardado."
+          "saved": "Guardado.",
+          "decided": {
+            "approved": "Aprobado.",
+            "rejected": "Rechazado."
+          }
         },
         "errors": {
           "reason_required": "Escribe un motivo de hasta {{max}} caracteres.",

@@ -812,7 +812,11 @@
           "reasonLabel": "Reason",
           "reasonHint": "The pro can read this. Up to {{max}} characters.",
           "saving": "Saving…",
-          "saved": "Saved."
+          "saved": "Saved.",
+          "decided": {
+            "approved": "Approved.",
+            "rejected": "Rejected."
+          }
         },
         "errors": {
           "reason_required": "Write a reason of up to {{max}} characters.",
