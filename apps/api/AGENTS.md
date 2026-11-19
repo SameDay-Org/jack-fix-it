@@ -173,6 +173,16 @@ them idempotent: they can run twice.
   without it. ARQ ends a job at its timeout for good (no retry), so every step of the job is
   bounded and each try stops itself `MEDIA_SANITIZE_SETTLE_SECONDS` before it
   (`media_copies.py`); `tests/test_media_copy_deadlines.py` runs the real worker on Redis.
+- **Re-dispatch (#478).** A request sent while no pro was eligible keeps no
+  `request_dispatches` row. The cron `redispatch_stalled_requests` (`dispatch/tasks.py`, every
+  `REDISPATCH_SWEEP_MINUTES`) queues `dispatch_request` again for up to
+  `REDISPATCH_BATCH_SIZE` such requests (received or reviewing, a category, no row at all,
+  created within `REDISPATCH_MAX_AGE_DAYS`), oldest first (`dispatch/stalled.py`). It never
+  dispatches inline: the job id `dispatch:<request id>` dedupes, and dispatch locks the request
+  and checks everything again. When a pro may have become eligible (approved, payouts enabled,
+  categories or areas changed), that module queues one `redispatch_for_pro` after its commit
+  (`dispatch/kicks.py`, job id `redispatch-pro:<pro id>`); a kick that cannot be queued is
+  logged and never fails the change. A request with any row stays with the existing flow.
 - **Orphan uploads (#191).** The cron `sweep_orphan_uploads` (`uploads/orphans.py`) lists `u/`
   and deletes uploads older than `ORPHAN_UPLOAD_MIN_AGE_HOURS` that no row references.
   `ORPHAN_UPLOAD_MODE` is `off`, `dry_run` (the default: counts only, in the

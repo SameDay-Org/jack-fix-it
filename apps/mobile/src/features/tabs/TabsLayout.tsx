@@ -7,10 +7,26 @@ import { useDerivedValue } from "react-native-reanimated";
 
 import { TabBar, TabBarAccessoryContext, type TabBarItem } from "@/components/ui";
 import { CONTENT_FROM, usePanelHandoff, usePanelHandoffContext } from "@/features/auth";
+import { OpenRequestBanner, useOpenRequest } from "@/features/history";
 import { JobBanner, useActiveJob } from "@/features/jobs";
 import { tokens } from "@/theme";
 
 import { TABS, tabFor } from "./tabs";
+
+/**
+ * What rides over the tab bar: the ongoing job's banner (#64), or else the open request's (#474),
+ * which is asked for only once the job's answer is in, so it never shows for a moment before a
+ * job banner. `refetch` asks for both again.
+ */
+function useTabsAccessory() {
+  const { active, updatedAt, refetch: refetchJob } = useActiveJob();
+  const { request, refetch: refetchRequest } = useOpenRequest(active === null && updatedAt > 0);
+  const refetch = useCallback(
+    () => Promise.all([refetchJob(), refetchRequest()]),
+    [refetchJob, refetchRequest],
+  );
+  return { active, updatedAt, request, refetch };
+}
 
 /**
  * The navigator's state as the kit's bar: one item per tab route, in the navigator's order. A
@@ -26,7 +42,7 @@ function RouterTabBar({ state, emitter, navigateToTab }: BottomTabBarProps) {
   const { progress } = usePanelHandoffContext();
   const { phase } = usePanelHandoff();
   const onHome = tabFor(state.routes[state.index]?.name ?? "")?.route === "index";
-  const { active, updatedAt, refetch } = useActiveJob();
+  const { active, updatedAt, request, refetch } = useTabsAccessory();
   useRefetchOnTabChange(state.routes[state.index]?.key, refetch);
   const slideOut = useDerivedValue(
     () => (onHome ? Math.min(1, progress.value / CONTENT_FROM) : 0),
@@ -64,7 +80,13 @@ function RouterTabBar({ state, emitter, navigateToTab }: BottomTabBarProps) {
       items={items}
       slideOut={slideOut}
       hidden={onHome && phase !== "idle"}
-      accessory={active ? <JobBanner active={active} updatedAt={updatedAt} /> : undefined}
+      accessory={
+        active ? (
+          <JobBanner active={active} updatedAt={updatedAt} />
+        ) : request ? (
+          <OpenRequestBanner request={request} />
+        ) : undefined
+      }
       testID="tab-bar"
     />
   );
@@ -109,13 +131,13 @@ function useRefetchOnTabsReturn(refetch: () => Promise<unknown>) {
  */
 export function TabsLayout() {
   const { t } = useTranslation();
-  // An ongoing job's banner over the bar (#64): the same answer the bar draws it from, so every
-  // tab root pads for it on the same render.
-  const { active, refetch } = useActiveJob();
+  // A banner over the bar (an ongoing job's, #64, or an open request's, #474): the same answers
+  // the bar draws it from, so every tab root pads for it on the same render.
+  const { active, request, refetch } = useTabsAccessory();
   useRefetchOnTabsReturn(refetch);
 
   return (
-    <TabBarAccessoryContext.Provider value={active !== null}>
+    <TabBarAccessoryContext.Provider value={active !== null || request !== null}>
       <Tabs
         backBehavior="initialRoute"
         tabBar={renderTabBar}

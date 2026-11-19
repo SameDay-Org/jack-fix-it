@@ -329,7 +329,7 @@ function JobContent({ job, requestId, updatedAt, refetch, text, now }: JobConten
         now={now}
         refetch={refetch}
       />
-      <MapBack onMap={phase === "onTheWay"} />
+      <MapBack overLight={phase === "onTheWay"} />
       <Sheet testID="job-sheet">
         <View className="gap-2">
           <Text accessibilityRole="header" className="text-title-1 text-navy-900">

@@ -75,12 +75,14 @@ beforeEach(() => {
 afterEach(() => announce.mockRestore());
 
 describe("MediaPicker", () => {
-  it("empty: says what to add, and the one primary action adds it", async () => {
+  it("empty: says what to add, and an outline button adds it (the form owns the primary, #477)", async () => {
     await renderPicker(makeUpload());
 
     expect(screen.getByText("No photos or videos yet")).toBeTruthy();
     expect(screen.getByText("Add up to 10 photos or videos.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add photos or videos" })).toBeTruthy();
+    const add = screen.getByRole("button", { name: "Add photos or videos" });
+    expect(add.props.className).toContain("border-navy-900");
+    expect(add.props.className).not.toContain("bg-green-500");
   });
 
   it("photos only for a purpose without videos", async () => {

@@ -1,4 +1,3 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { router, unstable_useIsNavigating, useScrollToTop } from "expo-router";
 import {
   useCallback,
@@ -10,16 +9,18 @@ import {
   type ReactElement,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { FlatList, RefreshControl, Text, View } from "react-native";
+import { FlatList, RefreshControl, View } from "react-native";
 
 import { SessionExpiredError } from "@/api";
-import { Button, showToast } from "@/components/ui";
+import { showToast } from "@/components/ui";
 import { useCategories } from "@/features/home/useCategories";
 import { RetryNotice } from "@/features/opportunities/RetryNotice";
 import { useRefetchOnReturn, useSettledError } from "@/features/quotes/useRequestQuotes";
 import { tokens } from "@/theme";
 
+import { HistoryError } from "./HistoryError";
 import { RequestRow, RequestRowSeparator, RequestRowSkeleton } from "./RequestRow";
+import { useNextPageAfterRefresh } from "./useNextPageAfterRefresh";
 import {
   flattenMyRequests,
   MY_REQUESTS_QUERY_KEY,
@@ -69,7 +70,7 @@ export function RequestList({ header, empty, testID = "request-list" }: RequestL
   const [pulling, setPulling] = useState(false);
   const listRef = useRef<ComponentRef<typeof FlatList<RequestSummary>>>(null);
   useScrollToTop(listRef);
-  const nextPage = useNextPageAfterRefresh(fetchNextPage);
+  const nextPage = useNextPageAfterRefresh(MY_REQUESTS_QUERY_KEY, fetchNextPage);
 
   const rows = useMemo(() => flattenMyRequests(data), [data]);
   // Rows name their category, so they wait for the catalog; with no rows there is nothing to name.
@@ -122,7 +123,10 @@ export function RequestList({ header, empty, testID = "request-list" }: RequestL
       ListHeaderComponent={header}
       ListEmptyComponent={
         failed ? (
-          <RequestListError
+          <HistoryError
+            title={t("history.customer.error.title")}
+            body={t("history.customer.error.body")}
+            retry={t("history.customer.error.retry")}
             onRetry={retry}
             busy={isFetching || categories.isFetching}
             testID={`${testID}-error`}
@@ -168,38 +172,6 @@ export function RequestList({ header, empty, testID = "request-list" }: RequestL
 }
 
 /**
- * Asks for the next page without ever cancelling a refresh of the list (focus, pull, an
- * invalidation): TanStack would drop the refresh and the old statuses would stay on screen. A page
- * asked for during a refresh is fetched once the refresh settles. The query is read directly,
- * since a refresh that just started may not have rendered yet.
- */
-function useNextPageAfterRefresh(
-  fetchNextPage: (options: { cancelRefetch: boolean }) => Promise<unknown>,
-): () => void {
-  const client = useQueryClient();
-  const waiting = useRef<(() => void) | null>(null);
-  useEffect(() => () => waiting.current?.(), []);
-
-  return useCallback(() => {
-    const cache = client.getQueryCache();
-    const query = cache.find({ queryKey: MY_REQUESTS_QUERY_KEY, exact: true });
-    const fetch = () => void fetchNextPage({ cancelRefetch: false });
-    if (query?.state.fetchStatus !== "fetching") return fetch();
-    // A page on its way already, or one waiting for the refresh: nothing more to ask.
-    if (query.state.fetchMeta?.fetchMore || waiting.current) return;
-    const stop = cache.subscribe((event) => {
-      if (event.query !== query) return;
-      const removed = event.type === "removed";
-      if (!removed && query.state.fetchStatus === "fetching") return;
-      stop();
-      waiting.current = null;
-      if (!removed) fetch();
-    });
-    waiting.current = stop;
-  }, [client, fetchNextPage]);
-}
-
-/**
  * Opens a request. A second tap before it is up opens nothing: the router queues a push and the
  * list stays tappable until it lands. Once the router is idle again a row opens again.
  */
@@ -236,31 +208,6 @@ function RequestListLoading({ testID }: { testID: string }) {
           </View>
         ))}
       </View>
-    </View>
-  );
-}
-
-type RequestListErrorProps = { onRetry: () => void; busy: boolean; testID: string };
-
-/** Nothing to show and the first page failed: the whole screen says so, with the one way out. */
-function RequestListError({ onRetry, busy, testID }: RequestListErrorProps) {
-  const { t } = useTranslation();
-  return (
-    <View className="flex-1 items-center justify-center gap-6 px-4 pb-12" testID={testID}>
-      <View className="items-center gap-2">
-        <Text accessibilityRole="header" className="text-center text-title-2 text-navy-900">
-          {t("history.customer.error.title")}
-        </Text>
-        <Text className="text-center text-body text-gray-500">
-          {t("history.customer.error.body")}
-        </Text>
-      </View>
-      <Button
-        label={t("history.customer.error.retry")}
-        onPress={onRetry}
-        loading={busy}
-        testID={`${testID}-action`}
-      />
     </View>
   );
 }

@@ -65,6 +65,13 @@ export function ChatScreen() {
   const [closedBySend, setClosedBySend] = useState(false);
   const closed = peer.closed || closedBySend;
   const list = useRef<FlatList<Row>>(null);
+  // A send near the newest waits for its bubble's row before gliding down to it (#492).
+  const toNewestOnLayout = useRef(false);
+  // How far up from the newest message the reader is, and the list's height, in dp.
+  const scrolledUp = useRef(0);
+  const viewport = useRef(0);
+  // A send from further up starts the list again, at the newest message (#492).
+  const [listKey, setListKey] = useState(0);
   const reduceMotion = useReducedMotion();
 
   const onDone = useCallback(
@@ -96,9 +103,26 @@ export function ChatScreen() {
   const names = peerNames(t, peer);
   const sending = queue.pending.some((item) => item.state === "sending");
 
+  // The new bubble shows at the newest message, at the bottom (#492). The list keeps what is on
+  // screen in place while rows come and go (`maintainVisibleContentPosition`), and that undoes a
+  // scroll asked too early or from too far: before the bubble's row exists, the list holds the
+  // older messages for it; from more than a screen up, the rows mounting on the way do the same.
   const send = (body: string) => {
     queue.send(body);
-    // Down to the newest message, without the glide under Reduce Motion.
+    if (scrolledUp.current > viewport.current) {
+      // Further up: the list starts again, at the newest message, where the new bubble is.
+      scrolledUp.current = 0;
+      setListKey((key) => key + 1);
+      return;
+    }
+    // Within a screen of it: down once the bubble's row is laid out.
+    toNewestOnLayout.current = true;
+  };
+
+  const onContentSizeChange = () => {
+    if (!toNewestOnLayout.current) return;
+    toNewestOnLayout.current = false;
+    // Without the glide under Reduce Motion.
     list.current?.scrollToOffset({ offset: 0, animated: !reduceMotion });
   };
 
@@ -119,6 +143,7 @@ export function ChatScreen() {
         <EmptyChat name={peer.fullName} inline={names.inline} closed={closed} />
       ) : (
         <FlatList
+          key={listKey}
           ref={list}
           inverted
           data={rows}
@@ -142,9 +167,16 @@ export function ChatScreen() {
           }}
           onEndReachedThreshold={0.5}
           maintainVisibleContentPosition={MAINTAIN_POSITION}
+          onContentSizeChange={onContentSizeChange}
           viewabilityConfigCallbackPairs={visible.pairs}
-          onScroll={visible.onScroll}
-          onLayout={visible.onLayout}
+          onScroll={(event) => {
+            scrolledUp.current = event.nativeEvent.contentOffset.y;
+            visible.onScroll(event);
+          }}
+          onLayout={(event) => {
+            viewport.current = event.nativeEvent.layout.height;
+            visible.onLayout(event);
+          }}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
           contentContainerClassName="px-4 py-4"

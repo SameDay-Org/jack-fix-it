@@ -648,10 +648,11 @@ class DisputeResolver:
                 started,
                 error.code or type(error).__name__,
                 "unavailable" if unavailable else "rejected",
-                # Stripe's definitive answer: a 4xx with its code (stripe_errors.raise_typed)
-                # to the create itself. A failed lookup or read leaves the create uncertain
-                # (#450 round 2): it never makes the refund abandonable.
-                definitive=isinstance(error, RefundCreateRejectedError) and error.code is not None,
+                # Stripe's definitive answer: the create itself refused with a code that means
+                # the charge cannot be refunded (REFUND_REFUSED_CODES, #450 round 4). Anything
+                # else, a failed lookup or read included (round 2), leaves the create uncertain:
+                # it never makes the refund abandonable.
+                definitive=isinstance(error, RefundCreateRejectedError) and error.definitive,
             )
             logger.error(
                 "dispute_refund_stripe_unavailable"

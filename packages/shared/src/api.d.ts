@@ -2801,6 +2801,11 @@ export interface components {
              * @description Photos whose copy is still being prepared.
              */
             photos_pending: number;
+            /**
+             * Customer Refund Cents
+             * @description What the resolution gives back to the customer (#472): 0 for a release, part of the payment for a partial, the whole payment for a refund; null while open. Always sent; optional in the schema so clients built before #472 keep compiling.
+             */
+            customer_refund_cents?: number | null;
         };
         /** CustomerDisputeView */
         CustomerDisputeView: {
@@ -2876,6 +2881,10 @@ export interface components {
              * @description What the customer paid: amount plus tax.
              */
             customer_total_cents: number;
+            /** @description The job's reported problem, if any (#472): open, or resolved. null when none was reported. Optional in the schema so older clients keep compiling. */
+            dispute_status?: components["schemas"]["DisputeStatus"] | null;
+            /** @description How an admin resolved it (released, partial_release, refunded); null while open or without a report. */
+            dispute_resolution?: components["schemas"]["DisputeResolution"] | null;
             /** @description Set once the job was cancelled (#69): who, why, when, the fee, the refund and where the refund stands. Always sent (null before a cancel); optional in the schema so clients built before #69 keep compiling. */
             cancellation?: components["schemas"]["CustomerJobCancellation"] | null;
             /**
@@ -4430,6 +4439,11 @@ export interface components {
              * @description What the pro receives for the job.
              */
             pro_payout_cents: number;
+            /**
+             * Pro Receives Cents
+             * @description What the pro will actually receive for this job (#488): the full payout normally and while a reported problem is open (under review); once an admin resolved it, the full payout for a release, the released part for a partial, 0 for a refund; 0 for a cancelled or refunded job. pro_payout_cents stays the quote's frozen payout. Always sent; optional in the schema so older clients keep compiling.
+             */
+            pro_receives_cents?: number | null;
             /** @description Set once the job was cancelled (#69): who, why and when. Always sent (null before a cancel); optional in the schema so clients built before #69 keep compiling. */
             cancellation?: components["schemas"]["ProJobCancellation"] | null;
             /** @description The transfer of that amount to the pro's account: null until the job is confirmed (and for a job that was never confirmed, or whose transfer was reversed). */
@@ -6414,7 +6428,7 @@ export interface components {
             attempts: number;
             /**
              * Last Error Code
-             * @description Why the last attempt did not make the transfer: a Stripe error code, an error class, `payouts_not_enabled` or `transfer_needs_review`. Never a message.
+             * @description Why the last attempt did not make the transfer: a Stripe error code, an error class, `payouts_not_enabled`, `pro_not_approved`, `held_before_create` (a hold seen at the last check before the create) or `transfer_needs_review`. Never a message.
              */
             last_error_code: string | null;
             /**
@@ -6422,6 +6436,16 @@ export interface components {
              * @description When the latest attempt started.
              */
             requested_at: string | null;
+            /**
+             * Create May Have Been Issued At
+             * @description When an attempt first went past the last check before the create (#450 round 5): from then on Stripe may hold a transfer of the job, even while a later attempt retries. Kept for good; null when no attempt ever got that far.
+             */
+            create_may_have_been_issued_at: string | null;
+            /**
+             * Needs Reversal At
+             * @description When a refund made late for the job's dispute found this transfer made, or possibly made (#450 round 4): the hold came too late to stop it. Staff reverse it in Stripe by hand and clear the flag (docs/stripe-money.md); nothing reverses or clears it automatically. null otherwise.
+             */
+            needs_reversal_at: string | null;
             /**
              * Created At
              * Format: date-time

@@ -148,9 +148,14 @@ describe("showcase page", () => {
 
   it("switches language with plain links to the same page, the current one marked", async () => {
     const html = await page("en");
-    const toggles = html.match(/<nav aria-label="Language"[\s\S]*?<\/nav>/g) ?? [];
+    const toggles = html.match(/<nav aria-label="Language[^"]*"[\s\S]*?<\/nav>/g) ?? [];
 
     expect(toggles).toHaveLength(2); // the header and the footer
+    // Two landmarks of one kind need two names (axe landmark-unique).
+    expect(toggles.map((toggle) => /aria-label="([^"]+)"/.exec(toggle)?.[1])).toEqual([
+      "Language",
+      "Language (footer)",
+    ]);
     for (const toggle of toggles) {
       expect(toggle).toMatch(
         /<a[^>]*aria-current="page"[^>]*href="\/app"[^>]*>EN<span class="sr-only"> English<\/span><\/a>/,
@@ -245,6 +250,8 @@ describe("showcase page", () => {
     for (const label of ["Page sections", "Language", "Legal"]) {
       expect(html).toContain(`<nav aria-label="${label}"`);
     }
+    // Header and footer both show their section links on a wide screen: two names (axe).
+    expect(html).toContain('<nav aria-label="Page sections (footer)"');
     expect(html.match(/<main/g)).toHaveLength(1);
     expect(html.match(/<header/g)).toHaveLength(1);
     expect(html.match(/<footer/g)).toHaveLength(1);
