@@ -50,8 +50,7 @@ from app.modules.auth.permissions import ensure_owner
 from app.modules.categories.intake import InvalidAnswersError, validate_answers
 from app.modules.categories.service import BrokenIntakeQuestionsError, CategoryService
 from app.modules.dispatch.service import enqueue_dispatch
-from app.modules.jobs.service import JobStatus, job_statuses_of_requests
-from app.modules.jobs.transitions import CUSTOMER_STATUS as JOB_CUSTOMER_STATUS
+from app.modules.jobs.service import job_customer_statuses_of_requests
 from app.modules.requests.customer_status import REQUEST_CUSTOMER_STATUS
 from app.modules.requests.errors import (
     IdempotencyKeyReusedError,
@@ -308,7 +307,7 @@ class ServiceRequestService:
         rows = await self._requests.page_of_customer(user.id, size + 1, before)
         page, more = rows[:size], len(rows) > size
         counts = await self._requests.media_counts([row.id for row in page])
-        jobs = await job_statuses_of_requests(self._session, [row.id for row in page])
+        jobs = await job_customer_statuses_of_requests(self._session, [row.id for row in page])
         items = [
             RequestSummary(
                 id=row.id,
@@ -387,7 +386,7 @@ class ServiceRequestService:
             )
             for row in await self._requests.media_of(request.id)
         ]
-        jobs = await job_statuses_of_requests(self._session, [request.id])
+        jobs = await job_customer_statuses_of_requests(self._session, [request.id])
         return RequestOut(
             id=request.id,
             public_code=request.public_code,
@@ -748,9 +747,9 @@ def _redact_value(value: JsonValue, known: KnownValues) -> tuple[JsonValue, bool
     return value, False
 
 
-def _customer_status(status: RequestStatus, job_status: JobStatus | None) -> str:
+def _customer_status(status: RequestStatus, job_customer_status: str | None) -> str:
     """What the customer sees (customer_status.py): the request's own status until it is paid,
-    then its job's (#466), as the staff queue shows it (ops.service)."""
-    if job_status is not None:
-        return JOB_CUSTOMER_STATUS[job_status]
+    then its job's (#466; a resolved dispute reads completed, #472)."""
+    if job_customer_status is not None:
+        return job_customer_status
     return REQUEST_CUSTOMER_STATUS[status]
