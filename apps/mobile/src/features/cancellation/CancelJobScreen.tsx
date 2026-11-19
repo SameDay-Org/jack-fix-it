@@ -46,9 +46,12 @@ export function CancelJobScreen() {
   const job = useCustomerJob(id, { enabled: valid, poll: false });
   const cancellable = job.data !== undefined && mayCancel(job.data.status);
   const preview = useCancelPreview(job.data?.id, { enabled: valid && cancellable });
-  const [sent, setSent] = useState<Cancellation | null>(null);
+  // The cancel sent from here, kept with its request: a link can reuse this screen for another
+  // job (new params, same screen), which must not inherit it.
+  const [sent, setSent] = useState<{ requestId: string; cancellation: Cancellation } | null>(null);
+  const sentHere = sent?.requestId === id ? sent.cancellation : null;
   const refusal = refusalOf(preview.error);
-  const cancelled = sent ?? job.data?.cancellation ?? null;
+  const cancelled = sentHere ?? job.data?.cancellation ?? null;
   const back = () => (router.canGoBack() ? router.back() : router.replace(jobHref(id)));
   const reread = () => void Promise.all([job.refetch(), preview.refetch()]);
 
@@ -68,11 +71,11 @@ export function CancelJobScreen() {
     body = (
       <State
         requestId={id}
-        title={t(sent ? "cancellation.sent.title" : "jobs.headline.cancelled")}
-        body={sent ? t("cancellation.sent.body") : ""}
+        title={t(sentHere ? "cancellation.sent.title" : "jobs.headline.cancelled")}
+        body={sentHere ? t("cancellation.sent.body") : ""}
         testID="cancel-sent"
       >
-        {moneyLines(t, cancelled, sent?.currency).map((line) => (
+        {moneyLines(t, cancelled, sentHere?.currency).map((line) => (
           <Text key={line} className="text-body text-navy-900">
             {line}
           </Text>
@@ -100,11 +103,13 @@ export function CancelJobScreen() {
   } else if (job.data && preview.data) {
     body = (
       <CancelForm
+        // A form per job: its reason, note and Idempotency-Key never carry over to another.
+        key={id}
         jobId={job.data.id}
         requestId={id}
         preview={preview.data}
         onSent={(cancellation) => {
-          setSent(cancellation);
+          setSent({ requestId: id, cancellation });
           announce(t("cancellation.sent.title"));
         }}
         onChanged={reread}

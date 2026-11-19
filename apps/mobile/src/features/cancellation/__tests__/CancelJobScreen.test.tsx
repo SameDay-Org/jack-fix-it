@@ -34,6 +34,8 @@ jest.mock(
   "expo-secure-store",
   () => jest.requireActual("../../../api/__tests__/helpers").secureStoreMock,
 );
+// The route's params: a link can hand the mounted screen another request's.
+const mockParams = { id: "7c9e6679-7425-40de-944b-e07fc1f90ae7" };
 jest.mock("expo-router", () => ({
   ...jest.requireActual("../../home/__tests__/helpers").homeRouterMock(),
   router: {
@@ -43,7 +45,7 @@ jest.mock("expo-router", () => ({
     replace: jest.fn(),
     dismissTo: jest.fn(),
   },
-  useLocalSearchParams: () => ({ id: "7c9e6679-7425-40de-944b-e07fc1f90ae7" }),
+  useLocalSearchParams: () => ({ id: mockParams.id }),
 }));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
@@ -54,6 +56,8 @@ jest.mock(
 type Answer = ReturnType<typeof deferred<Response>>;
 
 const REQUEST_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+const OTHER_REQUEST_ID = "0b9e5f8e-6a3c-4c1e-9d2f-1a2b3c4d5e6f";
+const OTHER_JOB = customerJob({ id: "1c2d3e4f-0000-4000-8000-000000000999", status: "confirmed" });
 const SCHEDULED = customerJob({ status: "scheduled" });
 const JOB_PATH = `/v1/requests/${REQUEST_ID}/job`;
 const PREVIEW_PATH = `/v1/jobs/${SCHEDULED.id}/cancel-preview`;
@@ -138,6 +142,7 @@ async function answer(index: number, response: Response | Error): Promise<void> 
 }
 
 beforeEach(async () => {
+  mockParams.id = REQUEST_ID;
   posts = [];
   job = SCHEDULED;
   preview = FREE;
@@ -155,6 +160,7 @@ beforeEach(async () => {
         : jsonResponse(200, preview);
     }
     if (path === JOB_PATH) return jsonResponse(200, job);
+    if (path === `/v1/requests/${OTHER_REQUEST_ID}/job`) return jsonResponse(200, OTHER_JOB);
     return errorResponse(404, "not_found");
   });
   resetSecureStore();
@@ -285,6 +291,20 @@ describe("CancelJobScreen", () => {
     await waitFor(() => expect(jobReads()).toBeGreaterThan(before));
     await fireEvent.press(screen.getByTestId("cancel-back"));
     expect(router.back).toHaveBeenCalled();
+  });
+
+  it("a link to another job's cancel shows that job, never the cancel just sent", async () => {
+    const rendered = await renderScreen();
+    await pick();
+    await confirm();
+    await answer(0, jsonResponse(200, cancellation({ fee_cents: 0, refund_cents: 18_050 })));
+    expect(await screen.findByText("Your job was cancelled")).toBeTruthy();
+    // The same screen, new params: another request's job, confirmed.
+    mockParams.id = OTHER_REQUEST_ID;
+    await rendered.rerender(<CancelJobScreen />);
+    expect(await screen.findByTestId("cancel-closed")).toBeTruthy();
+    expect(screen.queryByText("Your job was cancelled")).toBeNull();
+    expect(screen.queryByText(/going back to your payment method/)).toBeNull();
   });
 
   it.each([

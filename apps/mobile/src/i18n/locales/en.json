@@ -1970,7 +1970,7 @@
     },
     "closed": {
       "title": "This job can't be cancelled now",
-      "body": "The work may have started. If something's wrong, talk to Jack."
+      "body": "Once the work has started, a job can't be cancelled. If something's wrong, talk to Jack."
     },
     "review": {
       "title": "We need to look at this job first",

@@ -1932,7 +1932,7 @@
   "cancellation": {
     "entry": "Cancelar trabajo",
     "entryFailed": "No pudimos comprobar si este trabajo se puede cancelar.",
-    "retry": "Intentar de nuevo",
+    "retry": "Reintentar",
     "title": "¿Cancelar este trabajo?",
     "intro": "Cuéntanos por qué y revisa cuánto cuesta. Le avisaremos a tu profesional.",
     "reasonLabel": "¿Por qué cancelas?",
@@ -1952,9 +1952,9 @@
       "free": "Cancelar no tiene costo: recibes de vuelta el total de {{amount}}.",
       "fee": "Cancelar ahora cuesta {{fee}} ({{rate}} del precio del trabajo). Recibes de vuelta {{amount}}."
     },
-    "confirm": "Cancelar el trabajo",
-    "keep": "Mantener el trabajo",
-    "retrySend": "Intentar de nuevo",
+    "confirm": "Cancelar trabajo",
+    "keep": "No cancelar",
+    "retrySend": "Reintentar",
     "sent": {
       "title": "Tu trabajo fue cancelado",
       "body": "Le avisamos a tu profesional.",
@@ -1970,7 +1970,7 @@
     },
     "closed": {
       "title": "Este trabajo ya no se puede cancelar",
-      "body": "Es posible que el trabajo ya haya empezado. Si algo anda mal, habla con Jack."
+      "body": "Un trabajo no se puede cancelar una vez que empezó. Si algo anda mal, habla con Jack."
     },
     "review": {
       "title": "Primero tenemos que revisar este trabajo",
