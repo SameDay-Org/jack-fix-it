@@ -26,7 +26,7 @@
  */
 import { timingSafeEqual } from "node:crypto";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { NextRequest } from "next/server";
 import { cache } from "react";
@@ -34,6 +34,7 @@ import { cache } from "react";
 import type { components } from "@jack/shared";
 
 import { ApiError, apiGet, apiPost } from "./api";
+import { PATH_HEADER, safeReturnPath, withReturn } from "./return-path";
 
 export type User = components["schemas"]["UserOut"];
 export type AuthResponse = components["schemas"]["AuthResponse"];
@@ -208,14 +209,23 @@ async function readStaffSession(): Promise<StaffSession | typeof REFRESH_PATH | 
 }
 
 /**
+ * The panel page this request asked for (set by src/proxy.ts), when it is a valid return
+ * address: the sign-in comes back to it (#464).
+ */
+async function requestedPanelPath(): Promise<string | null> {
+  return safeReturnPath((await headers()).get(PATH_HEADER));
+}
+
+/**
  * The signed-in staff member, for server components. Redirects when there is no valid staff
  * session: to the one-time refresh when the login's access token is missing or refused, else
- * to the session end (no login, another login's token, another user, not staff). Cached per
- * request, so the layout and the page share one `/me` call.
+ * to the session end (no login, another login's token, another user, not staff), carrying the
+ * page that was asked for (`?next=`, lib/return-path.ts). Cached per request, so the layout
+ * and the page share one `/me` call.
  */
 export const requireStaff = cache(async (): Promise<User> => {
   const session = await readStaffSession();
-  if (typeof session === "string") redirect(session);
+  if (typeof session === "string") redirect(withReturn(session, await requestedPanelPath()));
   return session.user;
 });
 
@@ -230,7 +240,8 @@ export async function staffAuth(): Promise<RequestInit> {
   const jar = await cookies();
   const login = loginOf(jar.get(SESSION_COOKIE)?.value);
   const accessToken = login && tokenOf(jar, ACCESS_COOKIE, login);
-  if (!accessToken) redirect(END_PATH); // requireStaff just accepted it: fail closed
+  // requireStaff just accepted it: fail closed.
+  if (!accessToken) redirect(withReturn(END_PATH, await requestedPanelPath()));
   return bearer(accessToken);
 }
 

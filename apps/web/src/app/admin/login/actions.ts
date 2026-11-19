@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 
 import { ApiError, apiPost } from "@/lib/api";
+import { RETURN_PARAM, safeReturnPath } from "@/lib/return-path";
 import { type AuthResponse, isStaff, PANEL_PATH, revoke, startSession } from "@/lib/session";
 
 /** The login outcomes the form shows, each with its own i18n message. */
@@ -25,7 +26,8 @@ function errorOf(failure: unknown): LoginError {
  * Staff sign-in. Calls the API's login; a customer or pro account is signed out at once
  * (its refresh token revoked) and gets no cookie. Never logs the email, the password or a
  * token. Next.js checks that a server action's Origin matches the host, so another site
- * cannot post this form.
+ * cannot post this form. A signed-in staff member goes to the page they asked for (`next`,
+ * validated here: only a panel path, else the panel's home; #464).
  */
 export async function login(_previous: LoginState, form: FormData): Promise<LoginState> {
   const email = String(form.get("email") ?? "").trim();
@@ -43,5 +45,5 @@ export async function login(_previous: LoginState, form: FormData): Promise<Logi
     return { error: "not_staff", email };
   }
   await startSession(tokens);
-  redirect(PANEL_PATH);
+  redirect(safeReturnPath(form.get(RETURN_PARAM)) ?? PANEL_PATH);
 }
