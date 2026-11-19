@@ -114,8 +114,10 @@ class CustomerJob(_Out):
     tax_cents: int
     customer_total_cents: int = Field(description="What the customer paid: amount plus tax.")
     cancellation: CustomerJobCancellation | None = Field(
+        default=None,
         description="Set once the job was cancelled (#69): who, why, when, the fee, the refund "
-        "and where the refund stands."
+        "and where the refund stands. Always sent (null before a cancel); optional in the "
+        "schema so clients built before #69 keep compiling.",
     )
     unread_messages: int = Field(
         description="The pro's chat messages the customer has not marked read (#71)."
@@ -187,7 +189,10 @@ class ProJob(_Out):
     photos: ProJobPhotos
     pro_payout_cents: int = Field(description="What the pro receives for the job.")
     cancellation: ProJobCancellation | None = Field(
-        description="Set once the job was cancelled (#69): who, why and when."
+        default=None,
+        description="Set once the job was cancelled (#69): who, why and when. Always sent "
+        "(null before a cancel); optional in the schema so clients built before #69 keep "
+        "compiling.",
     )
     payout: JobPayout | None = Field(
         description="The transfer of that amount to the pro's account: null until the job is "

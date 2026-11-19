@@ -73,9 +73,11 @@ class RequestOut(BaseModel):
     category_id: uuid.UUID | None
     description: str
     address: AddressOut
-    address_id: uuid.UUID = Field(
+    address_id: uuid.UUID | None = Field(
+        default=None,
         description="The customer's own address the request uses (#69: Request again offers it "
-        "when it is still in their address book)."
+        "when it is still in their address book). Always set; optional in the schema so "
+        "clients built before #69 keep compiling.",
     )
     preferred_date: date | None
     preferred_period: PreferredPeriod | None = Field(
