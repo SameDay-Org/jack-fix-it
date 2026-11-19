@@ -16,7 +16,15 @@ import es from "./locales/es.json";
  * Only the public namespaces are read: the staff panel (`admin`) names things like "Held by" or
  * "Insurance" (a document type) as what they are, not as promises.
  */
-const PUBLIC_NAMESPACES = ["brand", "site", "showcase", "landing", "forPros", "seo"] as const;
+const PUBLIC_NAMESPACES = [
+  "brand",
+  "site",
+  "showcase",
+  "landing",
+  "forPros",
+  "seo",
+  "request",
+] as const;
 
 const FORBIDDEN: Record<"en" | "es", RegExp[]> = {
   en: [
