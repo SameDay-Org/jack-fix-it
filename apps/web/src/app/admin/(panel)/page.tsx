@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { Card, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { toLocale } from "@/i18n/locale";
 import { getT } from "@/i18n/server";
 import { requireStaff } from "@/lib/session";
@@ -22,7 +22,7 @@ export default async function PanelHome() {
 
   return (
     <Card className="flex max-w-2xl flex-col items-start gap-4">
-      <CardTitle className="break-words">{t("admin.home.welcome", { name })}</CardTitle>
+      <h1 className="text-xl font-bold break-words">{t("admin.home.welcome", { name })}</h1>
       <Link
         href={QUEUE_PATH}
         className="inline-flex h-11 items-center rounded-pill bg-green-500 px-6 text-sm font-semibold text-navy-900 outline-none hover:bg-green-700 hover:text-white focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2"

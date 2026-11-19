@@ -6,6 +6,7 @@
   "site": {
     "language": {
       "label": "Language",
+      "footerLabel": "Language (footer)",
       "en": "English",
       "es": "Español"
     }
@@ -247,6 +248,48 @@
       "getApp": "Get the app"
     }
   },
+  "seo": {
+    "service": {
+      "meta": {
+        "title": "{{name}} in {{place}} | Jack Fix It",
+        "titleAnywhere": "{{name}} | Jack Fix It",
+        "description": "{{name}} in {{place}}: tell Jack about the job, compare fixed-price quotes from pros near you and follow it in the app.",
+        "descriptionAnywhere": "{{name}}: tell Jack about the job, compare fixed-price quotes from pros near you and follow it in the app.",
+        "ogAlt": "The Jack Fix It name and the name of a home service on navy."
+      },
+      "nav": {
+        "ask": "What Jack asks",
+        "areas": "Where we work"
+      },
+      "hero": {
+        "eyebrow": "Home services",
+        "title": "{{name}} in {{place}}",
+        "titleAnywhere": "{{name}}",
+        "body": "Tell Jack about the job in the app. Pros near you who do this work send fixed-price quotes, you pick one, and you follow the job from start to finish.",
+        "getApp": "Get the app",
+        "ask": "What Jack asks"
+      },
+      "ask": {
+        "eyebrow": "In the app",
+        "title": "What Jack asks about the job",
+        "body": "A few questions, so pros near you can send a quote. You answer them in the app.",
+        "none": "Tell Jack what you need, in your own words."
+      },
+      "areas": {
+        "eyebrow": "Where we work",
+        "title": "Where Jack works",
+        "body": "Jack serves these cities. The app checks your ZIP code when you ask for a job."
+      },
+      "more": {
+        "title": "More from Jack"
+      },
+      "final": {
+        "title": "Tell Jack what's going on.",
+        "body": "Get the app and tell Jack what you need.",
+        "getApp": "Get the app"
+      }
+    }
+  },
   "showcase": {
     "meta": {
       "title": "Jack Fix It: the app for whatever happens at home",
@@ -375,6 +418,7 @@
       "body": "The app is coming soon to iPhone and Android."
     },
     "footer": {
+      "sectionsLabel": "Page sections (footer)",
       "legalLabel": "Legal",
       "terms": "Terms of Service",
       "privacy": "Privacy Policy",

@@ -453,6 +453,15 @@ describe("ProJobScreen", () => {
       expect(screen.queryByTestId("pro-job-open-maps")).toBeNull();
       expect(actionButtons()).toEqual([]);
     });
+
+    // #472: a job closed by a resolved report read "This job was cancelled." to the pro.
+    it("closed after a resolved report says so, not that it was cancelled", async () => {
+      await open(proJob({ status: "refunded", address: null }));
+
+      expect(screen.getByText("This job was closed after a report was resolved.")).toBeTruthy();
+      expect(screen.queryByText("This job was cancelled.")).toBeNull();
+      expect(actionButtons()).toEqual([]);
+    });
   });
 
   describe("Open in Maps", () => {

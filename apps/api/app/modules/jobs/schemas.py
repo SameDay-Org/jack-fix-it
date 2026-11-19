@@ -11,6 +11,7 @@ from typing import Annotated, Final
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
+from app.modules.disputes.outcomes import DisputeResolution, DisputeStatus
 from app.modules.jobs.models import JobPhotoKind, JobStatus
 from app.modules.payments.payout_status import PayoutStatus
 from app.modules.quotes.schemas import QuotePro
@@ -112,6 +113,16 @@ class CustomerJob(_Out):
     amount_cents: int = Field(description="The price paid for the service.")
     tax_cents: int
     customer_total_cents: int = Field(description="What the customer paid: amount plus tax.")
+    dispute_status: DisputeStatus | None = Field(
+        default=None,
+        description="The job's reported problem, if any (#472): open, or resolved. null when "
+        "none was reported. Optional in the schema so older clients keep compiling.",
+    )
+    dispute_resolution: DisputeResolution | None = Field(
+        default=None,
+        description="How an admin resolved it (released, partial_release, refunded); null "
+        "while open or without a report.",
+    )
     unread_messages: int = Field(
         description="The pro's chat messages the customer has not marked read (#71)."
     )
@@ -181,6 +192,14 @@ class ProJob(_Out):
     )
     photos: ProJobPhotos
     pro_payout_cents: int = Field(description="What the pro receives for the job.")
+    pro_receives_cents: int | None = Field(
+        default=None,
+        description="What the pro will actually receive for this job (#488): the full payout "
+        "normally and while a reported problem is open (under review); once an admin resolved "
+        "it, the full payout for a release, the released part for a partial, 0 for a refund; "
+        "0 for a cancelled or refunded job. pro_payout_cents stays the quote's frozen payout. "
+        "Always sent; optional in the schema so older clients keep compiling.",
+    )
     payout: JobPayout | None = Field(
         description="The transfer of that amount to the pro's account: null until the job is "
         "confirmed (and for a job that was never confirmed, or whose transfer was reversed)."
