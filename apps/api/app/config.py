@@ -1,20 +1,32 @@
 """Settings, read only from environment variables (plus apps/api/.env for local development)."""
 
+import logging
 import re
 from functools import lru_cache
 from typing import Annotated, Literal, Self
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from starlette.requests import Request
 
 from app.crypto import KeyringError, OriginalCipher, parse_keyring
 
+logger = logging.getLogger(__name__)
+
 AppEnv = Literal["development", "test", "staging", "production"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 # What the orphan upload sweep does (#191): nothing, count only, or delete.
 OrphanUploadMode = Literal["off", "dry_run", "delete"]
+
+# The safe-copy sweep's optional settings (#473): an invalid value falls back to its documented
+# default instead of stopping the worker (#491 round 1), with each one's highest accepted value.
+_RESWEEP_SETTINGS: dict[str, int | None] = {
+    "media_sanitize_resweep_minutes": 60,
+    "media_sanitize_resweep_after_minutes": None,
+    "media_sanitize_resweep_batch_size": None,
+    "media_sanitize_resweep_timeout_seconds": None,
+}
 
 _ASYNC_SCHEME = "postgresql+asyncpg://"
 _SYNC_SCHEMES = ("postgres://", "postgresql://")
@@ -553,6 +565,24 @@ class Settings(BaseSettings):
         if "*" in value:
             raise ValueError("CORS_ORIGINS must list explicit origins, not '*'")
         return value
+
+    @field_validator(*_RESWEEP_SETTINGS, mode="before")
+    @classmethod
+    def _resweep_or_default(cls, value: object, info: ValidationInfo) -> object:
+        """An optional sweep setting that is not a whole number in range (empty, a word, 0, a
+        negative, a fraction) is its default, with a warning naming the setting (never its
+        value): the worker still starts (#491 round 1)."""
+        name = info.field_name or ""
+        highest = _RESWEEP_SETTINGS[name]
+        number: int | None = None
+        if type(value) is int:
+            number = value
+        elif isinstance(value, str) and value.strip().isdigit():
+            number = int(value.strip())
+        if number is None or number < 1 or (highest is not None and number > highest):
+            logger.warning("setting_invalid_default_used", extra={"setting": name.upper()})
+            return cls.model_fields[name].default
+        return number
 
     @field_validator("media_video_codecs", "media_audio_codecs", mode="before")
     @classmethod

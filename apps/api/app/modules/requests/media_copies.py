@@ -16,6 +16,14 @@ ffmpeg, is still unavailable at the last try, the row stays pending (an ERROR fo
 media_sanitize_postponed), and the worker's sweep (app.modules.media.resweep) queues its copy
 again once MEDIA_SANITIZE_RESWEEP_AFTER_MINUTES have passed.
 
+One run copies one row at a time (#491 round 1): before it downloads, transforms or uploads
+anything, a run claims the row in the queue's Redis (app.modules.media.copy_store), and releases
+the claim once the row's outcome is recorded, or on any other way out. A row another run holds
+(a retry, an earlier batch's task, the sweep's) is left to it: skipped here, never copied twice
+at once, never failed under it, even by a final try's settlement, which claims each row it
+fails. A claim a dead worker left expires after the longest one row's copy may take. Without a
+store (development without Redis, unit tests) nothing is claimed.
+
 ARQ stops a job at MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS and never runs it again, so a try stops
 itself first. Every step has a bound: a download, an image transform, an ffmpeg or ffprobe run
 and an upload get MEDIA_SANITIZE_TIMEOUT_SECONDS each, a database step
@@ -34,6 +42,7 @@ the customer), a path or ffmpeg's output.
 """
 
 import asyncio
+import enum
 import logging
 import math
 import shutil
@@ -50,6 +59,7 @@ from functools import partial
 from pathlib import Path
 from typing import Final, Literal, Protocol
 
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -58,6 +68,7 @@ from app.integrations.storage import (
     StorageObjectMissingError,
     StorageUnavailableError,
 )
+from app.modules.media.copy_store import MediaCopyStore, row_key
 from app.modules.media.sanitize import (
     SafeFile,
     SanitizeConfig,
@@ -104,11 +115,11 @@ async def enqueue_sanitize(queue: JobQueue, request_id: uuid.UUID, timeout_secon
     )
 
 
-async def stale_pending_requests(
+async def stale_pending_request_media(
     session: AsyncSession, before: datetime, limit: int
-) -> list[uuid.UUID]:
-    """The requests whose media still waits for its safe copy since before `before`: for the
-    sweep (app.modules.media.resweep, #473)."""
+) -> list[tuple[uuid.UUID, uuid.UUID]]:
+    """(request id, media id) of the media still waiting for its safe copy since before
+    `before`, oldest first: for the sweep (app.modules.media.resweep, #473)."""
     return await ServiceRequestRepository(session).stale_pending_media(before, limit)
 
 
@@ -308,6 +319,25 @@ class RequestMediaRows:
 REQUEST_MEDIA_ROWS: Final = RequestMediaRows()
 
 
+class _Unclaimed(enum.Enum):
+    """Why a row has no claim of this run: no store to claim in, another run holds it, or the
+    store did not answer."""
+
+    NO_STORE = "no_store"
+    HELD = "held"
+    UNREACHABLE = "unreachable"
+
+
+# A claim of this run (its token), or why there is none.
+_Claim = str | _Unclaimed
+
+
+def claim_seconds(config: MediaCopyConfig) -> int:
+    """How long a claim lives: above the longest one row's copy may take, so it never ends
+    under a run that is still copying, and ends on its own when the worker died."""
+    return math.ceil(config.row_budget_seconds + config.overhead_seconds) + 1
+
+
 class MediaCopier:
     def __init__(
         self,
@@ -315,11 +345,13 @@ class MediaCopier:
         storage: Storage,
         config: MediaCopyConfig,
         rows: MediaRows = REQUEST_MEDIA_ROWS,
+        store: MediaCopyStore | None = None,
     ) -> None:
         self._sessions = sessions
         self._storage = storage
         self._config = config
         self._rows = rows
+        self._store = store
 
     async def copy_pending(
         self,
@@ -356,11 +388,22 @@ class MediaCopier:
             if unsettled or (index > 0 and run.work_left() < self._config.row_budget_seconds):
                 unsettled.append(media_id)
                 continue
+            claim = await self._claim(media_id)
+            if claim is _Unclaimed.HELD:
+                # Another run copies it: its outcome is that run's.
+                settled["skipped"] += 1
+                continue
+            if claim is _Unclaimed.UNREACHABLE:
+                # Nothing is copied unclaimed: a later try, or the sweep, takes it.
+                settled["postponed" if final else "waiting"] += 1
+                continue
             try:
                 result = await self._copy_guarded(run, media_id, parent_id, file_key, attempt)
             except _OutOfTimeError:
                 unsettled.append(media_id)
                 continue
+            finally:
+                await self._release(media_id, claim)
             if final and result == "waiting":
                 stuck.append(media_id)
             else:
@@ -370,7 +413,18 @@ class MediaCopier:
                 **dict.fromkeys(unsettled, SanitizeFailure.TIMEOUT),
                 **dict.fromkeys(stuck, SanitizeFailure.INTERNAL),
             }
-            settled["failed"] += await self._fail_unsettled(run, parent_id, reasons)
+            # Only the rows this run holds fail: one another run copies stays pending.
+            claims = {media_id: await self._claim(media_id) for media_id in reasons}
+            mine = {
+                media_id: reason
+                for media_id, reason in reasons.items()
+                if isinstance(claims[media_id], str) or claims[media_id] is _Unclaimed.NO_STORE
+            }
+            try:
+                settled["failed"] += await self._fail_unsettled(run, parent_id, mine)
+            finally:
+                for media_id, claim in claims.items():
+                    await self._release(media_id, claim)
             unsettled = []
         return MediaCopyOutcome(
             ready=settled["ready"],
@@ -379,6 +433,33 @@ class MediaCopier:
             deferred=len(unsettled),
             postponed=settled["postponed"],
         )
+
+    async def _claim(self, media_id: uuid.UUID) -> _Claim:
+        """This run's claim on the row (its token), or why there is none."""
+        if self._store is None:
+            return _Unclaimed.NO_STORE
+        try:
+            token = await self._store.claim(row_key(self._rows.parent_field, media_id))
+        except (RedisError, OSError) as error:  # TimeoutError is an OSError
+            logger.warning(
+                "media_copy_claim_unavailable",
+                extra={"media_id": str(media_id), "error_class": type(error).__name__},
+            )
+            return _Unclaimed.UNREACHABLE
+        return _Unclaimed.HELD if token is None else token
+
+    async def _release(self, media_id: uuid.UUID, claim: _Claim) -> None:
+        """Ends this run's claim, if it took one. A store that fails is logged: the claim then
+        ends on its own (claim_seconds)."""
+        if self._store is None or not isinstance(claim, str):
+            return
+        try:
+            await self._store.release(row_key(self._rows.parent_field, media_id), claim)
+        except (RedisError, OSError) as error:
+            logger.warning(
+                "media_copy_release_failed",
+                extra={"media_id": str(media_id), "error_class": type(error).__name__},
+            )
 
     async def _pending(self, parent_id: uuid.UUID) -> list[tuple[uuid.UUID, str]]:
         async with self._sessions() as session:
