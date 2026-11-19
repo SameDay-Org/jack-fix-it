@@ -60,6 +60,13 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy .
+      # The demo video's scripts (docs/demo-video.md) run in this environment and follow the
+      # same rules; tests/test_demo_seed.py runs the seed itself.
+      - name: Demo scripts (lint, format, types)
+        run: |
+          uv run ruff check ../../scripts/demo
+          uv run ruff format --check ../../scripts/demo
+          uv run mypy ../../scripts/demo
       - name: Migrations upgrade, downgrade, upgrade
         run: uv run alembic upgrade head && uv run alembic downgrade base && uv run alembic upgrade head
       # The media copy tests run ffmpeg and ffprobe (#173); in CI they fail without them.
