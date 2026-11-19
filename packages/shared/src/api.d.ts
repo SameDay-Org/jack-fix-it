@@ -4488,7 +4488,7 @@ export interface components {
              */
             currency: string;
             /** @description pending: Stripe holds no refund of ours yet, an attempt may be under way. created: Stripe holds the refund; stripe_status says whether the money is back. failed: the last attempt's call failed. A retry sends the same idempotency key, and Stripe answers a refusal it already gave under that key (for 24 h) with the same refusal: a retry helps when the call never reached Stripe, or once the key expired. */
-            status: components["schemas"]["RefundStatus"];
+            status: components["schemas"]["ShownRefundStatus"];
             /**
              * Stripe Refund Id
              * @description Stripe's id of the refund, once made.
@@ -4512,12 +4512,6 @@ export interface components {
              */
             requested_at: string | null;
         };
-        /**
-         * RefundStatus
-         * @description Where a refund to the customer stands (#76; internal: staff read the row).
-         * @enum {string}
-         */
-        RefundStatus: "pending" | "created" | "failed";
         /** RegionOut */
         RegionOut: {
             /** Region */
@@ -5139,6 +5133,13 @@ export interface components {
              */
             publishable_key: string;
         };
+        /**
+         * ShownRefundStatus
+         * @description A dispute's refund as staff see it: the one that is not abandoned (#434), so never
+         *     `abandoned`. The same values as RefundStatus otherwise.
+         * @enum {string}
+         */
+        ShownRefundStatus: "pending" | "created" | "failed";
         /** SingleChoiceQuestion */
         SingleChoiceQuestion: {
             /**
@@ -5276,6 +5277,11 @@ export interface components {
              */
             refund_failed: boolean;
             /**
+             * Refund Needs Reconciliation
+             * @description Stripe shows a refund made (or still under way) for this dispute that its abandoned or failed refund records do not hold (#450 round 2): money may have gone back outside the records, so any payout of the job stays held until staff reconcile it in Stripe and clear the hold (docs/stripe-money.md). Never cleared on its own.
+             */
+            refund_needs_reconciliation: boolean;
+            /**
              * Description
              * @description The customer's text, as stored (masked).
              */
@@ -5368,6 +5374,11 @@ export interface components {
              * @description Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it.
              */
             refund_failed: boolean;
+            /**
+             * Refund Needs Reconciliation
+             * @description Stripe shows a refund made (or still under way) for this dispute that its abandoned or failed refund records do not hold (#450 round 2): money may have gone back outside the records, so any payout of the job stays held until staff reconcile it in Stripe and clear the hold (docs/stripe-money.md). Never cleared on its own.
+             */
+            refund_needs_reconciliation: boolean;
         };
         /**
          * StaffDocumentCounts
@@ -5846,7 +5857,7 @@ export interface components {
             attempts: number;
             /**
              * Last Error Code
-             * @description Why the last attempt did not make the transfer: a Stripe error code, an error class, `payouts_not_enabled` or `transfer_needs_review`. Never a message.
+             * @description Why the last attempt did not make the transfer: a Stripe error code, an error class, `payouts_not_enabled`, `pro_not_approved`, `held_before_create` (a hold seen at the last check before the create) or `transfer_needs_review`. Never a message.
              */
             last_error_code: string | null;
             /**
@@ -5854,6 +5865,16 @@ export interface components {
              * @description When the latest attempt started.
              */
             requested_at: string | null;
+            /**
+             * Create May Have Been Issued At
+             * @description When an attempt first went past the last check before the create (#450 round 5): from then on Stripe may hold a transfer of the job, even while a later attempt retries. Kept for good; null when no attempt ever got that far.
+             */
+            create_may_have_been_issued_at: string | null;
+            /**
+             * Needs Reversal At
+             * @description When a refund made late for the job's dispute found this transfer made, or possibly made (#450 round 4): the hold came too late to stop it. Staff reverse it in Stripe by hand and clear the flag (docs/stripe-money.md); nothing reverses or clears it automatically. null otherwise.
+             */
+            needs_reversal_at: string | null;
             /**
              * Created At
              * Format: date-time

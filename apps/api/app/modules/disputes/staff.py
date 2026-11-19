@@ -70,7 +70,7 @@ class DisputeStaffReader:
 
     async def listed(self, status: DisputeStatus | None, limit: int | None) -> StaffDisputeList:
         """Disputes of `status` (or any), oldest first. `limit` above the maximum is capped.
-        Six statements, whatever the page's size."""
+        Seven statements, whatever the page's size."""
         size = min(limit or self._list_default_limit, self._list_max_limit)
         disputes = await self._disputes.listed(status, size)
         jobs = await self._jobs.read_many({dispute.job_id for dispute in disputes})
@@ -80,6 +80,7 @@ class DisputeStaffReader:
             {job.customer_id for job in jobs.values()} | {job.pro_user_id for job in jobs.values()}
         )
         failed = await self._ledger.failed_of_disputes([dispute.id for dispute in disputes])
+        held = await self._ledger.held_for_reconciliation([dispute.id for dispute in disputes])
         items = [
             _summary(
                 dispute,
@@ -88,6 +89,7 @@ class DisputeStaffReader:
                 payments.get(jobs[dispute.job_id].quote_id),
                 names,
                 refund_failed=dispute.id in failed,
+                refund_needs_reconciliation=dispute.id in held,
             )
             for dispute in disputes
         ]
@@ -108,6 +110,7 @@ class DisputeStaffReader:
         history = await self._job_history.of_request(job.request_id)
         refund = await self._ledger.of_dispute(dispute.id)
         transfer = await self._transfers.of_job(job.job_id)
+        held = await self._ledger.held_for_reconciliation([dispute.id])
         summary = _summary(
             dispute,
             job,
@@ -115,6 +118,7 @@ class DisputeStaffReader:
             payment,
             names,
             refund_failed=refund is not None and refund.stripe_status in STRIPE_REFUND_FAILED,
+            refund_needs_reconciliation=dispute.id in held,
         )
         # Built before the commit below: nothing is read from a row after it.
         out = StaffDisputeOut(
@@ -168,6 +172,7 @@ def _summary(
     names: Mapping[uuid.UUID, str | None],
     *,
     refund_failed: bool,
+    refund_needs_reconciliation: bool,
 ) -> StaffDisputeSummary:
     return StaffDisputeSummary(
         id=dispute.id,
@@ -187,4 +192,5 @@ def _summary(
         opened_at=dispute.created_at,
         resolved_at=dispute.resolved_at,
         refund_failed=refund_failed,
+        refund_needs_reconciliation=refund_needs_reconciliation,
     )

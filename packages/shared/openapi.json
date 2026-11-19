@@ -13436,7 +13436,7 @@
             ]
           },
           "status": {
-            "$ref": "#/components/schemas/RefundStatus",
+            "$ref": "#/components/schemas/ShownRefundStatus",
             "description": "pending: Stripe holds no refund of ours yet, an attempt may be under way. created: Stripe holds the refund; stripe_status says whether the money is back. failed: the last attempt's call failed. A retry sends the same idempotency key, and Stripe answers a refusal it already gave under that key (for 24 h) with the same refusal: a retry helps when the call never reached Stripe, or once the key expired."
           },
           "stripe_refund_id": {
@@ -13508,16 +13508,6 @@
         ],
         "title": "RefundOut",
         "description": "A refund to the customer as staff see it (#76): the row, without the idempotency key."
-      },
-      "RefundStatus": {
-        "type": "string",
-        "enum": [
-          "pending",
-          "created",
-          "failed"
-        ],
-        "title": "RefundStatus",
-        "description": "Where a refund to the customer stands (#76; internal: staff read the row)."
       },
       "RegionOut": {
         "properties": {
@@ -15006,6 +14996,16 @@
         "title": "SetupIntentOut",
         "description": "What the app's Payment Sheet needs, in setup mode, to save a card on the customer."
       },
+      "ShownRefundStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "created",
+          "failed"
+        ],
+        "title": "ShownRefundStatus",
+        "description": "A dispute's refund as staff see it: the one that is not abandoned (#434), so never\n`abandoned`. The same values as RefundStatus otherwise."
+      },
       "SingleChoiceQuestion": {
         "properties": {
           "key": {
@@ -15304,6 +15304,11 @@
             "title": "Refund Failed",
             "description": "Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it."
           },
+          "refund_needs_reconciliation": {
+            "type": "boolean",
+            "title": "Refund Needs Reconciliation",
+            "description": "Stripe shows a refund made (or still under way) for this dispute that its abandoned or failed refund records do not hold (#450 round 2): money may have gone back outside the records, so any payout of the job stays held until staff reconcile it in Stripe and clear the hold (docs/stripe-money.md). Never cleared on its own."
+          },
           "description": {
             "type": "string",
             "title": "Description",
@@ -15428,6 +15433,7 @@
           "opened_at",
           "resolved_at",
           "refund_failed",
+          "refund_needs_reconciliation",
           "description",
           "pro_reply",
           "pro_replied_at",
@@ -15576,6 +15582,11 @@
             "type": "boolean",
             "title": "Refund Failed",
             "description": "Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it."
+          },
+          "refund_needs_reconciliation": {
+            "type": "boolean",
+            "title": "Refund Needs Reconciliation",
+            "description": "Stripe shows a refund made (or still under way) for this dispute that its abandoned or failed refund records do not hold (#450 round 2): money may have gone back outside the records, so any payout of the job stays held until staff reconcile it in Stripe and clear the hold (docs/stripe-money.md). Never cleared on its own."
           }
         },
         "additionalProperties": false,
@@ -15597,7 +15608,8 @@
           "currency",
           "opened_at",
           "resolved_at",
-          "refund_failed"
+          "refund_failed",
+          "refund_needs_reconciliation"
         ],
         "title": "StaffDisputeSummary",
         "description": "One line of the staff list."
@@ -16662,7 +16674,7 @@
               }
             ],
             "title": "Last Error Code",
-            "description": "Why the last attempt did not make the transfer: a Stripe error code, an error class, `payouts_not_enabled` or `transfer_needs_review`. Never a message."
+            "description": "Why the last attempt did not make the transfer: a Stripe error code, an error class, `payouts_not_enabled`, `pro_not_approved`, `held_before_create` (a hold seen at the last check before the create) or `transfer_needs_review`. Never a message."
           },
           "requested_at": {
             "anyOf": [
@@ -16676,6 +16688,32 @@
             ],
             "title": "Requested At",
             "description": "When the latest attempt started."
+          },
+          "create_may_have_been_issued_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Create May Have Been Issued At",
+            "description": "When an attempt first went past the last check before the create (#450 round 5): from then on Stripe may hold a transfer of the job, even while a later attempt retries. Kept for good; null when no attempt ever got that far."
+          },
+          "needs_reversal_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Needs Reversal At",
+            "description": "When a refund made late for the job's dispute found this transfer made, or possibly made (#450 round 4): the hold came too late to stop it. Staff reverse it in Stripe by hand and clear the flag (docs/stripe-money.md); nothing reverses or clears it automatically. null otherwise."
           },
           "created_at": {
             "type": "string",
@@ -16702,6 +16740,8 @@
           "attempts",
           "last_error_code",
           "requested_at",
+          "create_may_have_been_issued_at",
+          "needs_reversal_at",
           "created_at",
           "updated_at"
         ],

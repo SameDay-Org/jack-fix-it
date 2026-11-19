@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Final
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, false, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, IdTimestampsMixin, str_enum
@@ -172,6 +172,18 @@ class Transfer(IdTimestampsMixin, Base):
     # until then, so the need for it outlives a failed or cancelled read (#416 r2).
     reversal_check_tried_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reversal_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The initiation boundary (#450 round 4): when the current attempt passed its last hold
+    # check, under the job's lock, right before the create. NULL until then; cleared when a new
+    # attempt starts. A late refund that finds it set (or the transfer made) cannot stop the
+    # create any more: it flags the transfer instead.
+    create_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When an attempt first crossed the boundary (#450 round 5): from then on Stripe may hold a
+    # transfer of this job, whatever later attempts do. Never cleared, by a retry, a failed
+    # lookup or a new attempt's start: the late refund's flag reads it.
+    create_may_have_been_issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When a late refund found this transfer issued, or possibly issued: staff reverse it by
+    # hand (docs/stripe-money.md). Never cleared by the code.
+    needs_reversal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RefundStatus(StrEnum):
@@ -187,6 +199,10 @@ class RefundStatus(StrEnum):
     # The last attempt's call ended with an error (last_error_code) and Stripe holds no refund
     # of ours that we know of; the same decision tries again.
     FAILED = "failed"
+    # Staff gave it up (#434, scripts/resolve_dispute_refund.py, audited) once Stripe showed no
+    # refund of the dispute that could still move money: it no longer fixes the dispute's
+    # decision, and an admin may decide again, a refund then taking a new row and key. Final.
+    ABANDONED = "abandoned"
 
 
 # Statuses of a refund not made yet: an attempt may still be started for it.
@@ -232,6 +248,10 @@ class Refund(IdTimestampsMixin, Base):
     requested_at) are committed before the Stripe call, so a lost answer leaves a row that says
     a refund may have been made: the next attempt looks it up in Stripe before creating one.
 
+    A dispute holds one refund that is not abandoned. Its key is `dispute:<id>:refund` for the
+    first, `dispute:<id>:refund:<n>` for the n-th after staff abandoned the earlier ones (#434),
+    so Stripe never answers a new decision with an abandoned refund's stored answer.
+
     Stripe's status of the refund is kept as Stripe says it (stripe_status) and read again
     (an admin's retry, or Stripe's refund events): what the refund settles waits for
     `succeeded` (#433 round 1). A dispute's refund also carries the decision it pays for,
@@ -248,10 +268,18 @@ class Refund(IdTimestampsMixin, Base):
             "status <> 'created' OR stripe_refund_id IS NOT NULL",
             name="created_has_stripe_refund_id",
         ),
-        # Stripe's status is stored with its refund, and only then.
+        # Stripe's status is stored with its refund, and only then; an abandoned row keeps
+        # whatever it had (#434).
         CheckConstraint(
-            "(status = 'created') = (stripe_status IS NOT NULL)",
+            "status = 'abandoned' OR (status = 'created') = (stripe_status IS NOT NULL)",
             name="created_has_stripe_status",
+        ),
+        # One refund per dispute that is not abandoned: the one its decision carries out.
+        Index(
+            "uq_refunds_current_dispute_refund",
+            "dispute_id",
+            unique=True,
+            postgresql_where=text("dispute_id IS NOT NULL AND status <> 'abandoned'"),
         ),
         CheckConstraint(
             "dispute_id IS NULL OR (initiated_by IS NOT NULL AND pro_release_cents IS NOT NULL"
@@ -282,6 +310,10 @@ class Refund(IdTimestampsMixin, Base):
     # Stripe attempts started (each committed before its call).
     attempts: Mapped[int] = mapped_column(server_default="0")
     last_error_code: Mapped[str | None] = mapped_column(String(REFUND_ERROR_CODE_LENGTH))
+    # The last attempt's failure was Stripe's definitive answer to the create (a 4xx error with
+    # a Stripe code, not a timeout, a 409, a 429 or a 5xx): the same key gets the same refusal,
+    # so that create can never make a refund. Only such a refund may be abandoned (#434).
+    last_error_definitive: Mapped[bool] = mapped_column(server_default=false())
     # When the latest attempt started; NULL before the first.
     requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Stripe's status of the refund as last read (pending, requires_action, succeeded, failed,
@@ -294,3 +326,9 @@ class Refund(IdTimestampsMixin, Base):
     # The deciding admin's note (staff only, never logged): the dispute's resolution_note once
     # the refund settles it.
     resolution_note: Mapped[str | None] = mapped_column(Text)
+    # When a signed refund event, read again from Stripe, showed a refund Stripe made or still
+    # holds for the dispute while this row was abandoned or failed (#450 round 2): money our
+    # rows do not show may have moved. The job's payout stays held (payments.transfers) until
+    # staff reconcile it in Stripe and clear this by hand (docs/stripe-money.md); no code ever
+    # clears it.
+    late_refund_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

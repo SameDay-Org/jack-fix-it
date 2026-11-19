@@ -114,6 +114,12 @@ class StaffDisputeSummary(_Out):
         "back, the dispute stays open (or, resolved, needs a look) and any payout it decided "
         "stays held. Staff repair it."
     )
+    refund_needs_reconciliation: bool = Field(
+        description="Stripe shows a refund made (or still under way) for this dispute that its "
+        "abandoned or failed refund records do not hold (#450 round 2): money may have gone "
+        "back outside the records, so any payout of the job stays held until staff reconcile "
+        "it in Stripe and clear the hold (docs/stripe-money.md). Never cleared on its own."
+    )
 
 
 class StaffDisputeList(_Out):

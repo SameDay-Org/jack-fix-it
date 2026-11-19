@@ -84,7 +84,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.errors import ForbiddenError, NotFoundError
-from app.integrations.stripe_errors import StripeCallError, StripeUnavailableError
+from app.integrations.stripe_errors import (
+    StripeCallError,
+    StripeUnavailableError,
+)
 from app.integrations.stripe_refunds import RefundFacts, StripeRefunds
 from app.modules.audit.service import AuditService
 from app.modules.audit.types import (
@@ -129,10 +132,10 @@ from app.modules.payments.refunds import (
     PaymentFacts,
     RefundAttempt,
     RefundBlocked,
+    RefundCreateRejectedError,
     RefundDecision,
     RefundLedger,
     RefundNeedsReviewError,
-    dispute_refund_key,
     make_refund,
     recheck_refund,
     refund_fits,
@@ -645,6 +648,11 @@ class DisputeResolver:
                 started,
                 error.code or type(error).__name__,
                 "unavailable" if unavailable else "rejected",
+                # Stripe's definitive answer: the create itself refused with a code that means
+                # the charge cannot be refunded (REFUND_REFUSED_CODES, #450 round 4). Anything
+                # else, a failed lookup or read included (round 2), leaves the create uncertain:
+                # it never makes the refund abandonable.
+                definitive=isinstance(error, RefundCreateRejectedError) and error.definitive,
             )
             logger.error(
                 "dispute_refund_stripe_unavailable"
@@ -705,7 +713,7 @@ class DisputeResolver:
                     "pro_release_cents": plan.pro_release_cents,
                     "customer_refund_cents": plan.customer_refund_cents,
                     "refund_id": str(started.refund_id),
-                    "idempotency_key": dispute_refund_key(locked.dispute_id),
+                    "idempotency_key": started.idempotency_key,
                     "attempt": None if attempt is None else attempt.number,
                     "stripe_refund_id": (
                         started.stripe_refund_id if isinstance(started, DisputeRefund) else None
@@ -738,11 +746,13 @@ class DisputeResolver:
         started: RefundAttempt | DisputeRefund,
         code: str,
         outcome: str,
+        *,
+        definitive: bool = False,
     ) -> None:
         """No refund came back from Stripe: the attempt ended failed (a read of a held refund
         leaves the row as it is) and the outcome audited, committed before the answer."""
         if isinstance(started, RefundAttempt):
-            await self._ledger.failed(started, code)
+            await self._ledger.failed(started, code, definitive=definitive)
         await self._settlement.record_outcome(
             actor,
             started.dispute_id,

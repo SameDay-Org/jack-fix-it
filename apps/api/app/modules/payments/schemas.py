@@ -1,9 +1,19 @@
 import uuid
 from datetime import datetime
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.payments.models import PaymentStatus, RefundStatus, TransferStatus
+
+
+class ShownRefundStatus(StrEnum):
+    """A dispute's refund as staff see it: the one that is not abandoned (#434), so never
+    `abandoned`. The same values as RefundStatus otherwise."""
+
+    PENDING = RefundStatus.PENDING.value
+    CREATED = RefundStatus.CREATED.value
+    FAILED = RefundStatus.FAILED.value
 
 
 class PaymentCreate(BaseModel):
@@ -71,9 +81,21 @@ class TransferOut(BaseModel):
     attempts: int = Field(description="Attempts made with Stripe so far.")
     last_error_code: str | None = Field(
         description="Why the last attempt did not make the transfer: a Stripe error code, an "
-        "error class, `payouts_not_enabled` or `transfer_needs_review`. Never a message."
+        "error class, `payouts_not_enabled`, `pro_not_approved`, `held_before_create` (a hold "
+        "seen at the last check before the create) or `transfer_needs_review`. Never a message."
     )
     requested_at: datetime | None = Field(description="When the latest attempt started.")
+    create_may_have_been_issued_at: datetime | None = Field(
+        description="When an attempt first went past the last check before the create (#450 "
+        "round 5): from then on Stripe may hold a transfer of the job, even while a later "
+        "attempt retries. Kept for good; null when no attempt ever got that far."
+    )
+    needs_reversal_at: datetime | None = Field(
+        description="When a refund made late for the job's dispute found this transfer made, or "
+        "possibly made (#450 round 4): the hold came too late to stop it. Staff reverse it in "
+        "Stripe by hand and clear the flag (docs/stripe-money.md); nothing reverses or clears "
+        "it automatically. null otherwise."
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -94,7 +116,7 @@ class RefundOut(BaseModel):
     id: uuid.UUID
     amount_cents: int = Field(description="What is refunded, in integer cents.")
     currency: str = Field(examples=["usd"])
-    status: RefundStatus = Field(
+    status: ShownRefundStatus = Field(
         description="pending: Stripe holds no refund of ours yet, an attempt may be under way. "
         "created: Stripe holds the refund; stripe_status says whether the money is back. "
         "failed: the last attempt's call failed. A retry sends the same idempotency key, and "

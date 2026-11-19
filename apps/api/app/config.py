@@ -422,6 +422,11 @@ class Settings(BaseSettings):
     # the refund up in Stripe before it creates anything. It must outlast the Stripe calls of
     # one attempt (checked below).
     refund_stuck_pending_minutes: int = Field(default=15, gt=0)
+    # Staff may abandon a dispute's refund Stripe refused for good (#434,
+    # scripts/resolve_dispute_refund.py). Off by default: turn it on only once the deploy that
+    # reads abandoned refunds has finished on the api AND the worker, so no previous release,
+    # which cannot read them, is still serving (#450 round 1).
+    refund_abandon_enabled: bool = False
     # Job execution (D12.2, #63): wrong arrival codes a pro may enter at check-in before the
     # code locks and the BDC is alerted (Cesar, 2026-10-29: 5).
     arrival_code_max_attempts: int = Field(default=5, gt=0)
