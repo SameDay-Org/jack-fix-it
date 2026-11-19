@@ -116,8 +116,20 @@ class DisputeRepository:
 
     @staticmethod
     def metric_facts() -> Subquery:
-        """Every dispute's opening time (`created_at`), for the staff metrics (#84)."""
-        return select(Dispute.created_at.label("created_at")).subquery()
+        """Every dispute's opening time (`created_at`) and job (`job_id`), and once an admin
+        resolved it, when (`resolved_at`), whether it released the payout in full
+        (`released_in_full`) or refunded the customer in full (`refunded_in_full`), and the
+        split #76 stored (`pro_release_cents`, `customer_refund_cents`), for the staff metrics
+        (#84). No text."""
+        return select(
+            Dispute.created_at.label("created_at"),
+            Dispute.job_id.label("job_id"),
+            Dispute.resolved_at.label("resolved_at"),
+            (Dispute.resolution == DisputeResolution.RELEASED).label("released_in_full"),
+            (Dispute.resolution == DisputeResolution.REFUNDED).label("refunded_in_full"),
+            Dispute.pro_release_cents.label("pro_release_cents"),
+            Dispute.customer_refund_cents.label("customer_refund_cents"),
+        ).subquery()
 
     @staticmethod
     def open_jobs() -> Subquery:

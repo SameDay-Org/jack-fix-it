@@ -3206,7 +3206,7 @@ export interface components {
          * MetricFormula
          * @enum {string}
          */
-        MetricFormula: "first_response_minutes" | "contact_rate" | "lead_to_job" | "completion_rate" | "customer_rating" | "pro_rating" | "dispute_rate" | "repeat_rate" | "gmv" | "revenue_gross_of_refunds";
+        MetricFormula: "first_response_minutes" | "contact_rate" | "lead_to_job" | "completion_rate" | "customer_rating" | "pro_rating" | "dispute_rate" | "repeat_rate" | "gmv" | "revenue_net_of_refunds";
         /** Metrics */
         Metrics: {
             avg_first_response_minutes: components["schemas"]["ResponseTimeMetric"];
@@ -3243,7 +3243,7 @@ export interface components {
             time_zone: string;
             /**
              * Refunds Netted
-             * @description Whether revenue_cents is net of refunds. False until #76's refunds land: revenue is then the platform's fee as charged.
+             * @description Whether revenue_cents is net of refunds: true (#76). Revenue is the fee the platform keeps: on the jobs confirmed in the range, and on the disputes resolved in the range (a release keeps the fee, a partial what its split left the platform, a full refund nothing). GMV covers the confirmed jobs only: the two cohorts differ on purpose.
              */
             refunds_netted: boolean;
             metrics: components["schemas"]["Metrics"];

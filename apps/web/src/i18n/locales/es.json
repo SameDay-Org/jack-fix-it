@@ -904,7 +904,7 @@
         "dispute_rate": "Problemas reportados (disputas abiertas) en el período ÷ trabajos completados en el período (por fecha de finalización).",
         "repeat_rate": "Entre los clientes con al menos un trabajo confirmado en el período, la parte que tiene al menos dos trabajos confirmados antes del fin del período.",
         "gmv": "Lo que se cobró a los clientes (el precio fijado del trabajo más impuestos) por los trabajos confirmados en el período. Un trabajo pagado al profesional por la liberación de una disputa nunca se confirmó y no cuenta.",
-        "revenue_gross_of_refunds": "La comisión de la plataforma (el porcentaje fijado al pagar) sobre los trabajos confirmados en el período, tal como se cobró. Los reembolsos todavía no se restan."
+        "revenue_net_of_refunds": "La comisión que la plataforma conserva. En los trabajos confirmados en el período: su comisión fijada al pagar. En los problemas que un administrador resolvió en el período: toda la comisión si se pagó al profesional, su parte en un reparto y nada en un reembolso total. El GMV solo cuenta los trabajos confirmados."
       },
       "series": {
         "title": "Por día",

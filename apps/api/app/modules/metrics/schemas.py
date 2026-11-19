@@ -18,9 +18,10 @@ class MetricFormula(StrEnum):
     DISPUTE_RATE = "dispute_rate"
     REPEAT_RATE = "repeat_rate"
     GMV = "gmv"
-    # Gross: refunds are not subtracted yet (they come with #76's refunds table); the key
-    # changes when they are, so the panel never shows a gross figure under a net label.
-    REVENUE_GROSS_OF_REFUNDS = "revenue_gross_of_refunds"
+    # Net of refunds (#76): the fee the platform keeps, confirmed jobs and resolved disputes.
+    # The key changed from revenue_gross_of_refunds when the netting landed, so the panel never
+    # shows a figure under the other's label.
+    REVENUE_NET_OF_REFUNDS = "revenue_net_of_refunds"
 
 
 class _Out(BaseModel):
@@ -85,8 +86,10 @@ class MetricsOut(_Out):
     to_date: date = Field(description="The last day read, in `time_zone` (inclusive).")
     time_zone: str = Field(examples=["America/New_York"])
     refunds_netted: bool = Field(
-        description="Whether revenue_cents is net of refunds. False until #76's refunds land: "
-        "revenue is then the platform's fee as charged."
+        description="Whether revenue_cents is net of refunds: true (#76). Revenue is the fee the "
+        "platform keeps: on the jobs confirmed in the range, and on the disputes resolved in "
+        "the range (a release keeps the fee, a partial what its split left the platform, a full "
+        "refund nothing). GMV covers the confirmed jobs only: the two cohorts differ on purpose."
     )
     metrics: Metrics
     series: list[SeriesPoint] = Field(description="One point per day of the range, in order.")

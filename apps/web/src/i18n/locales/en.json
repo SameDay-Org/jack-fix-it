@@ -904,7 +904,7 @@
         "dispute_rate": "Problems reported (disputes opened) in the range ÷ jobs completed in the range (by completion time).",
         "repeat_rate": "Among the customers with at least one job confirmed in the range, the share with at least two jobs confirmed before the range's end.",
         "gmv": "What customers were charged (the job's set price plus tax) for the jobs confirmed in the range. A job paid out through a dispute's release was never confirmed and is not counted.",
-        "revenue_gross_of_refunds": "The platform's fee (the take rate set at payment) on the jobs confirmed in the range, as charged. Refunds are not subtracted yet."
+        "revenue_net_of_refunds": "The fee the platform keeps. On the jobs confirmed in the range: its fee as set at payment. On the problems an admin resolved in the range: all of the fee for a release, its part of a split, nothing for a full refund. GMV counts the confirmed jobs only."
       },
       "series": {
         "title": "Per day",

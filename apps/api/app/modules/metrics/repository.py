@@ -23,6 +23,7 @@ from sqlalchemy import (
     ScalarSelect,
     Subquery,
     and_,
+    case,
     cast,
     func,
     literal_column,
@@ -157,6 +158,22 @@ class MetricsRepository:
                 _count(reviews, *where),
             )
 
+        # What the platform keeps on a dispute resolved in the range (#76's split, as the
+        # settlement stored it): a release keeps the job's fee, a full refund keeps nothing, a
+        # partial keeps what is left of the customer's total once the pro's part and the
+        # refund are taken out. A disputed job is never confirmed (the state machine has no
+        # such path), and a job counted as confirmed is never counted here again.
+        kept = case(
+            (disputes.c.released_in_full, jobs.c.platform_fee_cents),
+            (disputes.c.refunded_in_full, 0),
+            else_=jobs.c.captured_cents
+            - disputes.c.pro_release_cents
+            - disputes.c.customer_refund_cents,
+        )
+        dispute_settled = and_(
+            _within(disputes.c.resolved_at, start, end), jobs.c.confirmed_at.is_(None)
+        )
+
         pro_mean, pro_count = rating(True)
         customer_mean, customer_count = rating(False)
         statement = select(
@@ -195,6 +212,11 @@ class MetricsRepository:
             .where(job_confirmed)
             .scalar_subquery()
             .label("revenue"),
+            select(func.coalesce(func.sum(kept), 0))
+            .select_from(disputes.join(jobs, jobs.c.job_id == disputes.c.job_id))
+            .where(dispute_settled)
+            .scalar_subquery()
+            .label("dispute_revenue"),
             _by_day(requests, requests.c.created_at, func.count(), time_zone, created).label(
                 "requests_by_day"
             ),
@@ -223,7 +245,7 @@ class MetricsRepository:
             repeat_customers=row.repeaters,
             customers_confirmed=row.customers_confirmed,
             gmv_cents=int(row.gmv),
-            revenue_cents=int(row.revenue),
+            revenue_cents=int(row.revenue) + int(row.dispute_revenue),
             requests_by_day=_days(row.requests_by_day),
             completions_by_day=_days(row.completions_by_day),
             gmv_by_day=_days(row.gmv_by_day),
