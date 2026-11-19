@@ -41,6 +41,7 @@ from app.modules.reviews.router import router as reviews_router
 from app.modules.service_areas.router import router as service_areas_router
 from app.modules.support.router import router as support_router
 from app.modules.support.router import staff_router as staff_support_router
+from app.modules.tips.router import router as tips_router
 from app.modules.uploads.router import router as uploads_router
 from app.modules.waitlist.router import router as waitlist_router
 from app.modules.webhooks.router import router as webhooks_router
@@ -91,3 +92,4 @@ v1_router.include_router(earnings_router)
 v1_router.include_router(staff_disputes_router)
 v1_router.include_router(staff_metrics_router)
 v1_router.include_router(my_rating_router)
+v1_router.include_router(tips_router)

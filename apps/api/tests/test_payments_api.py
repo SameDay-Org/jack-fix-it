@@ -193,19 +193,21 @@ class FakeStripePayments:
         transfer_group: str,
         metadata: dict[str, str] | Any,
         idempotency_key: str,
+        description: str | None = None,
     ) -> PaymentIntentState:
         if "create_payment_intent" in self.errors:
             raise self.errors["create_payment_intent"]
-        self.intent_calls.append(
-            {
-                "amount_cents": amount_cents,
-                "currency": currency,
-                "customer_id": customer_id,
-                "transfer_group": transfer_group,
-                "metadata": dict(metadata),
-                "idempotency_key": idempotency_key,
-            }
-        )
+        call: dict[str, object] = {
+            "amount_cents": amount_cents,
+            "currency": currency,
+            "customer_id": customer_id,
+            "transfer_group": transfer_group,
+            "metadata": dict(metadata),
+            "idempotency_key": idempotency_key,
+        }
+        if description is not None:  # a tip's (#273); the job payment's calls stay as they were
+            call["description"] = description
+        self.intent_calls.append(call)
         if self.on_create_intent is not None:
             await self.on_create_intent()
         intent_id = self.intents_by_key.get(idempotency_key)

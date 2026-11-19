@@ -66,6 +66,9 @@ update, a repeated check-in, Job's done or confirm, and a refused action push no
 that cannot be queued is logged with ids and never fails the action. No push carries the
 arrival code or the ETA.
 
+The customer's view carries the job's tip (#273) once the job was confirmed: tips/service.py
+reads it and says what the customer may do. Confirming never reads or writes a tip.
+
 Confirmation (#66), the customer's, on the job's row lock: completed -> confirmed through the
 state machine (it sets confirmed_at; the event's actor is the customer), then the pro's push.
 Again once confirmed: 200, unchanged, no second event or push. Any other status: 409
@@ -134,7 +137,7 @@ from app.modules.jobs.schemas import (
     ProJob,
     ProJobPage,
 )
-from app.modules.jobs.service import JobStateMachine
+from app.modules.jobs.service import JobStateMachine, tip_facts
 from app.modules.jobs.transitions import CUSTOMER_STATUS
 from app.modules.media.safe_status import MediaSafeStatus
 from app.modules.notifications.events import (
@@ -152,6 +155,7 @@ from app.modules.quotes.schemas import QuotePro
 from app.modules.quotes.service import QuoteReader
 from app.modules.requests.errors import InvalidRequestError
 from app.modules.requests.service import CustomerRequestReader, ProRequestReader
+from app.modules.tips.service import TipConfig, TipReader
 from app.modules.uploads.keys import owned_upload, upload_issued_at
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.users.service import UserService
@@ -188,6 +192,7 @@ class JobExecutionConfig:
     photo_url_ttl_seconds: int
     enqueue_timeout_seconds: float
     auto_confirm_after: timedelta
+    tips: TipConfig
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "JobExecutionConfig":
@@ -200,6 +205,7 @@ class JobExecutionConfig:
             photo_url_ttl_seconds=settings.download_url_ttl_seconds,
             enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
             auto_confirm_after=timedelta(hours=settings.job_auto_confirm_after_hours),
+            tips=TipConfig.from_settings(settings),
         )
 
 
@@ -232,6 +238,7 @@ class JobExecutionService:
         self._chat = ChatUnreadReader(session)
         self._transfers = TransferReader(session)
         self._cancellations = CancellationReader(session)
+        self._tips = TipReader(session, config.tips)
 
     # Reads
 
@@ -276,6 +283,7 @@ class JobExecutionService:
             if job.status is JobStatus.CANCELLED
             else None,
             unread_messages=unread[job.id],
+            tip=await self._tips.for_job(tip_facts(job)),
         )
 
     async def pro_jobs(

@@ -60,6 +60,7 @@ CUSTOMER_KEYS = {
     "customer_total_cents",
     "cancellation",
     "unread_messages",
+    "tip",
 }
 PRO_KEYS = {
     "id",

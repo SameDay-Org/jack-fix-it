@@ -59,6 +59,11 @@ from app.integrations.stripe_errors import StripeRejectedError, raise_typed
 PAYMENT_INTENT_CLOSED_STATUSES: frozenset[str] = frozenset({"succeeded", "canceled"})
 # Stripe's error code for a cancel of an intent that is processing, succeeded or canceled.
 PAYMENT_INTENT_UNEXPECTED_STATE = "payment_intent_unexpected_state"
+# A PaymentIntent that is not a job payment's names what it is for in its metadata, under this
+# key (#273): a tip's says "tip", and its events go to the tips module, never to the payment's
+# reconciliation. A job payment's PaymentIntent has no such key.
+INTENT_KIND_KEY = "kind"
+TIP_INTENT_KIND = "tip"
 # One search page: more than one match is already an answer (ambiguous), so a single page
 # of this size counts them for the log.
 PAYMENT_INTENT_SEARCH_LIMIT = 10
@@ -127,8 +132,10 @@ class StripePayments(Protocol):
         transfer_group: str,
         metadata: Mapping[str, str],
         idempotency_key: str,
+        description: str | None = None,
     ) -> PaymentIntentState:
-        """Creates the PaymentIntent on the platform account (see the module doc)."""
+        """Creates the PaymentIntent on the platform account (see the module doc), with the
+        description Stripe shows on the charge when one is given (a tip's, #273)."""
         ...
 
     async def retrieve_payment_intent(self, payment_intent_id: str) -> PaymentIntentState: ...
@@ -203,6 +210,7 @@ class StripePaymentsClient:
         transfer_group: str,
         metadata: Mapping[str, str],
         idempotency_key: str,
+        description: str | None = None,
     ) -> PaymentIntentState:
         params: PaymentIntentCreateParams = {
             "amount": amount_cents,
@@ -216,6 +224,8 @@ class StripePaymentsClient:
             "transfer_group": transfer_group,
             "metadata": dict(metadata),
         }
+        if description is not None:
+            params["description"] = description
         try:
             intent = await self._client.v1.payment_intents.create_async(
                 params=params, options={"idempotency_key": idempotency_key}

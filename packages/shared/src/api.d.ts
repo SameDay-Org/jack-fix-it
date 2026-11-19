@@ -2132,6 +2132,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/requests/{request_id}/job/tip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Tip the pro of my confirmed job, or choose no tip
+         * @description The customer's tip for the pro of their confirmed job, inside the window the job's tip
+         *     shows (closes_at): "No tip", one of the offered percents, or an amount within the bounds.
+         *     The server computes every amount. A tip to pay comes with what the Payment Sheet needs
+         *     (the same PaymentIntent while the amount stays the same; a new amount cancels the earlier
+         *     one first); "No tip" comes with no sheet. Sending the same choice again is safe.
+         */
+        post: operations["choose_tip_v1_requests__request_id__job_tip_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2750,6 +2774,20 @@ export interface components {
              */
             first_contact_at: string;
         };
+        /** CustomTipIn */
+        CustomTipIn: {
+            /**
+             * Choice
+             * @constant
+             */
+            choice: "custom";
+            /**
+             * Amount Cents
+             * @description The tip in integer cents, within the options' bounds.
+             * @example 1250
+             */
+            amount_cents: number;
+        };
         /** CustomerCancelIn */
         CustomerCancelIn: {
             reason_code: components["schemas"]["CustomerCancelReason"];
@@ -2883,6 +2921,8 @@ export interface components {
              * @description The pro's chat messages the customer has not marked read (#71).
              */
             unread_messages: number;
+            /** @description The customer's tip for the pro (#273): set once the job was confirmed (by the customer or automatically), inside the tip window and after it; null for a job that takes no tip (not confirmed yet, disputed, refunded or cancelled). Always sent; optional in the schema so clients built before #273 keep compiling. */
+            tip?: components["schemas"]["TipOut"] | null;
         };
         /**
          * CustomerJobCancellation
@@ -3827,6 +3867,14 @@ export interface components {
              */
             next_cursor: string | null;
         };
+        /** NoTipIn */
+        NoTipIn: {
+            /**
+             * Choice
+             * @constant
+             */
+            choice: "none";
+        };
         /** NoteIn */
         NoteIn: {
             /**
@@ -4240,6 +4288,20 @@ export interface components {
          * @enum {string}
          */
         PayoutsStatus: "not_started" | "incomplete" | "in_review" | "enabled";
+        /** PercentTipIn */
+        PercentTipIn: {
+            /**
+             * Choice
+             * @constant
+             */
+            choice: "percent";
+            /**
+             * Percent
+             * @description One of the percents the job's tip options offer.
+             * @example 10
+             */
+            percent: number;
+        };
         /** PhoneSendRequest */
         PhoneSendRequest: {
             /**
@@ -6362,6 +6424,95 @@ export interface components {
          * @enum {string}
          */
         TicketTopic: "account" | "payment" | "job" | "safety" | "app_problem" | "other";
+        /**
+         * TipChoice
+         * @description What the customer chose (#273): no tip, one of the offered percents, or an amount.
+         * @enum {string}
+         */
+        TipChoice: "none" | "percent" | "custom";
+        /** TipCreateOut */
+        TipCreateOut: {
+            tip: components["schemas"]["TipOut"];
+            /** @description What the Payment Sheet needs to pay the tip (its amount, no tax); null for No tip. */
+            sheet: components["schemas"]["PaymentSheetOut"] | null;
+        };
+        /** TipOptions */
+        TipOptions: {
+            /**
+             * Presets
+             * @description The percents offered for this job, ascending; a percent whose amount falls outside the bounds below is left out.
+             */
+            presets: components["schemas"]["TipPreset"][];
+            /**
+             * Min Cents
+             * @description The smallest tip, inclusive.
+             */
+            min_cents: number;
+            /**
+             * Max Cents
+             * @description The largest tip, inclusive: a share of the job's price, capped.
+             */
+            max_cents: number;
+        };
+        /**
+         * TipOut
+         * @description The job's tip: what the customer chose, where its payment stands and what they may do.
+         */
+        TipOut: {
+            /** @description null until the customer chooses. declined: No tip. requires_payment: the Payment Sheet is open or was closed. processing, succeeded, failed, canceled: the payment's. A failed or canceled tip can be tried again while can_tip is true. */
+            status: components["schemas"]["TipStatus"] | null;
+            /** @description null until the customer chooses. */
+            choice: components["schemas"]["TipChoice"] | null;
+            /**
+             * Percent
+             * @description The offered percent chosen; null otherwise.
+             */
+            percent: number | null;
+            /**
+             * Amount Cents
+             * @description The tip, in integer cents; 0 until chosen and for No tip.
+             */
+            amount_cents: number;
+            /**
+             * Currency
+             * @description Stripe's lower-case currency code.
+             * @example usd
+             */
+            currency: string;
+            options: components["schemas"]["TipOptions"];
+            /**
+             * Can Tip
+             * @description Whether a tip may be chosen or paid now: inside the window, nothing paid or being paid yet.
+             */
+            can_tip: boolean;
+            /**
+             * Closes At
+             * Format: date-time
+             * @description When the window closes: the job's confirmation plus TIP_WINDOW_HOURS.
+             */
+            closes_at: string;
+        };
+        /** TipPreset */
+        TipPreset: {
+            /**
+             * Percent
+             * @description A whole percent of the job's price.
+             * @example 10
+             */
+            percent: number;
+            /**
+             * Amount Cents
+             * @description What that percent comes to, computed by the server (rounded half up): the app shows it as is.
+             */
+            amount_cents: number;
+        };
+        /**
+         * TipStatus
+         * @description Where a tip stands. `declined` is the choice "No tip" (no PaymentIntent); the others
+         *     follow the current attempt's PaymentIntent, moved by its payment_intent.* events.
+         * @enum {string}
+         */
+        TipStatus: "declined" | "requires_payment" | "processing" | "succeeded" | "failed" | "canceled";
         /**
          * TransferOut
          * @description A job's transfer to its pro as staff see it (#68): the row, without the idempotency
@@ -12974,6 +13125,95 @@ export interface operations {
             };
             /** @description The request is invalid. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    choose_tip_v1_requests__request_id__job_tip_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoTipIn"] | components["schemas"]["PercentTipIn"] | components["schemas"]["CustomTipIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TipCreateOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers tip. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id, or no job on it. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description tip_not_available: the job was never confirmed (under way, disputed, refunded, cancelled) or its tip window closed; tip_already_paid: the tip succeeded; tip_in_progress: its payment is processing, or another change of the tip is under way. Nothing changed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description tip_percent_not_offered: the percent is not one of the job's presets; tip_amount_out_of_range: the amount, or what the percent comes to, is outside the job's bounds; validation_error: a malformed id or body. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payments_error: Stripe refused the call; nothing changed, try again. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_configured: payments are not configured; payments_unavailable: Stripe is not reachable or asked to retry later; nothing changed, retry later. */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
