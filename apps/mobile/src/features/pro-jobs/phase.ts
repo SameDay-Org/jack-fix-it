@@ -58,6 +58,20 @@ export const soonestFirst = (jobs: readonly ProJob[]): ProJob[] =>
       (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
   );
 
+/**
+ * A job's status pill: its step's words (`proJobs.status.<label>`) and tone, except a reported
+ * job, which reads "Under review" while the report is open (#469): its step stays `done`, since
+ * the pro has nothing to act on but the reply.
+ */
+export function jobChip(job: Pick<ProJob, "status" | "checked_in_at" | "arrival_code_locked">): {
+  label: JobStep | "underReview";
+  tone: StatusTone;
+} {
+  if (job.status === "disputed") return { label: "underReview", tone: "warning" };
+  const step = jobStep(job);
+  return { label: step, tone: STEP_TONE[step] };
+}
+
 /** The tone of each step's status pill; its words are `proJobs.status.<step>`. */
 export const STEP_TONE: Record<JobStep, StatusTone> = {
   scheduled: "info",

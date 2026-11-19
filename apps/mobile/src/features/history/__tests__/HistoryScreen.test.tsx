@@ -30,11 +30,8 @@ import {
   type RequestSummary,
 } from "../useMyRequests";
 
-jest.mock("@/api", () => ({
-  ...jest.requireActual("../../../api/errors"),
-  apiGet: jest.fn(),
-  useSession: jest.fn(),
-}));
+// The pro-jobs suites' `@/api`: a pro's History reads their jobs with the session's generation.
+jest.mock("@/api", () => jest.requireActual("../../pro-jobs/__tests__/helpers").apiMock());
 jest.mock("expo-router", () => {
   const { routerMock } = jest.requireActual("../../opportunities/__tests__/helpers");
   return {
@@ -108,6 +105,7 @@ function answer<T>(queue: Answer<T>[]): Promise<T> {
   return Promise.resolve(next as T | Promise<T>);
 }
 
+const PRO_JOBS = "/v1/pros/me/jobs";
 const listCalls = () => jest.mocked(apiGet).mock.calls.filter(([path]) => path === LIST);
 const rowIds = () => screen.queryAllByTestId(ROW_ID).map((row) => row.props.testID as string);
 const rowOf = (item: RequestSummary) => `request-${item.id}`;
@@ -471,23 +469,33 @@ describe("HistoryScreen, customer: the requests (#47)", () => {
   });
 });
 
-describe("HistoryScreen, pro and staff: unchanged until their jobs land", () => {
-  it("pro: the jobs copy and the way to Home, as one screen; no request list asked for", async () => {
+describe("HistoryScreen, pro and staff", () => {
+  // A pro's History lists their jobs (#467; the list itself: ProJobList.test.tsx).
+  const proJobsAnswer = () =>
+    jest
+      .mocked(apiGet)
+      .mockImplementation(((path: string) =>
+        path === PRO_JOBS
+          ? Promise.resolve({ items: [], next_cursor: null })
+          : answer(answers.catalog)) as unknown as typeof apiGet);
+
+  it("pro: their jobs, and with none the jobs copy and the way to Home; no request list asked for", async () => {
     signedInAs("pro");
+    proJobsAnswer();
     await renderWithQuery(<HistoryScreen />);
 
     expect(screen.getByRole("header", { name: "Your jobs" })).toBeTruthy();
-    expect(screen.getByText("Jobs you're hired for will show up here.")).toBeTruthy();
+    expect(await screen.findByText("Jobs you're hired for will show up here.")).toBeTruthy();
     const shadowed = screen
       .getByTestId("history-screen")
       .queryAll((node) => StyleSheet.flatten(node.props.style)?.shadowRadius !== undefined);
     expect(shadowed).toEqual([]);
     await fireEvent.press(screen.getByRole("button", { name: "Go to Home" }));
     expect(router.navigate).toHaveBeenCalledWith("/");
-    expect(apiGet).not.toHaveBeenCalled();
+    expect(jest.mocked(apiGet).mock.calls.map(([path]) => path)).toEqual([PRO_JOBS]);
   });
 
-  it("staff read the pro copy", async () => {
+  it("staff read the pro copy and ask for nothing: they have no jobs of their own", async () => {
     signedInAs("agent");
     await renderWithQuery(<HistoryScreen />);
 
@@ -497,11 +505,12 @@ describe("HistoryScreen, pro and staff: unchanged until their jobs land", () => 
 
   it("Spanish", async () => {
     signedInAs("pro");
+    proJobsAnswer();
     await act(() => i18n.changeLanguage("es"));
     await renderWithQuery(<HistoryScreen />);
 
     expect(screen.getByRole("header", { name: "Tus trabajos" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Ir a Inicio" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Ir a Inicio" })).toBeTruthy();
   });
 
   it("renders nothing without a user", async () => {

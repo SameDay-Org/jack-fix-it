@@ -1,4 +1,13 @@
-import { queryOptions, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import {
+  infiniteQueryOptions,
+  queryOptions,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+  type QueryClient,
+} from "@tanstack/react-query";
+import { useIsFocused } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -11,11 +20,19 @@ import {
   useSession,
   useSessionGeneration,
 } from "@/api";
+import { useInForeground } from "@/features/jobs/api";
+import { jobsConfig } from "@/features/jobs/config";
 import { isUuid } from "@/features/quotes/navigation";
 import { useRefetchOnReturn } from "@/features/quotes/useRequestQuotes";
 
 import type { CheckInPosition } from "./location";
-import { isActiveJob, soonestFirst, type JobPhotoKind, type ProJob } from "./phase";
+import {
+  isActiveJob,
+  soonestFirst,
+  type JobPhotoKind,
+  type ProJob,
+  type ProJobPage,
+} from "./phase";
 import { followJob } from "./sharing/sender";
 
 const PRO_JOBS = "pro-jobs";
@@ -28,6 +45,11 @@ const PRO_JOBS = "pro-jobs";
 export const proJobsQueryKey = (generation: number) => [PRO_JOBS, "active", generation] as const;
 export const proJobQueryKey = (jobId: string, generation: number) =>
   [PRO_JOBS, "job", jobId, generation] as const;
+/** History's list: every job of the pro, a page per `next_cursor`. */
+export const proJobHistoryQueryKey = (generation: number) =>
+  [PRO_JOBS, "history", generation] as const;
+/** Rows per History page: the API's own default, asked for explicitly so the two never drift. */
+export const PRO_JOB_HISTORY_PAGE_SIZE = 20;
 
 /** The job screen's link (the deep link #65's pushes use, `/jobs/<id>`). */
 export const proJobHref = (jobId: string) =>
@@ -77,6 +99,47 @@ export const proJobQueryOptions = (jobId: string, generation: number) =>
     retry: false,
   });
 
+type Cursor = string | undefined;
+
+/** Every job of the pro (active, done, reported, cancelled), newest start first as the API pages. */
+export const proJobHistoryQueryOptions = (generation: number) =>
+  infiniteQueryOptions({
+    queryKey: proJobHistoryQueryKey(generation),
+    queryFn: ({ pageParam, signal }) =>
+      apiGet("/v1/pros/me/jobs", {
+        auth: true,
+        signal,
+        generation,
+        query: { limit: PRO_JOB_HISTORY_PAGE_SIZE, cursor: pageParam },
+      }),
+    initialPageParam: undefined as Cursor,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    retry: false,
+  });
+
+/** The pro's History (#467), asked for while a pro is signed in. */
+export function useProJobHistory() {
+  const generation = useSessionGeneration();
+  const { status, user } = useSession();
+  const enabled = status === "signedIn" && user?.role === "pro";
+  return useInfiniteQuery({ ...proJobHistoryQueryOptions(generation), enabled });
+}
+
+/** The rows of every loaded page, in order, each job once (the first copy stays). */
+export function flattenProJobs(data: InfiniteData<ProJobPage, unknown> | undefined): ProJob[] {
+  const seen = new Set<string>();
+  const rows: ProJob[] = [];
+  for (const job of data?.pages.flatMap((page) => page.items) ?? []) {
+    if (seen.has(job.id)) continue;
+    seen.add(job.id);
+    rows.push(job);
+  }
+  return rows;
+}
+
+/** A job waiting on someone else: the customer's confirmation, or staff on an open report. */
+const WAITING: readonly ProJob["status"][] = ["completed", "disputed"];
+
 /**
  * "Your jobs" on the pro's home: asked for while a pro is signed in, and again when the home
  * comes back into focus or the app to the foreground (once per screen: a second reader of the same
@@ -99,18 +162,29 @@ export function useProJobs({ refetchOnReturn = true }: { refetchOnReturn?: boole
 
 /**
  * One of the pro's jobs. It draws at once from "Your jobs" when the list holds it, then asks the
- * API (on open, on focus, on foreground). An id that is not a UUID asks nothing and reads as not
- * found, as the API would answer.
+ * API (on open, on focus, on foreground), and every `jobsConfig.pollMs` while the screen is
+ * focused, the app in the foreground and the job waits on someone else (#469): the customer's
+ * confirmation, or staff resolving a report. An id that is not a UUID asks nothing and reads as
+ * not found, as the API would answer.
  */
 export function useProJob(jobId: string) {
   const client = useQueryClient();
   const generation = useSessionGeneration();
   const signedIn = useSession().status === "signedIn";
+  const focused = useIsFocused();
+  const foreground = useInForeground();
   const valid = isUuid(jobId);
   const enabled = signedIn && valid;
+  const polling = enabled && focused && foreground;
   const query = useQuery({
     ...proJobQueryOptions(jobId, generation),
     enabled,
+    refetchInterval: (current) => {
+      const status = current.state.data?.status;
+      return polling && status !== undefined && WAITING.includes(status)
+        ? jobsConfig.pollMs
+        : false;
+    },
     initialData: () =>
       client.getQueryData<ProJob[]>(proJobsQueryKey(generation))?.find((job) => job.id === jobId),
     initialDataUpdatedAt: () => client.getQueryState(proJobsQueryKey(generation))?.dataUpdatedAt,
@@ -138,6 +212,8 @@ function applyJob(client: QueryClient, job: ProJob, generation: number): void {
   if (!isCurrentGeneration(generation)) return;
   void followJob(job);
   client.setQueryData(proJobQueryKey(job.id, generation), job);
+  // History lists the job too: read again (now if it is mounted, on its next mount otherwise).
+  void client.invalidateQueries({ queryKey: proJobHistoryQueryKey(generation) });
   const listKey = proJobsQueryKey(generation);
   const list = client.getQueryState<ProJob[]>(listKey);
   if (list && list.data === undefined && list.fetchStatus === "fetching") {
@@ -168,6 +244,7 @@ export function refreshJob(client: QueryClient, jobId: string, generation: numbe
   if (!isCurrentGeneration(generation)) return;
   void client.invalidateQueries({ queryKey: proJobQueryKey(jobId, generation) });
   void client.invalidateQueries({ queryKey: proJobsQueryKey(generation) });
+  void client.invalidateQueries({ queryKey: proJobHistoryQueryKey(generation) });
 }
 
 /**
