@@ -71,7 +71,13 @@ export function LandingFooter({
         </div>
         <div className="flex flex-col gap-6 border-t border-navy-700 pt-8 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm">{t("landing.footer.rights", { year })}</p>
-          <LanguageToggle t={t} locale={locale} paths={paths} className="self-start" />
+          <LanguageToggle
+            t={t}
+            locale={locale}
+            paths={paths}
+            label={t("site.language.footerLabel")}
+            className="self-start"
+          />
         </div>
       </div>
     </footer>

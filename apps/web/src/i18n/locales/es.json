@@ -6,6 +6,7 @@
   "site": {
     "language": {
       "label": "Idioma",
+      "footerLabel": "Idioma (pie de página)",
       "en": "English",
       "es": "Español"
     }
@@ -375,6 +376,7 @@
       "body": "La app llega muy pronto a iPhone y Android."
     },
     "footer": {
+      "sectionsLabel": "Secciones de la página (pie de página)",
       "legalLabel": "Legal",
       "terms": "Términos de servicio",
       "privacy": "Política de privacidad",
