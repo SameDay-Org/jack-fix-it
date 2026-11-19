@@ -143,6 +143,7 @@ class CancellationService:
                 job_id=job.job_id,
                 job_status=job.status,
                 fee_applies=job.status is JobStatus.ON_THE_WAY,
+                fee_bps=self._config.fee_bps,
                 customer_total_cents=payment.customer_total_cents,
                 fee_cents=split.fee_cents,
                 refund_cents=split.refund_cents,

@@ -73,6 +73,10 @@ class RequestOut(BaseModel):
     category_id: uuid.UUID | None
     description: str
     address: AddressOut
+    address_id: uuid.UUID = Field(
+        description="The customer's own address the request uses (#69: Request again offers it "
+        "when it is still in their address book)."
+    )
     preferred_date: date | None
     preferred_period: PreferredPeriod | None = Field(
         description="Set whenever preferred_date is; null without one."

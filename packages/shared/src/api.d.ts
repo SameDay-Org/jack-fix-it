@@ -2108,6 +2108,11 @@ export interface components {
              */
             fee_applies: boolean;
             /**
+             * Fee Bps
+             * @description The fee's rate once the pro is on the way, in basis points of the job price (1500 = 15%), from the server's setting: for the rule line, whether or not it applies now (fee_applies).
+             */
+            fee_bps: number;
+            /**
              * Customer Total Cents
              * @description What the customer paid, tax included.
              */
@@ -2671,11 +2676,38 @@ export interface components {
              * @description What the customer paid: amount plus tax.
              */
             customer_total_cents: number;
+            /** @description Set once the job was cancelled (#69): who, why, when, the fee, the refund and where the refund stands. */
+            cancellation: components["schemas"]["CustomerJobCancellation"] | null;
             /**
              * Unread Messages
              * @description The pro's chat messages the customer has not marked read (#71).
              */
             unread_messages: number;
+        };
+        /**
+         * CustomerJobCancellation
+         * @description The cancellation of the customer's job, as their job view shows it.
+         */
+        CustomerJobCancellation: {
+            cancelled_by: components["schemas"]["CancelParty"];
+            reason_code: components["schemas"]["CancelReason"];
+            /**
+             * Cancelled At
+             * Format: date-time
+             */
+            cancelled_at: string;
+            /**
+             * Fee Cents
+             * @description Kept by the platform: 0 when cancelled before On my way.
+             */
+            fee_cents: number;
+            /**
+             * Refund Cents
+             * @description Given back to the original payment method.
+             */
+            refund_cents: number;
+            /** @description none, pending, succeeded or failed, as on the cancel's answer. */
+            refund_status: components["schemas"]["CancelRefundState"];
         };
         /**
          * CustomerJobPhotos
@@ -4075,6 +4107,8 @@ export interface components {
              * @description What the pro receives for the job.
              */
             pro_payout_cents: number;
+            /** @description Set once the job was cancelled (#69): who, why and when. */
+            cancellation: components["schemas"]["ProJobCancellation"] | null;
             /** @description The transfer of that amount to the pro's account: null until the job is confirmed (and for a job that was never confirmed, or whose transfer was reversed). */
             payout: components["schemas"]["JobPayout"] | null;
             /**
@@ -4082,6 +4116,20 @@ export interface components {
              * @description The customer's chat messages the pro has not marked read (#71).
              */
             unread_messages: number;
+        };
+        /**
+         * ProJobCancellation
+         * @description The cancellation of the pro's job, as their job view shows it: who, why and when; never
+         *     the money or the note.
+         */
+        ProJobCancellation: {
+            cancelled_by: components["schemas"]["CancelParty"];
+            reason_code: components["schemas"]["CancelReason"];
+            /**
+             * Cancelled At
+             * Format: date-time
+             */
+            cancelled_at: string;
         };
         /** ProJobPage */
         ProJobPage: {
@@ -4857,6 +4905,12 @@ export interface components {
             /** Description */
             description: string;
             address: components["schemas"]["AddressOut"];
+            /**
+             * Address Id
+             * Format: uuid
+             * @description The customer's own address the request uses (#69: Request again offers it when it is still in their address book).
+             */
+            address_id: string;
             /** Preferred Date */
             preferred_date: string | null;
             /** @description Set whenever preferred_date is; null without one. */

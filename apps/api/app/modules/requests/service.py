@@ -392,6 +392,7 @@ class ServiceRequestService:
             category_id=request.category_id,
             description=request.description,
             address=address,
+            address_id=request.address_id,
             preferred_date=request.preferred_date,
             preferred_period=request.preferred_period,
             intake_answers=request.intake_answers,

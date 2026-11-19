@@ -182,6 +182,7 @@ async def test_a_customer_cancel_refunds_the_payment_minus_the_fee_once_the_pro_
         "job_id": str(job_id),
         "job_status": status.value,
         "fee_applies": fee > 0,
+        "fee_bps": 1500,
         "customer_total_cents": TOTAL,
         "fee_cents": fee,
         "refund_cents": TOTAL - fee,
@@ -676,3 +677,47 @@ async def test_a_lookup_stripe_refuses_is_no_answer_to_the_create(
     [row] = await refund_rows(db_session, job_id)
     assert (row.status, row.stripe_status) == (RefundStatus.CREATED, "succeeded")
     assert len(refunds.creates) == 1
+
+
+# --- What each side reads afterwards ------------------------------------------------------
+
+
+async def test_both_sides_read_the_cancellation_with_the_job(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+) -> None:
+    """The customer's job view carries the split and the refund's state; the pro's (one job
+    and the list) who cancelled, why and when, never the money or the note. Before the cancel,
+    neither carries one. The request's own view names its address for Request again."""
+    job_id = await booked(db_session, world, JobStatus.ON_THE_WAY)
+    request_id = (await job_row(db_session, job_id)).request_id
+    customer_path = f"/v1/requests/{request_id}/job"
+    before = await db_client.get(customer_path, headers=world.customer.headers)
+    assert before.status_code == 200, before.text
+    assert before.json()["cancellation"] is None
+    assert (await cancel(db_client, world, job_id, note=NOTE)).status_code == 200
+
+    customer = await db_client.get(customer_path, headers=world.customer.headers)
+    one = await db_client.get(f"/v1/pros/me/jobs/{job_id}", headers=world.pro.headers)
+    listed = await db_client.get(
+        "/v1/pros/me/jobs", params={"active": "false"}, headers=world.pro.headers
+    )
+    request = await db_client.get(f"/v1/requests/{request_id}", headers=world.customer.headers)
+
+    seen = customer.json()["cancellation"]
+    assert {k: seen[k] for k in seen if k != "cancelled_at"} == {
+        "cancelled_by": "customer",
+        "reason_code": "changed_my_mind",
+        "fee_cents": FEE,
+        "refund_cents": TOTAL - FEE,
+        "refund_status": "pending",
+    }
+    assert one.status_code == listed.status_code == 200, (one.text, listed.text)
+    [item] = [job for job in listed.json()["items"] if job["id"] == str(job_id)]
+    assert one.json()["cancellation"] == item["cancellation"]
+    assert set(item["cancellation"]) == {"cancelled_by", "reason_code", "cancelled_at"}
+    assert item["cancellation"]["cancelled_by"] == "customer"
+    assert item["cancellation"]["cancelled_at"] == seen["cancelled_at"]
+    assert NOTE not in one.text
+    assert request.json()["address_id"] == str(world.address_id)

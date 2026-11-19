@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Collection
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,13 @@ class CancellationRepository:
             .execution_options(populate_existing=True)
         )
         return (await self._session.scalars(statement)).one_or_none()
+
+    async def of_jobs(self, job_ids: Collection[uuid.UUID]) -> list[JobCancellation]:
+        """The cancellations among these jobs, in one statement."""
+        if not job_ids:
+            return []
+        statement = select(JobCancellation).where(JobCancellation.job_id.in_(job_ids))
+        return list((await self._session.scalars(statement)).all())
 
     async def by_idempotency_key(
         self, user_id: uuid.UUID, key: uuid.UUID

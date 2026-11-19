@@ -8624,6 +8624,11 @@
             "title": "Fee Applies",
             "description": "The pro tapped On my way (or arrived): cancelling now costs a fee."
           },
+          "fee_bps": {
+            "type": "integer",
+            "title": "Fee Bps",
+            "description": "The fee's rate once the pro is on the way, in basis points of the job price (1500 = 15%), from the server's setting: for the rule line, whether or not it applies now (fee_applies)."
+          },
           "customer_total_cents": {
             "type": "integer",
             "title": "Customer Total Cents",
@@ -8653,6 +8658,7 @@
           "job_id",
           "job_status",
           "fee_applies",
+          "fee_bps",
           "customer_total_cents",
           "fee_cents",
           "refund_cents",
@@ -9794,6 +9800,17 @@
             "title": "Customer Total Cents",
             "description": "What the customer paid: amount plus tax."
           },
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CustomerJobCancellation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set once the job was cancelled (#69): who, why, when, the fee, the refund and where the refund stands."
+          },
           "unread_messages": {
             "type": "integer",
             "title": "Unread Messages",
@@ -9816,10 +9833,52 @@
           "amount_cents",
           "tax_cents",
           "customer_total_cents",
+          "cancellation",
           "unread_messages"
         ],
         "title": "CustomerJob",
         "description": "The customer's job on their request, once paid."
+      },
+      "CustomerJobCancellation": {
+        "properties": {
+          "cancelled_by": {
+            "$ref": "#/components/schemas/CancelParty"
+          },
+          "reason_code": {
+            "$ref": "#/components/schemas/CancelReason"
+          },
+          "cancelled_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Cancelled At"
+          },
+          "fee_cents": {
+            "type": "integer",
+            "title": "Fee Cents",
+            "description": "Kept by the platform: 0 when cancelled before On my way."
+          },
+          "refund_cents": {
+            "type": "integer",
+            "title": "Refund Cents",
+            "description": "Given back to the original payment method."
+          },
+          "refund_status": {
+            "$ref": "#/components/schemas/CancelRefundState",
+            "description": "none, pending, succeeded or failed, as on the cancel's answer."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cancelled_by",
+          "reason_code",
+          "cancelled_at",
+          "fee_cents",
+          "refund_cents",
+          "refund_status"
+        ],
+        "title": "CustomerJobCancellation",
+        "description": "The cancellation of the customer's job, as their job view shows it."
       },
       "CustomerJobPhotos": {
         "properties": {
@@ -12632,6 +12691,17 @@
             "title": "Pro Payout Cents",
             "description": "What the pro receives for the job."
           },
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProJobCancellation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set once the job was cancelled (#69): who, why and when."
+          },
           "payout": {
             "anyOf": [
               {
@@ -12667,11 +12737,36 @@
           "confirm_by",
           "photos",
           "pro_payout_cents",
+          "cancellation",
           "payout",
           "unread_messages"
         ],
         "title": "ProJob",
         "description": "The pro's own job. Never the arrival code, the customer's last name or contacts."
+      },
+      "ProJobCancellation": {
+        "properties": {
+          "cancelled_by": {
+            "$ref": "#/components/schemas/CancelParty"
+          },
+          "reason_code": {
+            "$ref": "#/components/schemas/CancelReason"
+          },
+          "cancelled_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Cancelled At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cancelled_by",
+          "reason_code",
+          "cancelled_at"
+        ],
+        "title": "ProJobCancellation",
+        "description": "The cancellation of the pro's job, as their job view shows it: who, why and when; never\nthe money or the note."
       },
       "ProJobPage": {
         "properties": {
@@ -14347,6 +14442,12 @@
           "address": {
             "$ref": "#/components/schemas/AddressOut"
           },
+          "address_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Address Id",
+            "description": "The customer's own address the request uses (#69: Request again offers it when it is still in their address book)."
+          },
           "preferred_date": {
             "anyOf": [
               {
@@ -14399,6 +14500,7 @@
           "category_id",
           "description",
           "address",
+          "address_id",
           "preferred_date",
           "preferred_period",
           "intake_answers",

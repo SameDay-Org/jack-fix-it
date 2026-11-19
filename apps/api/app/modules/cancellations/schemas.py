@@ -62,6 +62,11 @@ class CancelPreviewOut(_Out):
     fee_applies: bool = Field(
         description="The pro tapped On my way (or arrived): cancelling now costs a fee."
     )
+    fee_bps: int = Field(
+        description="The fee's rate once the pro is on the way, in basis points of the job "
+        "price (1500 = 15%), from the server's setting: for the rule line, whether or not it "
+        "applies now (fee_applies)."
+    )
     customer_total_cents: int = Field(description="What the customer paid, tax included.")
     fee_cents: int = Field(description="What cancelling now keeps: 0 before On my way.")
     refund_cents: int = Field(description="What cancelling now gives back: total minus fee.")
