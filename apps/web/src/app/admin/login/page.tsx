@@ -1,12 +1,20 @@
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { defaultLocale } from "@/i18n/config";
 import { getT } from "@/i18n/server";
+import { RETURN_PARAM, safeReturnPath } from "@/lib/return-path";
 
 import { LoginForm } from "./login-form";
 
-// Before sign-in the account's language is unknown: the panel's default language.
-export default async function LoginPage() {
+// Before sign-in the account's language is unknown: the panel's default language. The page a
+// signed-out staff member asked for (`?next=`) rides along in the form, if it is a panel path.
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const t = await getT(defaultLocale);
+  const requested = (await searchParams)[RETURN_PARAM];
+  const returnTo = safeReturnPath(typeof requested === "string" ? requested : null);
 
   return (
     <main className="flex min-h-dvh items-center justify-center bg-navy-900 px-4 py-10">
@@ -20,6 +28,7 @@ export default async function LoginPage() {
             <CardDescription>{t("admin.login.subtitle")}</CardDescription>
           </div>
           <LoginForm
+            returnTo={returnTo}
             text={{
               email: t("admin.login.email"),
               password: t("admin.login.password"),
