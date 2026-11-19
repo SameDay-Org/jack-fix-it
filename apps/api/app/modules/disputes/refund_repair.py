@@ -28,9 +28,13 @@ must be failed or canceled. A listing with further pages, or one Stripe cannot g
 nothing. Applied, Stripe is read again, then everything above is checked again under the job's
 lock, the dispute's and the row's (the row must be as the read saw it), and the row is abandoned
 with its audit row (AuditService.record: an active admin, the money path) in one transaction. A
-confirmed attempt that is refused, or cannot finish (Stripe unavailable), writes an audit row
-of its outcome (dispute.refund_abandon_refused: a fixed code, no provider text) before the
-refusal is answered. No lock or transaction is held across a Stripe call. Logs carry ids only.
+confirmed attempt that is refused, or cannot finish (Stripe unavailable, or the operator no
+longer an active admin when the change is recorded), writes an audit row of its outcome
+(dispute.refund_abandon_refused: a fixed code, no provider text) in a transaction of its own
+before the refusal is answered: through AuditService.record_outcome, which records the outcome
+of the attempt the operator was checked for when the script started, whatever their role is now
+(#450 round 2). It never authorizes anything: the repair stays rolled back. No lock or
+transaction is held across a Stripe call. Logs carry ids only.
 """
 
 import logging
@@ -45,7 +49,14 @@ from app.errors import NotFoundError
 from app.integrations.stripe_errors import StripeCallError
 from app.integrations.stripe_refunds import StripeRefunds
 from app.modules.audit.service import AuditService
-from app.modules.audit.types import AuditAction, AuditEntity, AuditEntityType, AuditState, Operator
+from app.modules.audit.types import (
+    AuditAction,
+    AuditEntity,
+    AuditEntityType,
+    AuditState,
+    Operator,
+    OperatorNotAdminError,
+)
 from app.modules.disputes.errors import DisputeNeedsReviewError, RefundRepairRefusedError
 from app.modules.disputes.models import DisputeStatus
 from app.modules.disputes.resolution import RefundSettlement
@@ -108,7 +119,8 @@ class DisputeRefundRepair:
     async def abandon(self, dispute_id: uuid.UUID, operator: Operator, *, apply: bool) -> None:
         """Gives the dispute's refund up (see the module doc). Ends every transaction it opens;
         RefundRepairRefusedError on a refusal, PaymentsNotConfiguredError without Stripe,
-        StripeCallError when Stripe cannot be read. Applied, a refusal is audited first."""
+        StripeCallError when Stripe cannot be read, OperatorNotAdminError when the operator lost
+        admin before the change was recorded. Applied, a refusal is audited first."""
         refund_id: uuid.UUID | None = None
         try:
             if not self._enabled:
@@ -148,7 +160,12 @@ class DisputeRefundRepair:
                 "dispute_refund_abandoned",
                 extra={**target.refund.ids, "operator_id": str(operator.user_id)},
             )
-        except (RefundRepairRefusedError, StripeCallError, PaymentsNotConfiguredError) as error:
+        except (
+            RefundRepairRefusedError,
+            StripeCallError,
+            PaymentsNotConfiguredError,
+            OperatorNotAdminError,
+        ) as error:
             await self._session.rollback()
             if apply:
                 await self._audit_refusal(dispute_id, operator, refund_id, error)
@@ -164,19 +181,24 @@ class DisputeRefundRepair:
         error: Exception,
     ) -> None:
         """A confirmed attempt that did not abandon: its outcome code on record (no provider
-        text), committed before the refusal is answered."""
+        text), committed in a transaction of its own before the refusal is answered. Recorded
+        for the operator the script checked when it started, with no role check now: one who
+        lost admin since is refused, and that refusal is recorded too (#450 round 2)."""
         if isinstance(error, RefundRepairRefusedError):
             outcome = error.code
         elif isinstance(error, PaymentsNotConfiguredError):
             outcome = "stripe_not_configured"
+        elif isinstance(error, OperatorNotAdminError):
+            outcome = "operator_not_admin"
         else:
             outcome = "stripe_unavailable"
-        await self._audit.record(
-            operator,
+        await self._audit.record_outcome(
+            operator.user_id,
             AuditAction.DISPUTE_REFUND_ABANDON_REFUSED,
             AuditEntity(AuditEntityType.DISPUTE, dispute_id),
             {},
             {"outcome": outcome, "refund_id": None if refund_id is None else str(refund_id)},
+            reason=operator.reason,
         )
         await self._session.commit()
         logger.warning(

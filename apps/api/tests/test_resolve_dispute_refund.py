@@ -23,8 +23,10 @@ from app.integrations.stripe_refunds import FoundRefunds, RefundFacts, get_strip
 from app.modules.audit.models import AuditLog
 from app.modules.disputes.models import DisputeStatus
 from app.modules.payments.models import Payment, Refund, RefundStatus
+from app.modules.payments.transfer_tasks import release_confirmed_jobs
 from app.modules.payments.transfers import ReleaseOutcome, TransferConfig, TransferService
-from app.modules.users.types import UserRole
+from app.modules.users.models import User
+from app.modules.users.types import UserRole, UserStatus
 from scripts.resolve_dispute_refund import Io, run
 from scripts.staff_operator import NOT_AN_ADMIN
 from tests.audit_helpers import OPERATOR_DOMAIN, OPERATOR_EMAIL, make_staff
@@ -40,6 +42,7 @@ from tests.test_dispute_resolution_api import (
     deliver,
     dispute_row,
     disputed,
+    queued_release,
     refund_event,
     refund_rows,
     resolve,
@@ -52,7 +55,7 @@ from tests.test_dispute_resolution_api import queue as queue
 from tests.test_dispute_resolution_api import refunds as refunds
 from tests.test_dispute_resolution_api import world as world
 from tests.test_disputes_api import RecordingQueue
-from tests.test_transfers import FakeStripeTransfers
+from tests.test_transfers import FakeStripeTransfers, worker_ctx
 
 REASON: Final = "zq434 ticket 77"
 
@@ -584,3 +587,224 @@ async def test_an_event_for_an_abandoned_refund_settles_nothing(
         r for r in caplog.records if r.getMessage() == "refund_event_abandoned_refund_succeeded"
     ]
     assert error.levelno == logging.ERROR
+
+
+# --- Round 2: a failed lookup is no answer to the create (B2a) ----------------------------------
+
+
+@pytest.mark.parametrize("retry", ["api_key_expired", "parameter_invalid", "create_refused"])
+async def test_only_the_create_s_own_refusal_makes_a_refund_abandonable(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    refunds: FakeStripeRefunds,
+    settings: Settings,
+    caplog: pytest.LogCaptureFixture,
+    retry: str,
+) -> None:
+    """The first create's answer is lost (a timeout). The retry first lists the payment's
+    refunds: a 4xx to that lookup says nothing about the first create, which may still have
+    made a refund, so the row stays uncertain and the repair refuses. Only Stripe's refusal of
+    the create itself is definitive."""
+    case = await disputed(db_session, world)
+    refunds.errors["create"] = [StripeUnavailableError(request_id="req_timeout")]
+    assert (await resolve(db_client, world, case, "refund")).status_code == 503
+    if retry == "create_refused":
+        refunds.errors["create"] = [StripeRejectedError(code="charge_disputed")]
+    else:
+        refunds.errors["list"] = [StripeRejectedError(code=retry)]
+    assert (await resolve(db_client, world, case, "refund")).status_code == 502
+
+    [row] = await refund_rows(db_session, case)
+    expected_code = "charge_disputed" if retry == "create_refused" else retry
+    assert (row.status, row.attempts, row.last_error_code) == (
+        RefundStatus.FAILED,
+        2,
+        expected_code,
+    )
+    assert row.last_error_definitive is (retry == "create_refused")
+
+    code, terminal = await abandon(db_session, settings, refunds, case, caplog)
+
+    if retry == "create_refused":
+        assert code == 0, terminal.text
+        [row] = await refund_rows(db_session, case)
+        assert row.status is RefundStatus.ABANDONED
+    else:
+        assert code == 1
+        assert "is not final" in terminal.text
+        [row] = await refund_rows(db_session, case)
+        assert row.status is RefundStatus.FAILED
+        assert await abandon_rows(db_session, case) == []
+
+
+# --- Round 2: a late refund holds the payout (B2b) ----------------------------------------------
+
+
+async def reconcile_flag(
+    client: httpx.AsyncClient, world: JobWorld, case: Case
+) -> tuple[bool, bool]:
+    """refund_needs_reconciliation as the staff list and the detail show it."""
+    listed = await client.get("/v1/admin/disputes", headers=world.agent.headers)
+    detail = await client.get(f"/v1/admin/disputes/{case.dispute_id}", headers=world.agent.headers)
+    [item] = [d for d in listed.json()["disputes"] if d["id"] == str(case.dispute_id)]
+    return item["refund_needs_reconciliation"], detail.json()["refund_needs_reconciliation"]
+
+
+def late_refund_event(case: Case, refund_id: str) -> Any:
+    """A signed refund.updated for a refund no row holds that names the dispute."""
+    base = refund_event("refund.updated", refund_id, "succeeded")
+    named = {"id": refund_id, "object": "refund", "metadata": {"dispute_id": str(case.dispute_id)}}
+    return dataclasses.replace(base, payload={**base.payload, "data": {"object": named}})
+
+
+@pytest.mark.parametrize(
+    ("when", "late_status"),
+    [
+        ("release_queued_before", "succeeded"),
+        ("release_queued_before", "pending"),
+        ("open_then_released", "succeeded"),
+        ("release_queued_before", "failed"),
+    ],
+)
+async def test_a_refund_stripe_made_after_the_abandon_holds_the_payout_for_staff(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+    settings: Settings,
+    caplog: pytest.LogCaptureFixture,
+    when: str,
+    late_status: str,
+) -> None:
+    """Staff abandoned the refund, then Stripe shows a refund for the dispute that no row
+    holds (made or still under way). Whether an admin released the dispute before the event
+    (its transfer queued, not made yet) or after it, the payout stays held: at the queued task's
+    own check and in the sweep. Staff see it; a repeated event changes nothing. A late refund
+    Stripe failed moved no money and holds nothing."""
+    case = await refused_by_stripe(db_client, db_session, world, refunds)
+    clock.now += timedelta(minutes=1)
+    assert (await abandon(db_session, settings, refunds, case, caplog))[0] == 0
+    if when == "release_queued_before":
+        assert (await resolve(db_client, world, case, "release")).status_code == 200
+        assert queued_release(queue, case)
+    late = RefundFacts("re_probe76late", TOTAL, "usd", str(case.dispute_id), late_status, None)
+    refunds.add(late, case.payment_intent_id)
+
+    await deliver(db_session, refunds, queue, late_refund_event(case, late.refund_id))
+    [row] = await refund_rows(db_session, case)
+    first_seen = row.late_refund_seen_at
+    # Stripe's retry of the same event: nothing more is written.
+    clock.now += timedelta(minutes=5)
+    await deliver(db_session, refunds, queue, late_refund_event(case, late.refund_id))
+
+    if when == "open_then_released":
+        assert (await dispute_row(db_session, case)).status is DisputeStatus.OPEN
+        assert (await resolve(db_client, world, case, "release")).status_code == 200
+    held = late_status != "failed"
+    [row] = await refund_rows(db_session, case)
+    assert row.status is RefundStatus.ABANDONED
+    assert (row.late_refund_seen_at is not None) is held
+    assert row.late_refund_seen_at == first_seen
+    assert await reconcile_flag(db_client, world, case) == (held, held)
+    stripe = FakeStripeTransfers()
+    # The queued task, run now: the hold is checked when it runs, not when it was queued.
+    service = TransferService(db_session, stripe, TransferConfig(STUCK), clock)
+    outcome = await service.release(case.job_id)
+    if held:
+        assert outcome is ReleaseOutcome.HELD
+        # The sweep leaves it out too.
+        await release_confirmed_jobs(worker_ctx(db_session, stripe))
+        assert stripe.creates == []
+        alarms = {"refund_event_abandoned_refund_succeeded", "refund_event_unrecorded_refund"}
+        errors = [r for r in caplog.records if r.getMessage() in alarms]
+        # One per delivery, each naming the hold.
+        assert [(r.levelno, r.__dict__["payout_held"]) for r in errors] == [
+            (logging.ERROR, "true")
+        ] * 2
+    else:
+        assert outcome is ReleaseOutcome.CREATED
+
+
+async def test_an_abandoned_refund_stripe_shows_live_again_holds_the_payout(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+    settings: Settings,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The abandoned row's own Stripe refund, read again after its event, is no longer failed
+    or canceled: the payout of a release decided since stays held."""
+    case = await disputed(db_session, world)
+    refunds.status = "canceled"
+    assert (await resolve(db_client, world, case, "refund")).status_code == 409
+    [made] = refunds.refunds.values()
+    clock.now += timedelta(minutes=1)
+    assert (await abandon(db_session, settings, refunds, case, caplog))[0] == 0
+    assert (await resolve(db_client, world, case, "release")).status_code == 200
+    refunds.set_status(made.refund_id, "pending")
+
+    await deliver(db_session, refunds, queue, refund_event("refund.updated", made.refund_id, "x"))
+
+    [row] = await refund_rows(db_session, case)
+    assert (row.status, row.late_refund_seen_at is not None) == (RefundStatus.ABANDONED, True)
+    stripe = FakeStripeTransfers()
+    service = TransferService(db_session, stripe, TransferConfig(STUCK), clock)
+    assert await service.release(case.job_id) is ReleaseOutcome.HELD
+    assert stripe.creates == []
+    [error] = [r for r in caplog.records if r.getMessage() == "refund_event_abandoned_refund_live"]
+    assert error.levelno == logging.ERROR
+
+
+# --- Round 2: an operator who loses admin at the apply (B4) -------------------------------------
+
+
+@pytest.mark.parametrize("loss", ["demoted", "suspended"])
+async def test_an_operator_who_loses_admin_during_the_apply_is_refused_and_audited(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    settings: Settings,
+    operator: uuid.UUID,
+    caplog: pytest.LogCaptureFixture,
+    loss: str,
+) -> None:
+    """The operator was an active admin when the script started and confirmed; during the
+    apply's Stripe read they are demoted or suspended. The abandon is refused and rolled back,
+    and the refusal is on record for them (operator_not_admin) before the script answers 1."""
+    stripe = ListingFake()
+    app.dependency_overrides[get_stripe_refunds] = lambda: stripe
+    case = await refused_by_stripe(db_client, db_session, world, stripe)
+    lists = 0
+
+    async def lose_admin_at_apply() -> None:
+        nonlocal lists
+        lists += 1
+        if lists == 2:  # the apply's own read
+            values: dict[str, Any] = (
+                {"role": UserRole.AGENT} if loss == "demoted" else {"status": UserStatus.SUSPENDED}
+            )
+            await db_session.execute(update(User).where(User.id == operator).values(**values))
+            await db_session.commit()
+
+    stripe.on_list = lose_admin_at_apply
+
+    code, terminal = await abandon(db_session, settings, stripe, case, caplog)
+
+    assert code == 1
+    assert NOT_AN_ADMIN in terminal.text
+    [row] = await refund_rows(db_session, case)
+    assert row.status is RefundStatus.FAILED
+    assert await abandon_rows(db_session, case) == []
+    [refused] = await refused_rows(db_session, case)
+    assert (refused.actor_user_id, refused.after, refused.reason) == (
+        operator,
+        {"outcome": "operator_not_admin", "refund_id": str(row.id)},
+        REASON,
+    )

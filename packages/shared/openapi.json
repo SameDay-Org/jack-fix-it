@@ -15258,6 +15258,11 @@
             "title": "Refund Failed",
             "description": "Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it."
           },
+          "refund_needs_reconciliation": {
+            "type": "boolean",
+            "title": "Refund Needs Reconciliation",
+            "description": "Stripe shows a refund made (or still under way) for this dispute that its abandoned or failed refund records do not hold (#450 round 2): money may have gone back outside the records, so any payout of the job stays held until staff reconcile it in Stripe and clear the hold (docs/stripe-money.md). Never cleared on its own."
+          },
           "description": {
             "type": "string",
             "title": "Description",
@@ -15382,6 +15387,7 @@
           "opened_at",
           "resolved_at",
           "refund_failed",
+          "refund_needs_reconciliation",
           "description",
           "pro_reply",
           "pro_replied_at",
@@ -15530,6 +15536,11 @@
             "type": "boolean",
             "title": "Refund Failed",
             "description": "Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it."
+          },
+          "refund_needs_reconciliation": {
+            "type": "boolean",
+            "title": "Refund Needs Reconciliation",
+            "description": "Stripe shows a refund made (or still under way) for this dispute that its abandoned or failed refund records do not hold (#450 round 2): money may have gone back outside the records, so any payout of the job stays held until staff reconcile it in Stripe and clear the hold (docs/stripe-money.md). Never cleared on its own."
           }
         },
         "additionalProperties": false,
@@ -15551,7 +15562,8 @@
           "currency",
           "opened_at",
           "resolved_at",
-          "refund_failed"
+          "refund_failed",
+          "refund_needs_reconciliation"
         ],
         "title": "StaffDisputeSummary",
         "description": "One line of the staff list."

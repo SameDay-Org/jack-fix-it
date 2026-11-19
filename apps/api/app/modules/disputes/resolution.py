@@ -86,7 +86,6 @@ from app.config import Settings
 from app.errors import ForbiddenError, NotFoundError
 from app.integrations.stripe_errors import (
     StripeCallError,
-    StripeRejectedError,
     StripeUnavailableError,
 )
 from app.integrations.stripe_refunds import RefundFacts, StripeRefunds
@@ -133,6 +132,7 @@ from app.modules.payments.refunds import (
     PaymentFacts,
     RefundAttempt,
     RefundBlocked,
+    RefundCreateRejectedError,
     RefundDecision,
     RefundLedger,
     RefundNeedsReviewError,
@@ -648,8 +648,10 @@ class DisputeResolver:
                 started,
                 error.code or type(error).__name__,
                 "unavailable" if unavailable else "rejected",
-                # Stripe's definitive answer: a 4xx with its code (stripe_errors.raise_typed).
-                definitive=isinstance(error, StripeRejectedError) and error.code is not None,
+                # Stripe's definitive answer: a 4xx with its code (stripe_errors.raise_typed)
+                # to the create itself. A failed lookup or read leaves the create uncertain
+                # (#450 round 2): it never makes the refund abandonable.
+                definitive=isinstance(error, RefundCreateRejectedError) and error.code is not None,
             )
             logger.error(
                 "dispute_refund_stripe_unavailable"

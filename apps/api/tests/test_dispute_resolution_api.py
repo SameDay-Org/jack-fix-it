@@ -22,7 +22,7 @@ import httpx
 import pytest
 from arq import Retry
 from fastapi import FastAPI
-from sqlalchemy import URL, delete, select, text, update
+from sqlalchemy import URL, delete, func, select, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -34,7 +34,8 @@ from app.integrations.stripe_refunds import FoundRefunds, RefundFacts, get_strip
 from app.modules.addresses.models import Address
 from app.modules.audit.models import AuditLog
 from app.modules.audit.service import AuditService
-from app.modules.audit.types import AuditAction
+from app.modules.audit.types import AuditAction, Operator
+from app.modules.disputes.errors import RefundRepairRefusedError
 from app.modules.disputes.models import (
     Dispute,
     DisputePhoto,
@@ -42,6 +43,7 @@ from app.modules.disputes.models import (
     DisputeResolution,
     DisputeStatus,
 )
+from app.modules.disputes.refund_repair import DisputeRefundRepair
 from app.modules.disputes.refund_webhooks import (
     REFUND_EVENT_TYPES,
     RefundEventMalformedError,
@@ -1495,6 +1497,96 @@ async def test_a_second_admin_waits_for_the_first_ones_lock_and_one_decision_win
     assert status is DisputeStatus.OPEN
     # One attempt, the refund's: the release never reached Stripe.
     assert [(row.status, row.attempts) for row in rows] == [(RefundStatus.FAILED, 1)]
+
+
+async def test_a_create_still_in_flight_is_never_abandoned_after_a_failed_lookup(
+    committed_case: CommittedCase,
+) -> None:
+    """#450 round 2 B2a, on real commits: an admin's refund create is under way (its intent
+    committed, Stripe has not answered). Once it is old enough, a retry by the same decision
+    lists the payment's refunds and Stripe refuses that listing (a 4xx). That says nothing about
+    the first create: staff cannot abandon the refund, so no release can be decided either, and
+    when the first create comes back with the refund made, the refund decision settles."""
+    world = committed_case
+    stripe = FakeStripeRefunds()
+    inside = asyncio.Event()
+    go_on = asyncio.Event()
+
+    async def paused() -> None:
+        inside.set()
+        await go_on.wait()
+
+    async def first_create() -> str:
+        async with world.sessions() as session:
+            try:
+                await resolver(session, stripe).resolve(
+                    world.admin, world.case.dispute_id, REFUND, RecordingQueue()
+                )
+            except AppError as error:
+                return error.code
+            return "ok"
+
+    stripe.on_create = paused
+    first = asyncio.create_task(first_create())
+    outcomes: list[str] = []
+    try:
+        async with asyncio.timeout(10):
+            await inside.wait()
+        later = Clock(NOW + STUCK + timedelta(minutes=1))
+        # The retry, past the stuck window: its lookup is refused.
+        stripe.errors["list"] = [StripeRejectedError(code="api_key_expired")]
+        async with world.sessions() as session:
+            retry = DisputeResolver(session, stripe, ResolutionConfig(STUCK, 1.0), later)
+            with pytest.raises(PaymentsProviderError):
+                await retry.resolve(world.admin, world.case.dispute_id, REFUND, RecordingQueue())
+        async with world.sessions() as session:
+            row = (
+                await session.scalars(select(Refund).where(Refund.job_id == world.case.job_id))
+            ).one()
+            assert (row.status, row.attempts, row.last_error_definitive) == (
+                RefundStatus.FAILED,
+                2,
+                False,
+            )
+        # Staff try to abandon it, then an admin tries a release: both refused.
+        async with world.sessions() as session:
+            repair = DisputeRefundRepair(session, stripe, enabled=True, clock=later)
+            with pytest.raises(RefundRepairRefusedError) as refused:
+                await repair.abandon(
+                    world.case.dispute_id, Operator(world.other_admin.id), apply=True
+                )
+            outcomes.append(refused.value.code)
+        async with world.sessions() as session:
+            release = DisputeResolver(session, stripe, ResolutionConfig(STUCK, 1.0), later)
+            with pytest.raises(AppError) as blocked:
+                await release.resolve(
+                    world.other_admin, world.case.dispute_id, RELEASE, RecordingQueue()
+                )
+            outcomes.append(blocked.value.code)
+    finally:
+        go_on.set()
+        outcomes.append(await first)
+
+    assert outcomes == ["not_final", "refund_already_attempted", "ok"]
+    async with world.sessions() as session:
+        dispute = (
+            await session.scalars(select(Dispute).where(Dispute.id == world.case.dispute_id))
+        ).one()
+        rows = (
+            await session.scalars(select(Refund).where(Refund.job_id == world.case.job_id))
+        ).all()
+        job_status = await session.scalar(select(Job.status).where(Job.id == world.case.job_id))
+        transfers = await session.scalar(
+            select(func.count()).select_from(Transfer).where(Transfer.job_id == world.case.job_id)
+        )
+    assert (dispute.status, dispute.resolution) == (
+        DisputeStatus.RESOLVED,
+        DisputeResolution.REFUNDED,
+    )
+    assert [(r.status, r.stripe_status) for r in rows] == [(RefundStatus.CREATED, "succeeded")]
+    assert (job_status, transfers) == (JobStatus.REFUNDED, 0)
+    assert len(stripe.creates) == 1
+    assert (world.other_admin.id, "dispute.refund_abandon_refused") in world.audited
 
 
 # --- Stripe's status of the refund: settled only at succeeded (#433 round 1 B1) ----------------

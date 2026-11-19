@@ -19,8 +19,17 @@ endpoint: a refund is the platform's own object. Each is handled the same way:
   queued, and both sides pushed after the worker's commit); failed or canceled leaves it open,
   flagged for staff (refund_failed) with any payout held (#434 repairs it); anything else is
   stored and waits. Twice the same state changes nothing.
-- A refund staff abandoned (#434) settles nothing: the event is logged and acknowledged (an
-  error for staff should Stripe ever say it succeeded).
+- A refund staff abandoned (#434) settles nothing: the event is logged and acknowledged.
+- Late money (#450 round 2): when Stripe, read again, shows a refund it made or still holds
+  (anything but failed or canceled) that the dispute's records do not show, either the refund
+  of a row staff abandoned or a refund no row holds that names a dispute whose refund was
+  abandoned or failed, the money may have gone back outside the records, and an admin may have
+  decided the dispute again since. Under the job's lock, then the dispute's, then the rows', the
+  dispute's abandoned and failed refunds are marked (late_refund_seen_at) before the event is
+  acknowledged: the job's payout stays held from then on (payments.transfers, at the release's
+  own check and in the sweep), whatever was decided or queued, until staff reconcile it
+  (docs/stripe-money.md). Nothing settles through that refund, and staff get an ERROR with the
+  ids. A repeated event changes nothing more.
 - Stripe failing, or no Stripe key: raised, so the worker rolls the handler back and runs the
   event again after its backoff, until the event is failed for staff. Nothing is written.
 
@@ -38,7 +47,7 @@ from typing import Final
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.stripe_refunds import StripeRefunds, worker_stripe_refunds
-from app.modules.disputes.resolution import RefundActor, RefundSettlement
+from app.modules.disputes.resolution import RefundActor, RefundSettlement, utc_now
 from app.modules.payments.refunds import RefundLedger, recheck_refund, refund_fits
 from app.modules.webhooks.events import AfterCommit, StripeEvent, StripeEventHandler
 
@@ -88,7 +97,16 @@ def _named_dispute(event: StripeEvent) -> uuid.UUID | None:
         return None
 
 
+async def _hold_payout(session: AsyncSession, ledger: RefundLedger, dispute_id: uuid.UUID) -> int:
+    """Under the job's lock, then the dispute's, then the rows': the dispute's abandoned and
+    failed refunds hold its job's payout until staff reconcile it (late_refund_seen_at). Written
+    in the worker's transaction, committed with the event. Returns how many rows hold it."""
+    await RefundSettlement(session).lock(dispute_id)
+    return await ledger.hold_for_reconciliation(dispute_id, utc_now())
+
+
 async def _unknown_refund(
+    session: AsyncSession,
     ledger: RefundLedger,
     stripe: StripeRefundsProvider,
     event: StripeEvent,
@@ -96,9 +114,10 @@ async def _unknown_refund(
     log: dict[str, str],
 ) -> None:
     """A refund no row holds. One that names a dispute whose refund failed or was abandoned
-    is a refund our rows do not know (a create whose answer was never stored): staff hear of
-    it (an ERROR with the ids). Nothing settles through it, and the dispute stays as it is:
-    open, its payouts held. Anything else is acknowledged, as before."""
+    is a refund our rows do not know (a create whose answer was never stored, or one made after
+    the abandon): staff hear of it (an ERROR with the ids), and unless Stripe failed or canceled
+    it, the job's payout is held for them to reconcile (_hold_payout), whatever an admin decided
+    since. Nothing settles through it. Anything else is acknowledged, as before."""
     named = _named_dispute(event)
     if named is None:
         logger.warning("refund_event_unknown_refund", extra=log)
@@ -113,12 +132,14 @@ async def _unknown_refund(
     if not any(row.abandoned or row.last_attempt_failed for row in rows):
         logger.warning("refund_event_unknown_refund", extra=log)
         return
+    held = 0 if read.dead else await _hold_payout(session, ledger, named)
     ids = {
         **log,
         "dispute_id": str(named),
         "job_id": str(rows[0].job_id),
         "refund_ids": ",".join(str(row.refund_id) for row in rows),
         "stripe_status": read.status,
+        "payout_held": str(held > 0).lower(),
     }
     if read.succeeded and any(row.abandoned for row in rows):
         logger.error("refund_event_abandoned_refund_succeeded", extra=ids)
@@ -138,7 +159,7 @@ def refund_event_handler(stripe: StripeRefundsProvider) -> StripeEventHandler:
         ledger = RefundLedger(session)
         known = await ledger.by_stripe_id(stripe_refund_id)
         if known is None:
-            await _unknown_refund(ledger, stripe, event, stripe_refund_id, log)
+            await _unknown_refund(session, ledger, stripe, event, stripe_refund_id, log)
             return
         client = stripe()
         if client is None:
@@ -148,11 +169,18 @@ def refund_event_handler(stripe: StripeRefundsProvider) -> StripeEventHandler:
         read = await recheck_refund(client, known)
         if known.abandoned:
             # Staff gave this refund up once Stripe showed it could not move money (#434):
-            # nothing settles through it. Should Stripe say it succeeded after all, staff look.
-            if read.succeeded:
-                logger.error("refund_event_abandoned_refund_succeeded", extra={**log, **known.ids})
-            else:
+            # nothing settles through it. Should Stripe show it otherwise after all, the payout
+            # is held and staff look (round 2).
+            if read.dead:
                 logger.info("refund_event_abandoned_refund", extra={**log, **known.ids})
+                return
+            held = await _hold_payout(session, ledger, known.dispute_id)
+            logger.error(
+                "refund_event_abandoned_refund_succeeded"
+                if read.succeeded
+                else "refund_event_abandoned_refund_live",
+                extra={**log, **known.ids, "payout_held": str(held > 0).lower()},
+            )
             return
         settlement = RefundSettlement(session)
         locked = await settlement.lock(known.dispute_id)

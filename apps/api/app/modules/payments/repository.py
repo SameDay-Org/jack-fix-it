@@ -3,7 +3,7 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Final
 
-from sqlalchemy import ColumnElement, Select, Subquery, case, func, or_, select, update
+from sqlalchemy import ColumnElement, Select, Subquery, and_, case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.payments.models import (
@@ -557,6 +557,30 @@ class RefundRepository:
         )
         return {dispute_id for dispute_id in await self._session.scalars(statement) if dispute_id}
 
+    async def hold_for_reconciliation(self, dispute_id: uuid.UUID, now: datetime) -> int:
+        """Marks the dispute's abandoned and failed refunds as seen made late (#450 round 2):
+        the first time is kept, so a repeated event changes nothing. Returns how many rows hold
+        it now. The caller holds the job's and the dispute's locks; the rows' are taken here."""
+        statement = (
+            update(Refund)
+            .where(
+                Refund.dispute_id == dispute_id,
+                Refund.status.in_((RefundStatus.ABANDONED, RefundStatus.FAILED)),
+            )
+            .values(late_refund_seen_at=func.coalesce(Refund.late_refund_seen_at, now))
+            .returning(Refund.id)
+        )
+        return len((await self._session.scalars(statement)).all())
+
+    async def held_for_reconciliation(self, dispute_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """The disputes among these with a refund staff must reconcile (late_refund_seen_at)."""
+        if not dispute_ids:
+            return set()
+        statement = select(Refund.dispute_id).where(
+            Refund.dispute_id.in_(dispute_ids), Refund.late_refund_seen_at.is_not(None)
+        )
+        return {dispute_id for dispute_id in await self._session.scalars(statement) if dispute_id}
+
     async def unsettled_of_job(self, job_id: uuid.UUID) -> bool:
         """Whether the job has a dispute refund Stripe has not finished (not `succeeded`)."""
         statement = select(
@@ -568,9 +592,16 @@ class RefundRepository:
     def unsettled_dispute_jobs() -> Select[uuid.UUID]:
         """The job of every dispute refund whose money Stripe has not given back (anything but
         `succeeded`, none read yet included): its payout stays held (payments.transfers). An
-        abandoned refund holds nothing: Stripe showed none that could still move money (#434)."""
+        abandoned refund holds nothing: Stripe showed none that could still move money (#434),
+        unless a refund was seen made late for its dispute since (late_refund_seen_at, #450
+        round 2): then it holds the payout until staff reconcile it, whatever its status."""
         return select(Refund.job_id.label("job_id")).where(
             Refund.dispute_id.is_not(None),
-            Refund.stripe_status.is_distinct_from(STRIPE_REFUND_SUCCEEDED),
-            Refund.status != RefundStatus.ABANDONED,
+            or_(
+                and_(
+                    Refund.stripe_status.is_distinct_from(STRIPE_REFUND_SUCCEEDED),
+                    Refund.status != RefundStatus.ABANDONED,
+                ),
+                Refund.late_refund_seen_at.is_not(None),
+            ),
         )

@@ -115,3 +115,35 @@ Stripe page it comes from, as read on 2026-11-06. Anything not confirmed there i
   before refunding) is a policy for #69 / #74 to decide with Cesar (#3), not a Stripe rule.
 - Amounts stay integer cents computed in the backend and frozen per payment and job (root
   `AGENTS.md`, "Money").
+
+## A dispute refund seen made late: the reconciliation hold (#450 round 2)
+
+When staff abandoned a dispute's refund (`scripts.resolve_dispute_refund`, #434), or its last
+attempt failed, and a signed refund event then shows (Stripe read again, never the payload) a
+refund for that dispute that Stripe made or still holds, the worker marks the dispute's
+abandoned and failed refund rows with `refunds.late_refund_seen_at`, under the job's and the
+dispute's locks, before it acknowledges the event. From then on the job's payout is held:
+`TransferService.release` refuses it (`held`) at its own check, a release task already queued
+included, and the sweep leaves it out. Staff see `refund_needs_reconciliation` on the dispute
+(the panel's list and detail) and an ERROR log (`refund_event_abandoned_refund_succeeded`,
+`refund_event_abandoned_refund_live` or `refund_event_unrecorded_refund`) with the ids.
+
+Nothing clears the hold on its own. Until a staff command exists, an admin clears it by hand:
+
+1. In the Stripe dashboard, open the job's PaymentIntent (the payment's
+   `stripe_payment_intent_id`) and list its refunds. Decide with Cesar what the money that
+   went back means for the dispute (for example, whether a release already decided should still
+   be paid out), and settle that in Stripe first. Keep the hold while anything is undecided.
+2. Then, in one transaction on the production database (an admin with database access, after
+   a backup), clear the rows and record it:
+
+   ```sql
+   BEGIN;
+   UPDATE refunds SET late_refund_seen_at = NULL WHERE dispute_id = '<dispute id>';
+   INSERT INTO audit_log (actor_user_id, action, entity_type, entity_id, before, after, reason)
+   VALUES ('<admin user id>', 'dispute.refund_reconciled', 'dispute', '<dispute id>',
+           '{"late_refund_seen": true}', '{"late_refund_seen": false}', '<what was decided>');
+   COMMIT;
+   ```
+
+   The next transfer sweep then releases any payout the dispute's decision still owes.
