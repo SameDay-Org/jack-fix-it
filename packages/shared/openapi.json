@@ -13106,7 +13106,7 @@
             ]
           },
           "status": {
-            "$ref": "#/components/schemas/RefundStatus",
+            "$ref": "#/components/schemas/ShownRefundStatus",
             "description": "pending: Stripe holds no refund of ours yet, an attempt may be under way. created: Stripe holds the refund; stripe_status says whether the money is back. failed: the last attempt's call failed. A retry sends the same idempotency key, and Stripe answers a refusal it already gave under that key (for 24 h) with the same refusal: a retry helps when the call never reached Stripe, or once the key expired."
           },
           "stripe_refund_id": {
@@ -13178,16 +13178,6 @@
         ],
         "title": "RefundOut",
         "description": "A refund to the customer as staff see it (#76): the row, without the idempotency key."
-      },
-      "RefundStatus": {
-        "type": "string",
-        "enum": [
-          "pending",
-          "created",
-          "failed"
-        ],
-        "title": "RefundStatus",
-        "description": "Where a refund to the customer stands (#76; internal: staff read the row)."
       },
       "RegionOut": {
         "properties": {
@@ -14675,6 +14665,16 @@
         ],
         "title": "SetupIntentOut",
         "description": "What the app's Payment Sheet needs, in setup mode, to save a card on the customer."
+      },
+      "ShownRefundStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "created",
+          "failed"
+        ],
+        "title": "ShownRefundStatus",
+        "description": "A dispute's refund as staff see it: the one that is not abandoned (#434), so never\n`abandoned`. The same values as RefundStatus otherwise."
       },
       "SingleChoiceQuestion": {
         "properties": {

@@ -51,6 +51,9 @@ class AuditAction(StrEnum):
     # What came of it when it did not settle the dispute: a call that failed or never
     # answered, a refund Stripe has not finished, failed or canceled (#433 round 1 B2).
     DISPUTE_REFUND_OUTCOME = "dispute.refund_outcome"
+    # Staff abandoned a dispute's refund Stripe refused for good, failed or canceled, once Stripe
+    # showed none that could still move money, so an admin may decide again (#434).
+    DISPUTE_REFUND_ABANDON = "dispute.refund_abandon"
 
 
 class AuditEntityType(StrEnum):

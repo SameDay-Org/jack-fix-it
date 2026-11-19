@@ -168,6 +168,7 @@ class FakeStripeRefunds:
                     amount_cents=amount_cents,
                     currency="usd",
                     dispute_id=dict(metadata).get("dispute_id"),
+                    refund_key=dict(metadata).get("refund_key"),
                     status=self.status,
                     request_id="req_fake_refund",
                 ),
@@ -431,7 +432,11 @@ async def test_a_full_refund_gives_the_customer_total_back_and_no_transfer(
     assert create == {
         "payment_intent_id": case.payment_intent_id,
         "amount_cents": TOTAL,  # tax included
-        "metadata": {"dispute_id": str(case.dispute_id), "job_id": str(case.job_id)},
+        "metadata": {
+            "dispute_id": str(case.dispute_id),
+            "job_id": str(case.job_id),
+            "refund_key": f"dispute:{case.dispute_id}:refund",
+        },
         "idempotency_key": f"dispute:{case.dispute_id}:refund",
     }
     [refund] = await refund_rows(db_session, case)
@@ -1035,12 +1040,45 @@ async def test_the_refunds_table_refuses_what_the_rules_forbid(
             }
         )
 
-    db_session.add(row(idempotency_key="taken"))
+    # Abandoned (#434): the dispute's refund rule below does not count it.
+    db_session.add(row(idempotency_key="taken", status=RefundStatus.ABANDONED))
     await db_session.flush()
     db_session.add(row(**values))
     with pytest.raises(IntegrityError) as raised:
         await db_session.flush()
     assert violated_constraint(raised.value) == constraint
+
+
+async def test_a_dispute_holds_one_refund_that_is_not_abandoned(
+    db_session: AsyncSession, world: JobWorld
+) -> None:
+    """#434: any number of abandoned refunds, one other at most."""
+    case = await disputed(db_session, world)
+    payment_id = (
+        await db_session.scalars(select(Payment.id).where(Payment.request_id == case.request_id))
+    ).one()
+
+    def row(status: RefundStatus) -> Refund:
+        return Refund(
+            job_id=case.job_id,
+            payment_id=payment_id,
+            dispute_id=case.dispute_id,
+            amount_cents=TOTAL,
+            currency="usd",
+            idempotency_key=f"k-{uuid.uuid4()}",
+            initiated_by=world.admin.id,
+            pro_release_cents=0,
+            resolution_note=NOTE,
+            status=status,
+        )
+
+    db_session.add_all([row(RefundStatus.ABANDONED), row(RefundStatus.ABANDONED)])
+    db_session.add(row(RefundStatus.FAILED))
+    await db_session.flush()
+    db_session.add(row(RefundStatus.PENDING))
+    with pytest.raises(IntegrityError) as raised:
+        await db_session.flush()
+    assert violated_constraint(raised.value) == "uq_refunds_current_dispute_refund"
 
 
 # --- Who -----------------------------------------------------------------------------------------
@@ -1405,9 +1443,9 @@ async def test_a_second_admin_waits_for_the_first_ones_lock_and_one_decision_win
     inside = asyncio.Event()
     go_on = asyncio.Event()
     holder: list[int] = []
-    original = RefundRepository.by_key_for_update
+    original = RefundRepository.current_of_dispute_for_update
 
-    async def paused(self: RefundRepository, key: str) -> Refund | None:
+    async def paused(self: RefundRepository, key: uuid.UUID) -> Refund | None:
         if not holder:
             holder.append(int(await self._session.scalar(text("SELECT pg_backend_pid()")) or 0))
             inside.set()
@@ -1425,7 +1463,7 @@ async def test_a_second_admin_waits_for_the_first_ones_lock_and_one_decision_win
             return "ok"
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(RefundRepository, "by_key_for_update", paused)
+        patch.setattr(RefundRepository, "current_of_dispute_for_update", paused)
         first = asyncio.create_task(run(world.admin, REFUND))
         second: asyncio.Task[str] | None = None
         try:

@@ -19,6 +19,8 @@ endpoint: a refund is the platform's own object. Each is handled the same way:
   queued, and both sides pushed after the worker's commit); failed or canceled leaves it open,
   flagged for staff (refund_failed) with any payout held (#434 repairs it); anything else is
   stored and waits. Twice the same state changes nothing.
+- A refund staff abandoned (#434) settles nothing: the event is logged and acknowledged (an
+  error for staff should Stripe ever say it succeeded).
 - Stripe failing, or no Stripe key: raised, so the worker rolls the handler back and runs the
   event again after its backoff, until the event is failed for staff. Nothing is written.
 
@@ -92,6 +94,14 @@ def refund_event_handler(stripe: StripeRefundsProvider) -> StripeEventHandler:
             raise RefundsNotConfiguredError
         # Stripe's state now, never the payload's: read before any lock is taken.
         read = await recheck_refund(client, known)
+        if known.abandoned:
+            # Staff gave this refund up once Stripe showed it could not move money (#434):
+            # nothing settles through it. Should Stripe say it succeeded after all, staff look.
+            if read.succeeded:
+                logger.error("refund_event_abandoned_refund_succeeded", extra={**log, **known.ids})
+            else:
+                logger.info("refund_event_abandoned_refund", extra={**log, **known.ids})
+            return
         settlement = RefundSettlement(session)
         locked = await settlement.lock(known.dispute_id)
         refund = await ledger.locked_of_dispute(known.dispute_id)

@@ -187,6 +187,10 @@ class RefundStatus(StrEnum):
     # The last attempt's call ended with an error (last_error_code) and Stripe holds no refund
     # of ours that we know of; the same decision tries again.
     FAILED = "failed"
+    # Staff gave it up (#434, scripts/resolve_dispute_refund.py, audited) once Stripe showed no
+    # refund of the dispute that could still move money: it no longer fixes the dispute's
+    # decision, and an admin may decide again, a refund then taking a new row and key. Final.
+    ABANDONED = "abandoned"
 
 
 # Statuses of a refund not made yet: an attempt may still be started for it.
@@ -232,6 +236,10 @@ class Refund(IdTimestampsMixin, Base):
     requested_at) are committed before the Stripe call, so a lost answer leaves a row that says
     a refund may have been made: the next attempt looks it up in Stripe before creating one.
 
+    A dispute holds one refund that is not abandoned. Its key is `dispute:<id>:refund` for the
+    first, `dispute:<id>:refund:<n>` for the n-th after staff abandoned the earlier ones (#434),
+    so Stripe never answers a new decision with an abandoned refund's stored answer.
+
     Stripe's status of the refund is kept as Stripe says it (stripe_status) and read again
     (an admin's retry, or Stripe's refund events): what the refund settles waits for
     `succeeded` (#433 round 1). A dispute's refund also carries the decision it pays for,
@@ -248,10 +256,18 @@ class Refund(IdTimestampsMixin, Base):
             "status <> 'created' OR stripe_refund_id IS NOT NULL",
             name="created_has_stripe_refund_id",
         ),
-        # Stripe's status is stored with its refund, and only then.
+        # Stripe's status is stored with its refund, and only then; an abandoned row keeps
+        # whatever it had (#434).
         CheckConstraint(
-            "(status = 'created') = (stripe_status IS NOT NULL)",
+            "status = 'abandoned' OR (status = 'created') = (stripe_status IS NOT NULL)",
             name="created_has_stripe_status",
+        ),
+        # One refund per dispute that is not abandoned: the one its decision carries out.
+        Index(
+            "uq_refunds_current_dispute_refund",
+            "dispute_id",
+            unique=True,
+            postgresql_where=text("dispute_id IS NOT NULL AND status <> 'abandoned'"),
         ),
         CheckConstraint(
             "dispute_id IS NULL OR (initiated_by IS NOT NULL AND pro_release_cents IS NOT NULL"

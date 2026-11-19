@@ -401,25 +401,45 @@ class RefundRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def by_key_for_update(self, idempotency_key: str) -> Refund | None:
-        """The refund made under this key, locked until the transaction ends, read as last
-        committed; None before the first attempt. Take the job's lock first."""
+    async def current_of_dispute_for_update(self, dispute_id: uuid.UUID) -> Refund | None:
+        """The dispute's refund that is not abandoned (one at most: a partial unique index),
+        locked until the transaction ends, read as last committed; None before the first
+        attempt, or once staff abandoned the last one (#434). Take the job's lock first."""
         statement = (
             select(Refund)
-            .where(Refund.idempotency_key == idempotency_key)
+            .where(Refund.dispute_id == dispute_id, Refund.status != RefundStatus.ABANDONED)
             .with_for_update()
             .execution_options(populate_existing=True)
         )
         return (await self._session.scalars(statement)).one_or_none()
 
+    async def abandoned_of_dispute(self, dispute_id: uuid.UUID) -> int:
+        """How many of the dispute's refunds staff abandoned (#434)."""
+        statement = select(func.count()).where(
+            Refund.dispute_id == dispute_id, Refund.status == RefundStatus.ABANDONED
+        )
+        return int(await self._session.scalar(statement) or 0)
+
     async def of_dispute(self, dispute_id: uuid.UUID) -> Refund | None:
-        """The dispute's refund (one at most: its key is unique), unlocked."""
+        """The dispute's refund that is not abandoned (one at most), unlocked."""
         statement = (
             select(Refund)
-            .where(Refund.dispute_id == dispute_id)
+            .where(Refund.dispute_id == dispute_id, Refund.status != RefundStatus.ABANDONED)
             .execution_options(populate_existing=True)
         )
         return (await self._session.scalars(statement)).one_or_none()
+
+    async def mark_abandoned(self, refund_id: uuid.UUID) -> bool:
+        """Staff gave the refund up (#434); False (nothing written) when it was abandoned
+        already. The caller checked, under the row's lock, that it cannot move money, and
+        commits it with its audit row."""
+        statement = (
+            update(Refund)
+            .where(Refund.id == refund_id, Refund.status != RefundStatus.ABANDONED)
+            .values(status=RefundStatus.ABANDONED)
+            .returning(Refund.id)
+        )
+        return (await self._session.scalar(statement)) is not None
 
     async def add(self, refund: Refund) -> Refund:
         """Inserts the row now (flush), so a second row under the key surfaces here."""
@@ -500,11 +520,13 @@ class RefundRepository:
         return (await self._session.scalars(statement)).one_or_none()
 
     async def dead_of_disputes(self, dispute_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
-        """The disputes among these whose refund Stripe failed or canceled."""
+        """The disputes among these whose refund (not abandoned) Stripe failed or canceled."""
         if not dispute_ids:
             return set()
         statement = select(Refund.dispute_id).where(
-            Refund.dispute_id.in_(dispute_ids), Refund.stripe_status.in_(STRIPE_REFUND_DEAD)
+            Refund.dispute_id.in_(dispute_ids),
+            Refund.stripe_status.in_(STRIPE_REFUND_DEAD),
+            Refund.status != RefundStatus.ABANDONED,
         )
         return {dispute_id for dispute_id in await self._session.scalars(statement) if dispute_id}
 
@@ -518,8 +540,10 @@ class RefundRepository:
     @staticmethod
     def unsettled_dispute_jobs() -> Select[uuid.UUID]:
         """The job of every dispute refund whose money Stripe has not given back (anything but
-        `succeeded`, none read yet included): its payout stays held (payments.transfers)."""
+        `succeeded`, none read yet included): its payout stays held (payments.transfers). An
+        abandoned refund holds nothing: Stripe showed none that could still move money (#434)."""
         return select(Refund.job_id.label("job_id")).where(
             Refund.dispute_id.is_not(None),
             Refund.stripe_status.is_distinct_from(STRIPE_REFUND_SUCCEEDED),
+            Refund.status != RefundStatus.ABANDONED,
         )

@@ -3,12 +3,20 @@ read again until Stripe finishes it.
 
 The caller (disputes.resolution) commits the refund row and the attempt before calling
 `make_refund`, with no transaction open, and stores what it returns. An attempt after the first
-may follow a lost answer: it first lists the PaymentIntent's refunds and adopts the one whose
-metadata names the dispute, if it fits the row (amount, currency), whatever Stripe's status of
-it. More than one, one that does not fit, or a listing with further pages creates nothing
-(RefundNeedsReviewError: staff look in Stripe). Otherwise the refund is created for the row's
-amount with the idempotency key `dispute:<id>:refund`, the same for every attempt, so Stripe
-itself answers a repeated create with the first one's refund while it keeps the key.
+may follow a lost answer: it first lists the PaymentIntent's refunds and adopts the one made
+for the row (metadata dispute_id and refund_key), if it fits the row (amount, currency),
+whatever Stripe's status of it. More than one, one that does not fit, or a listing with further
+pages creates nothing (RefundNeedsReviewError: staff look in Stripe). Otherwise the refund is
+created for the row's amount with the row's idempotency key, the same for every attempt, so
+Stripe itself answers a repeated create with the first one's refund while it keeps the key.
+
+A dispute holds one refund row that is not abandoned. Staff abandon one Stripe refused for good,
+or failed, once Stripe shows no refund of the dispute that could still move money
+(disputes.refund_repair, #434); the dispute's next refund then takes a new row and key
+(`dispute:<id>:refund:<n>`, dispute_refund_key), so Stripe never answers it with the abandoned
+one's stored answer, and its metadata refund_key keeps a retry's lookup from ever adopting the
+abandoned one's refund. The dispute's first refund carries no refund_key (made before #434):
+only it may be matched without one.
 
 Once Stripe answered with a refund, its id and Stripe's status of it are stored (`observe`),
 and no attempt is ever started again for the row: Stripe holds the refund. Created is not done
@@ -49,10 +57,24 @@ STRIPE_REFUND_FAILED: Final = STRIPE_REFUND_DEAD
 REFUND_CODE_LENGTH: Final = REFUND_ERROR_CODE_LENGTH
 
 
-def dispute_refund_key(dispute_id: uuid.UUID) -> str:
-    """The same key for every attempt to refund this dispute (AGENTS.md "Money": every refund
-    carries a deterministic idempotency key). Unique on the row: one refund per dispute."""
-    return f"dispute:{dispute_id}:refund"
+def dispute_refund_key(dispute_id: uuid.UUID, generation: int = 1) -> str:
+    """The same key for every attempt of the dispute's `generation`-th refund (AGENTS.md
+    "Money": every refund carries a deterministic idempotency key): the first is
+    `dispute:<id>:refund`, the n-th after staff abandoned the earlier ones (#434)
+    `dispute:<id>:refund:<n>`. Unique on the row."""
+    base = f"dispute:{dispute_id}:refund"
+    return base if generation == 1 else f"{base}:{generation}"
+
+
+def made_for(fact: RefundFacts, dispute_id: uuid.UUID, key: str) -> bool:
+    """Whether Stripe's refund was made for the refund row of this dispute and key: its
+    metadata names both (a refund without refund_key counts for the dispute's first row only,
+    made before rows carried it)."""
+    if fact.dispute_id != str(dispute_id):
+        return False
+    if fact.refund_key is None:
+        return key == dispute_refund_key(dispute_id)
+    return fact.refund_key == key
 
 
 @dataclass(frozen=True)
@@ -74,6 +96,23 @@ class DisputeRefund:
     stripe_refund_id: str | None
     stripe_status: str | None
     attempts: int
+    idempotency_key: str
+    last_error_code: str | None
+    requested_at: datetime | None
+
+    @property
+    def abandoned(self) -> bool:
+        """Staff gave it up (#434): it fixes nothing any more."""
+        return self.status is RefundStatus.ABANDONED
+
+    def in_flight(self, now: datetime, stuck_after: timedelta) -> bool:
+        """An attempt was stamped, has no outcome yet, and is too recent to be taken for lost."""
+        return (
+            self.status is RefundStatus.PENDING
+            and self.last_error_code is None
+            and self.requested_at is not None
+            and now - self.requested_at < stuck_after
+        )
 
     @property
     def succeeded(self) -> bool:
@@ -202,18 +241,25 @@ class RefundLedger:
         return await self._transfers.get_of_job(job_id) is not None
 
     async def attempted(self, dispute_id: uuid.UUID) -> bool:
-        """Whether a refund was ever attempted for the dispute; its row, if any, stays locked
-        until the transaction ends."""
-        return await self._refunds.by_key_for_update(dispute_refund_key(dispute_id)) is not None
+        """Whether the dispute has a refund that is not abandoned (one was attempted, and staff
+        did not give it up); its row, if any, stays locked until the transaction ends."""
+        return await self._refunds.current_of_dispute_for_update(dispute_id) is not None
 
     async def locked_of_dispute(self, dispute_id: uuid.UUID) -> DisputeRefund | None:
-        """The dispute's refund, locked until the transaction ends, read as last committed.
-        Take the job's lock first."""
-        refund = await self._refunds.by_key_for_update(dispute_refund_key(dispute_id))
+        """The dispute's refund that is not abandoned, locked until the transaction ends, read
+        as last committed. Take the job's lock first."""
+        refund = await self._refunds.current_of_dispute_for_update(dispute_id)
         return None if refund is None else _dispute_refund(refund)
 
+    async def abandon(self, refund: DisputeRefund) -> bool:
+        """Staff give the refund up (#434); False when it was abandoned already. The caller
+        holds its lock (locked_of_dispute), checked it cannot move money, and commits it with
+        the audit row."""
+        return await self._refunds.mark_abandoned(refund.refund_id)
+
     async def by_stripe_id(self, stripe_refund_id: str) -> DisputeRefund | None:
-        """The dispute refund holding this Stripe refund, unlocked; None for any other."""
+        """The dispute refund holding this Stripe refund, abandoned or not, unlocked; None for
+        any other."""
         refund = await self._refunds.by_stripe_id(stripe_refund_id)
         return None if refund is None or refund.dispute_id is None else _dispute_refund(refund)
 
@@ -233,10 +279,10 @@ class RefundLedger:
     ) -> RefundAttempt | RefundBlocked | DisputeRefund:
         """The dispute's refund row (created now with the decision, or the one an earlier
         attempt left) locked, and a new attempt stamped on it. A row Stripe already holds a
-        refund for comes back as is, to be read again (never a new attempt). The caller holds
-        the job's lock and commits before calling Stripe."""
-        key = dispute_refund_key(dispute_id)
-        refund = await self._refunds.by_key_for_update(key)
+        refund for comes back as is, to be read again (never a new attempt). A new row takes the
+        key of the dispute's next refund: the first, or the one after those staff abandoned.
+        The caller holds the job's lock and commits before calling Stripe."""
+        refund = await self._refunds.current_of_dispute_for_update(dispute_id)
         if refund is not None and (
             refund.amount_cents != decision.amount_cents
             or refund.pro_release_cents != decision.pro_release_cents
@@ -245,11 +291,13 @@ class RefundLedger:
         if refund is not None and refund.stripe_refund_id is not None:
             held = _dispute_refund(refund)
             return RefundBlocked.STRIPE_FAILED if held.dead else held
-        if refund is not None and _in_flight(refund, now, stuck_after):
+        if refund is not None and _dispute_refund(refund).in_flight(now, stuck_after):
             return RefundBlocked.IN_FLIGHT
         if payment.payment_intent_id is None:  # pragma: no cover - the caller checked it
             raise ValueError("the payment has no PaymentIntent")
         if refund is None:
+            generation = await self._refunds.abandoned_of_dispute(dispute_id) + 1
+            key = dispute_refund_key(dispute_id, generation)
             refund = await self._refunds.add(
                 Refund(
                     job_id=job_id,
@@ -275,7 +323,7 @@ class RefundLedger:
             payment_intent_id=payment.payment_intent_id,
             amount_cents=refund.amount_cents,
             currency=refund.currency,
-            idempotency_key=key,
+            idempotency_key=refund.idempotency_key,
             number=number,
             initiated_by=initiated_by,
         )
@@ -340,16 +388,9 @@ def _dispute_refund(refund: Refund) -> DisputeRefund:
         stripe_refund_id=refund.stripe_refund_id,
         stripe_status=refund.stripe_status,
         attempts=refund.attempts,
-    )
-
-
-def _in_flight(refund: Refund, now: datetime, stuck_after: timedelta) -> bool:
-    """An attempt was stamped, has no outcome yet, and is too recent to be lost."""
-    return (
-        refund.status is RefundStatus.PENDING
-        and refund.last_error_code is None
-        and refund.requested_at is not None
-        and now - refund.requested_at < stuck_after
+        idempotency_key=refund.idempotency_key,
+        last_error_code=refund.last_error_code,
+        requested_at=refund.requested_at,
     )
 
 
@@ -370,19 +411,35 @@ async def make_refund(stripe: StripeRefunds, attempt: RefundAttempt) -> RefundFa
         found = await stripe.list_refunds(attempt.payment_intent_id)
         if not found.complete:
             raise RefundNeedsReviewError("listing_incomplete")
-        ours = [fact for fact in found.refunds if fact.dispute_id == str(attempt.dispute_id)]
+        ours = [
+            fact
+            for fact in found.refunds
+            if made_for(fact, attempt.dispute_id, attempt.idempotency_key)
+        ]
         if len(ours) > 1:
             raise RefundNeedsReviewError("several_refunds")
         if ours:
-            return _fitting(ours[0], attempt.dispute_id, attempt.amount_cents, attempt.currency)
+            return _fitting(
+                ours[0],
+                attempt.dispute_id,
+                attempt.idempotency_key,
+                attempt.amount_cents,
+                attempt.currency,
+            )
     made = await stripe.create_refund(
         payment_intent_id=attempt.payment_intent_id,
         # From the row committed before the call, never from a request.
         amount_cents=attempt.amount_cents,
-        metadata={"dispute_id": str(attempt.dispute_id), "job_id": str(attempt.job_id)},
+        metadata={
+            "dispute_id": str(attempt.dispute_id),
+            "job_id": str(attempt.job_id),
+            "refund_key": attempt.idempotency_key,
+        },
         idempotency_key=attempt.idempotency_key,
     )
-    return _fitting(made, attempt.dispute_id, attempt.amount_cents, attempt.currency)
+    return _fitting(
+        made, attempt.dispute_id, attempt.idempotency_key, attempt.amount_cents, attempt.currency
+    )
 
 
 async def recheck_refund(stripe: StripeRefunds, refund: DisputeRefund) -> RefundFacts:
@@ -399,17 +456,19 @@ def refund_fits(read: RefundFacts, refund: DisputeRefund) -> RefundFacts:
     """`read` if it is the Stripe refund the row holds (or may hold: none stored yet)."""
     if refund.stripe_refund_id is not None and read.refund_id != refund.stripe_refund_id:
         raise RefundNeedsReviewError("refund_mismatch")
-    return _fitting(read, refund.dispute_id, refund.amount_cents, refund.currency)
+    return _fitting(
+        read, refund.dispute_id, refund.idempotency_key, refund.amount_cents, refund.currency
+    )
 
 
 def _fitting(
-    made: RefundFacts, dispute_id: uuid.UUID, amount_cents: int, currency: str
+    made: RefundFacts, dispute_id: uuid.UUID, key: str, amount_cents: int, currency: str
 ) -> RefundFacts:
     """The refund if it is the one the row describes; else nothing is stored for it."""
     if (
         made.amount_cents != amount_cents
         or made.currency != currency
-        or made.dispute_id != str(dispute_id)
+        or not made_for(made, dispute_id, key)
     ):
         raise RefundNeedsReviewError("refund_mismatch")
     return made

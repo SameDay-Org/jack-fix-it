@@ -132,7 +132,6 @@ from app.modules.payments.refunds import (
     RefundDecision,
     RefundLedger,
     RefundNeedsReviewError,
-    dispute_refund_key,
     make_refund,
     recheck_refund,
     refund_fits,
@@ -705,7 +704,7 @@ class DisputeResolver:
                     "pro_release_cents": plan.pro_release_cents,
                     "customer_refund_cents": plan.customer_refund_cents,
                     "refund_id": str(started.refund_id),
-                    "idempotency_key": dispute_refund_key(locked.dispute_id),
+                    "idempotency_key": started.idempotency_key,
                     "attempt": None if attempt is None else attempt.number,
                     "stripe_refund_id": (
                         started.stripe_refund_id if isinstance(started, DisputeRefund) else None

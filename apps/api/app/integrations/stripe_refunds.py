@@ -11,12 +11,12 @@ again by that id (retrieve_refund): Stripe may take a while to finish one, and m
 cancel it after it was created.
 
 What leaves this module is typed and minimal: a refund's id, amount, currency, metadata
-dispute_id and Stripe's status of it, as Stripe says it (`succeeded`: the money is back;
-`dead`: failed or canceled, it never will be; anything else is not finished). Stripe's errors become
-`StripeUnavailableError` or `StripeRejectedError` (stripe_errors.py), carrying only Stripe's
-request id and error code: an SDK error's text can name the payment or the customer, so it is
-never chained or logged. Calls go through the official SDK's async client on httpx (timeout and
-retries from settings).
+dispute_id and refund_key, and Stripe's status of it, as Stripe says it (`succeeded`: the
+money is back; `dead`: failed or canceled, it never will be; anything else is not finished).
+Stripe's errors become `StripeUnavailableError` or `StripeRejectedError` (stripe_errors.py),
+carrying only Stripe's request id and error code: an SDK error's text can name the payment or
+the customer, so it is never chained or logged. Calls go through the official SDK's async
+client on httpx (timeout and retries from settings).
 """
 
 from collections.abc import Mapping
@@ -53,6 +53,9 @@ class RefundFacts:
     dispute_id: str | None
     status: str
     request_id: str | None
+    # Metadata refund_key: the key of the row the refund was made for (#434); None on a
+    # refund made before rows carried it (the dispute's first).
+    refund_key: str | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -168,6 +171,9 @@ def _facts(refund: stripe.Refund) -> RefundFacts:
         currency=refund.currency,
         dispute_id=(
             metadata["dispute_id"] if metadata is not None and "dispute_id" in metadata else None
+        ),
+        refund_key=(
+            metadata["refund_key"] if metadata is not None and "refund_key" in metadata else None
         ),
         # Stripe documents a status on every refund; one without is not finished.
         status=(refund.status or "")[:STATUS_MAX_LENGTH],

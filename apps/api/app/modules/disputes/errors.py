@@ -108,3 +108,9 @@ class InvalidSplitError(AppError):
     status_code = 422
     code = "invalid_split"
     message = "pro_release_cents must be more than 0 and less than the pro's payout."
+
+
+class RefundRepairRefusedError(Exception):
+    """A staff repair of a dispute's refund (#434, scripts/resolve_dispute_refund.py) was
+    refused: nothing changed. The message is for the operator and never holds a Stripe id, a
+    name or a note."""

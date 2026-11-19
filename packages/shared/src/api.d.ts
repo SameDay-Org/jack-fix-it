@@ -4364,7 +4364,7 @@ export interface components {
              */
             currency: string;
             /** @description pending: Stripe holds no refund of ours yet, an attempt may be under way. created: Stripe holds the refund; stripe_status says whether the money is back. failed: the last attempt's call failed. A retry sends the same idempotency key, and Stripe answers a refusal it already gave under that key (for 24 h) with the same refusal: a retry helps when the call never reached Stripe, or once the key expired. */
-            status: components["schemas"]["RefundStatus"];
+            status: components["schemas"]["ShownRefundStatus"];
             /**
              * Stripe Refund Id
              * @description Stripe's id of the refund, once made.
@@ -4388,12 +4388,6 @@ export interface components {
              */
             requested_at: string | null;
         };
-        /**
-         * RefundStatus
-         * @description Where a refund to the customer stands (#76; internal: staff read the row).
-         * @enum {string}
-         */
-        RefundStatus: "pending" | "created" | "failed";
         /** RegionOut */
         RegionOut: {
             /** Region */
@@ -5015,6 +5009,13 @@ export interface components {
              */
             publishable_key: string;
         };
+        /**
+         * ShownRefundStatus
+         * @description A dispute's refund as staff see it: the one that is not abandoned (#434), so never
+         *     `abandoned`. The same values as RefundStatus otherwise.
+         * @enum {string}
+         */
+        ShownRefundStatus: "pending" | "created" | "failed";
         /** SingleChoiceQuestion */
         SingleChoiceQuestion: {
             /**

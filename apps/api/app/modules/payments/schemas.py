@@ -1,9 +1,19 @@
 import uuid
 from datetime import datetime
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.modules.payments.models import PaymentStatus, RefundStatus, TransferStatus
+
+
+class ShownRefundStatus(StrEnum):
+    """A dispute's refund as staff see it: the one that is not abandoned (#434), so never
+    `abandoned`. The same values as RefundStatus otherwise."""
+
+    PENDING = RefundStatus.PENDING.value
+    CREATED = RefundStatus.CREATED.value
+    FAILED = RefundStatus.FAILED.value
 
 
 class PaymentCreate(BaseModel):
@@ -94,7 +104,7 @@ class RefundOut(BaseModel):
     id: uuid.UUID
     amount_cents: int = Field(description="What is refunded, in integer cents.")
     currency: str = Field(examples=["usd"])
-    status: RefundStatus = Field(
+    status: ShownRefundStatus = Field(
         description="pending: Stripe holds no refund of ours yet, an attempt may be under way. "
         "created: Stripe holds the refund; stripe_status says whether the money is back. "
         "failed: the last attempt's call failed. A retry sends the same idempotency key, and "
