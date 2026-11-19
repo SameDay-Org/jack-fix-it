@@ -384,6 +384,24 @@
       "android": "Android",
       "badge": "Coming soon"
     },
+    "interest": {
+      "title": "Want to know when it's out?",
+      "hint": "Leave your email and we'll send one note when the app is in the stores.",
+      "label": "Email",
+      "consent": "We'll use your email only to tell you the app is out.",
+      "privacy": "Privacy",
+      "submit": "Notify me",
+      "sending": "Sending…",
+      "joined": "You're on the list. We'll email you when the app is in the stores.",
+      "honeypot": "Leave this field empty",
+      "errors": {
+        "invalid_email": "Enter an email like name@example.com.",
+        "retry": "That didn't go through. Press Notify me again.",
+        "stale": "This page was open for a while. Press Notify me again.",
+        "rate_limited": "Too many tries from here. Wait a few minutes, then try again.",
+        "unavailable": "We couldn't save your email right now. Try again in a moment."
+      }
+    },
     "faq": {
       "eyebrow": "Support when you need it",
       "title": "Questions, answered.",
