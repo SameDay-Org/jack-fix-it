@@ -258,7 +258,7 @@
       "label": "Page sections",
       "menu": "Menu",
       "how": "How it works",
-      "pros": "For pros",
+      "pros": "For professionals",
       "faq": "Questions",
       "soon": "Coming soon"
     },
@@ -316,7 +316,7 @@
         "body": "When the job is done, you and your pro rate each other. Ratings show on every pro's profile and quotes."
       },
       "pros": {
-        "label": "For pros",
+        "label": "For professionals",
         "title": "New jobs come to you.",
         "body": "See new requests in your categories and ZIP codes, answer with one fixed price, and get paid when the job is confirmed."
       }
@@ -437,7 +437,7 @@
     },
     "logout": "Log out",
     "home": {
-      "welcome": "Welcome, {{email}}",
+      "welcome": "Welcome, {{name}}",
       "openQueue": "Open the operations queue"
     },
     "support": {

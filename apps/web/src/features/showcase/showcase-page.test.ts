@@ -137,6 +137,15 @@ describe("showcase page", () => {
     expect(html).toMatch(/^<div lang="en"><a href="#content"[^>]*>Skip to content<\/a>/);
   });
 
+  it("calls the pros' section 'For professionals', as the landing does (#453)", async () => {
+    const html = await page("en");
+    const links = [...html.matchAll(/<a[^>]*href="#pros"[^>]*>([^<]*)<\/a>/g)].map((m) => m[1]);
+
+    expect(links.length).toBeGreaterThanOrEqual(2); // the header and the footer
+    for (const label of links) expect(label).toBe("For professionals");
+    expect(html).not.toContain("For pros<");
+  });
+
   it("switches language with plain links to the same page, the current one marked", async () => {
     const html = await page("en");
     const toggles = html.match(/<nav aria-label="Language"[\s\S]*?<\/nav>/g) ?? [];
@@ -207,7 +216,13 @@ describe("showcase page", () => {
     expect(html).toMatch(/<a[^>]*href="\/es\/privacy"[^>]*>Política de privacidad<\/a>/);
     expect(html).toContain(`alt="${es.showcase.media.track}"`);
     // Nothing English is left in the Spanish page.
-    for (const text of ["How it works", "Coming soon", "Questions", "For pros", "Skip to"]) {
+    for (const text of [
+      "How it works",
+      "Coming soon",
+      "Questions",
+      "For professionals",
+      "Skip to",
+    ]) {
       expect(html, text).not.toContain(text);
     }
   });
