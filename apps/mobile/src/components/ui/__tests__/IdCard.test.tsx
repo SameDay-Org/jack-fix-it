@@ -549,17 +549,16 @@ describe("IdCard", () => {
       const part = animatedStyle(testID).transform?.find((step) => "translateX" in step);
       return Number(part?.translateX ?? 0);
     };
-    // The right edge leans back: what floats slides right, the deeper the further; the print,
-    // under the laminate, slides left; the shadow moves the other way from the lean.
-    const print = shiftX("card-front-print");
-    const plate = shiftX("card-plate");
-    const ink = shiftX("card-front-ink");
-    const badge = shiftX("card-badge");
-    expect(print).toBeLessThan(0);
-    expect(plate).toBeGreaterThan(0);
-    expect(ink).toBeGreaterThan(plate);
-    expect(badge).toBeGreaterThan(ink);
+    // The right edge leans back: the ink (photo plate, text, badge) slides right, the print under
+    // the laminate slides left, and the shadow moves the other way from the lean.
+    expect(shiftX("card-front-print")).toBeLessThan(0);
+    expect(shiftX("card-front-ink")).toBeGreaterThan(0);
     expect(shiftX("card-shadow")).toBeLessThan(0);
+    // The face that looks away holds still: its layers and its pose are parked, half a turn round.
+    expect(animatedStyle("card-back-print").transform).toEqual([]);
+    expect(animatedStyle("card-back-ink").transform).toEqual([]);
+    expect(rotation(animatedStyle("card-back").transform, "rotateY")).toBe(180);
+    expect(rotation(animatedStyle("card-back").transform, "rotateX")).toBe(0);
   });
 
   it("holds every layer and its shadow still under Reduce Motion", async () => {
@@ -574,7 +573,7 @@ describe("IdCard", () => {
         { translationX: 120, translationY: -60 },
       ]);
     });
-    for (const id of ["card-front-print", "card-plate", "card-front-ink", "card-badge"]) {
+    for (const id of ["card-front-print", "card-front-ink", "card-back-print", "card-back-ink"]) {
       expect(animatedStyle(id).transform).toEqual([]);
     }
     expect(animatedStyle("card-shadow")).toMatchObject({ opacity: 1 });

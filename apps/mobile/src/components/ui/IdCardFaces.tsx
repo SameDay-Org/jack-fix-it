@@ -39,10 +39,8 @@ export type MotionStyle = ComponentProps<typeof Animated.View>["style"];
 export type FaceMotion = {
   /** The security print, sunk under the laminate. */
   print?: MotionStyle;
-  plate?: MotionStyle;
+  /** Everything printed on the laminate: the photo plate, the text, the PRO badge. */
   ink?: MotionStyle;
-  /** The PRO badge, raised above the plate. */
-  badge?: MotionStyle;
   /** The foil's gradient, sliding inside its band and badge. */
   foil?: MotionStyle;
   badgeFoil?: MotionStyle;
@@ -760,7 +758,6 @@ function InnerShadow({ gradientId }: { gradientId: string }) {
 type PhotoPlateProps = FaceShell & {
   photoUri?: string;
   onPhotoLoadEnd?: () => void;
-  style?: MotionStyle;
   testID?: string;
 };
 
@@ -771,7 +768,6 @@ function PhotoPlate({
   gradientId,
   photoUri,
   onPhotoLoadEnd,
-  style,
   testID,
 }: PhotoPlateProps) {
   const { photo, paddingX, bodyTop } = ID_CARD_BASE;
@@ -779,7 +775,7 @@ function PhotoPlate({
     (photo.width - (photo.ring + photo.mat) * 2) * unit * SILHOUETTE_FRACTION,
   );
   return (
-    <Animated.View
+    <View
       style={[
         {
           position: "absolute",
@@ -792,7 +788,6 @@ function PhotoPlate({
           backgroundColor: palette.ring,
         },
         continuousCorners,
-        style,
       ]}
       testID={testID ? `${testID}-plate` : undefined}
     >
@@ -844,7 +839,7 @@ function PhotoPlate({
           <InnerShadow gradientId={gradientId} />
         </View>
       </View>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -852,13 +847,11 @@ function PhotoPlate({
 function ProBadge({
   unit,
   gradientId,
-  style,
   foil,
   testID,
 }: {
   unit: number;
   gradientId: string;
-  style?: MotionStyle;
   foil?: MotionStyle;
   testID?: string;
 }) {
@@ -868,7 +861,7 @@ function ProBadge({
   // Wide enough for "PRO" in any language this card speaks; centered under the plate.
   const width = photo.width * unit * 0.5;
   return (
-    <Animated.View
+    <View
       style={[
         {
           position: "absolute",
@@ -877,7 +870,6 @@ function ProBadge({
           width,
           height,
         },
-        style,
       ]}
       testID={testID}
     >
@@ -926,7 +918,7 @@ function ProBadge({
           {t("idCard.pro")}
         </Text>
       </View>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -990,17 +982,24 @@ export function Front({
         style={motion.print}
         testID={testID ? `${testID}-front-print` : undefined}
       />
-      <PhotoPlate
-        {...shell}
-        photoUri={photoUri}
-        onPhotoLoadEnd={onPhotoLoadEnd}
-        style={motion.plate}
-        testID={testID}
-      />
       <Animated.View
         style={[StyleSheet.absoluteFill, motion.ink]}
         testID={testID ? `${testID}-front-ink` : undefined}
       >
+        <PhotoPlate
+          {...shell}
+          photoUri={photoUri}
+          onPhotoLoadEnd={onPhotoLoadEnd}
+          testID={testID}
+        />
+        {variant === "pro" ? (
+          <ProBadge
+            unit={unit}
+            gradientId={gradientId}
+            foil={motion.badgeFoil}
+            testID={testID ? `${testID}-badge` : undefined}
+          />
+        ) : null}
         <Header {...shell} variant={variant} width={width} foil={motion.foil} />
         <View
           style={{
@@ -1082,15 +1081,6 @@ export function Front({
           ) : null}
         </Footer>
       </Animated.View>
-      {variant === "pro" ? (
-        <ProBadge
-          unit={unit}
-          gradientId={gradientId}
-          style={motion.badge}
-          foil={motion.badgeFoil}
-          testID={testID ? `${testID}-badge` : undefined}
-        />
-      ) : null}
       <Sheen
         palette={palette}
         gradientId={gradientId}
@@ -1181,9 +1171,17 @@ export function Back({ palette, unit, gradientId, publicCode, motion, testID }: 
   const grouped = publicCode ? formatPublicCode(publicCode) : "";
   return (
     <>
-      <PrintLayer palette={palette} rosette={BACK_ROSETTE_PATH} style={motion.print} />
+      <PrintLayer
+        palette={palette}
+        rosette={BACK_ROSETTE_PATH}
+        style={motion.print}
+        testID={testID ? `${testID}-back-print` : undefined}
+      />
       <Stripe palette={palette} unit={unit} gradientId={gradientId} />
-      <Animated.View style={[StyleSheet.absoluteFill, motion.ink]}>
+      <Animated.View
+        style={[StyleSheet.absoluteFill, motion.ink]}
+        testID={testID ? `${testID}-back-ink` : undefined}
+      >
         {grouped ? (
           <View style={{ position: "absolute", top: code.top * unit, left: paddingX * unit }}>
             <Label palette={palette} unit={unit}>

@@ -94,6 +94,8 @@ export type IdCardProps = {
 };
 
 const HALF_TURN = 180;
+/** Within this many degrees of its own rest a hidden face is parked: turned away, not tracked. */
+const PARKED = 0.5;
 /** The lean of a drag across the whole card: the limit comes before the flip threshold. */
 const DRAG_TILT = 48;
 /** A horizontal drag this long activates the pan; a vertical one this long leaves it to the list. */
@@ -121,10 +123,10 @@ const LIFT_SPRING = { damping: 20, stiffness: 320 };
 const FADE = { duration: tokens.motion.transitionMs, reduceMotion: ReduceMotion.Never };
 /**
  * How high each layer floats over the face, in design dp (negative: under it). A lean slides them
- * against each other: the print sinks under the laminate, the photo and the ink sit on it, the
- * PRO badge stands above it.
+ * against each other: the print sinks under the laminate; the photo plate, the ink and the PRO
+ * badge stand on it.
  */
-const DEPTH = { print: -5, plate: 3, ink: 4.5, badge: 8 } as const;
+const DEPTH = { print: -5, ink: 4.5 } as const;
 /** How far the foil's bright streak travels at the full lean, as a fraction of its band. */
 const FOIL_TRAVEL = 0.8;
 /** The PRO badge's width, as a fraction of the photo plate's (IdCardFaces draws it so). */
@@ -135,39 +137,54 @@ const EDGE_REST_DROP = 0.5;
 const SHADOW_ROOM = 28;
 /** The ground shadow's layers: spread and drop in design dp, opacity each (they add up). */
 const SHADOW_LAYERS = [
-  { spread: 0.5, drop: 1.5, opacity: 0.06 },
-  { spread: 1, drop: 2.5, opacity: 0.05 },
-  { spread: 2, drop: 3.5, opacity: 0.045 },
-  { spread: 3.5, drop: 5, opacity: 0.04 },
-  { spread: 5.5, drop: 7, opacity: 0.035 },
-  { spread: 8, drop: 9.5, opacity: 0.03 },
-  { spread: 11, drop: 12.5, opacity: 0.025 },
+  { spread: 0.5, drop: 1, opacity: 0.07 },
+  { spread: 1, drop: 2, opacity: 0.05 },
+  { spread: 2, drop: 3, opacity: 0.04 },
+  { spread: 3, drop: 4.5, opacity: 0.032 },
+  { spread: 4.5, drop: 6, opacity: 0.025 },
+  { spread: 6.5, drop: 8, opacity: 0.018 },
+  { spread: 9, drop: 10.5, opacity: 0.012 },
 ] as const;
 
 type Tilt = { x: SharedValue<number>; y: SharedValue<number> };
 
-/** One layer's parallax at `depth` design dp; still under Reduce Motion. */
-function useLayerStyle(tilt: Tilt, depth: number, unit: number, still: boolean) {
+/** Which face looks out: the front until the turn passes edge-on, then the back. */
+type Side = "front" | "back";
+
+/**
+ * Whether `side` looks out at this turn. Every animated view costs a shadow-tree commit per frame
+ * on Android (Reanimated's synchronous UI-props path is off in this build), so the layers of the
+ * face that looks away hold still: they snap to the lean while the card passes edge-on, unseen.
+ */
+function looksOut(turn: number, side: Side): boolean {
+  "worklet";
+  return Math.abs(turn) < HALF_TURN / 2 === (side === "front");
+}
+
+type Layer = { tilt: Tilt; turn: SharedValue<number>; side: Side; still: boolean };
+
+/** One layer's parallax at `depth` design dp; still under Reduce Motion and while turned away. */
+function useLayerStyle({ tilt, turn, side, still }: Layer, depth: number, unit: number) {
   return useAnimatedStyle(() => {
-    if (still) return { transform: [] };
+    if (still || !looksOut(turn.value, side)) return { transform: [] };
     const offset = parallaxOffset(tilt.x.value, tilt.y.value, depth * unit);
     return { transform: [{ translateX: offset.x }, { translateY: offset.y }] };
   });
 }
 
 /** The foil's streak, sliding across its band of `band` dp as the card leans. */
-function useFoilStyle(tilt: Tilt, band: number, still: boolean) {
+function useFoilStyle({ tilt, turn, side, still }: Layer, band: number) {
   return useAnimatedStyle(() => {
-    if (still) return { transform: [] };
+    if (still || !looksOut(turn.value, side)) return { transform: [] };
     const sweep = clampTilt(tilt.y.value - tilt.x.value * 0.5) / MAX_TILT;
     return { transform: [{ translateX: sweep * band * FOIL_TRAVEL }] };
   });
 }
 
 /** The band of light follows the lean, and brightens with it; under Reduce Motion it holds still. */
-function useSheenStyle(tilt: Tilt, width: number, height: number, still: boolean) {
+function useSheenStyle({ tilt, turn, side, still }: Layer, width: number, height: number) {
   return useAnimatedStyle(() => {
-    if (still) return { opacity: SHEEN_REST, transform: [] };
+    if (still || !looksOut(turn.value, side)) return { opacity: SHEEN_REST, transform: [] };
     const pose = sheenPose(tilt.x.value, tilt.y.value, width, height);
     return {
       opacity: pose.strength,
@@ -179,27 +196,28 @@ function useSheenStyle(tilt: Tilt, width: number, height: number, still: boolean
 type Geometry = { width: number; height: number; unit: number };
 
 /**
- * The front's moving layers. Every view gets its own animated style: a style shared by two views
- * only drives one of them in Jest.
+ * The front's moving layers: the print, the ink (with the photo plate and the PRO badge), the two
+ * foils and the light. Every view gets its own animated style: a style shared by two views only
+ * drives one of them in Jest.
  */
-function useFrontMotion(tilt: Tilt, { width, height, unit }: Geometry, still: boolean): FaceMotion {
+function useFrontMotion(layer: Omit<Layer, "side">, { width, height, unit }: Geometry): FaceMotion {
+  const front: Layer = { ...layer, side: "front" };
   return {
-    print: useLayerStyle(tilt, DEPTH.print, unit, still),
-    plate: useLayerStyle(tilt, DEPTH.plate, unit, still),
-    ink: useLayerStyle(tilt, DEPTH.ink, unit, still),
-    badge: useLayerStyle(tilt, DEPTH.badge, unit, still),
-    foil: useFoilStyle(tilt, width, still),
-    badgeFoil: useFoilStyle(tilt, ID_CARD_BASE.photo.width * unit * BADGE_WIDTH, still),
-    sheen: useSheenStyle(tilt, width, height, still),
+    print: useLayerStyle(front, DEPTH.print, unit),
+    ink: useLayerStyle(front, DEPTH.ink, unit),
+    foil: useFoilStyle(front, width),
+    badgeFoil: useFoilStyle(front, ID_CARD_BASE.photo.width * unit * BADGE_WIDTH),
+    sheen: useSheenStyle(front, width, height),
   };
 }
 
-/** The back's moving layers: the print, the ink and the light (no plate, no badge, no foil). */
-function useBackMotion(tilt: Tilt, { width, height, unit }: Geometry, still: boolean): FaceMotion {
+/** The back's moving layers: the print, the ink and the light. */
+function useBackMotion(layer: Omit<Layer, "side">, { width, height, unit }: Geometry): FaceMotion {
+  const back: Layer = { ...layer, side: "back" };
   return {
-    print: useLayerStyle(tilt, DEPTH.print, unit, still),
-    ink: useLayerStyle(tilt, DEPTH.ink, unit, still),
-    sheen: useSheenStyle(tilt, width, height, still),
+    print: useLayerStyle(back, DEPTH.print, unit),
+    ink: useLayerStyle(back, DEPTH.ink, unit),
+    sheen: useSheenStyle(back, width, height),
   };
 }
 
@@ -474,6 +492,8 @@ export function IdCard({
   /** The card's pose: its lift (and the extra lift mid-flip) and its lean. */
   const frontStyle = useAnimatedStyle(() => {
     if (reduceMotion) return { opacity: 1 - fade.value, transform: [{ perspective }] };
+    // Resting on its back, the front waits turned away: no commit per frame for a hidden face.
+    if (Math.abs(turn.value) >= HALF_TURN - PARKED) return parkedPose(perspective);
     const scale = lift.value + Math.sin((Math.abs(turn.value) * Math.PI) / HALF_TURN) * FLIP_LIFT;
     return {
       opacity: 1,
@@ -488,6 +508,7 @@ export function IdCard({
 
   const backStyle = useAnimatedStyle(() => {
     if (reduceMotion) return { opacity: fade.value, transform: [{ perspective }] };
+    if (Math.abs(turn.value) <= PARKED) return parkedPose(perspective);
     const scale = lift.value + Math.sin((Math.abs(turn.value) * Math.PI) / HALF_TURN) * FLIP_LIFT;
     return {
       opacity: 1,
@@ -502,26 +523,24 @@ export function IdCard({
 
   /**
    * The plastic's edge: the card's slab, one thickness behind whichever face looks out, so on
-   * screen it peeks out the same way from both. Two views: the slab turns with the card (the pose),
-   * and its parent slides it on screen (the offset). Android's transform decomposition loses the
-   * rotation when a translation shares a matrix with the perspective.
+   * screen it peeks out the same way from both. It turns with the card, then slides in the card's
+   * own plane, whose x runs the other way seen from the back.
    */
-  const edgeOffsetStyle = useAnimatedStyle(() => {
+  const edgeStyle = useAnimatedStyle(() => {
     const thickness = ID_CARD_BASE.thickness * unit;
     const rest = thickness * EDGE_REST_DROP;
-    if (reduceMotion) return { transform: [{ translateY: rest }] };
-    const offset = parallaxOffset(tilt.x.value, tilt.y.value, -thickness);
-    return { transform: [{ translateX: offset.x }, { translateY: offset.y + rest }] };
-  });
-  const edgePoseStyle = useAnimatedStyle(() => {
-    if (reduceMotion) return { transform: [{ perspective }] };
+    if (reduceMotion) return { transform: [{ perspective }, { translateY: rest }] };
     const scale = lift.value + Math.sin((Math.abs(turn.value) * Math.PI) / HALF_TURN) * FLIP_LIFT;
+    const offset = parallaxOffset(tilt.x.value, tilt.y.value, -thickness);
+    const facing = Math.abs(turn.value) < HALF_TURN / 2 ? 1 : -1;
     return {
       transform: [
         { perspective },
         { scale },
         { rotateX: `${tilt.x.value}deg` },
         { rotateY: `${turn.value + tilt.y.value}deg` },
+        { translateX: offset.x * facing },
+        { translateY: offset.y + rest },
       ],
     };
   });
@@ -533,8 +552,8 @@ export function IdCard({
     );
   });
 
-  const frontMotion = useFrontMotion(tilt, geometry, still);
-  const backMotion = useBackMotion(tilt, geometry, still);
+  const frontMotion = useFrontMotion({ tilt, turn, still }, geometry);
+  const backMotion = useBackMotion({ tilt, turn, still }, geometry);
 
   const frontLabel = [
     t("idCard.a11y.card"),
@@ -611,25 +630,21 @@ export function IdCard({
           pointerEvents="none"
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
-          style={[StyleSheet.absoluteFill, edgeOffsetStyle]}
+          style={[
+            StyleSheet.absoluteFill,
+            { borderRadius: ID_CARD_BASE.radius * unit, backgroundColor: palette.surface },
+            continuousCorners,
+            edgeStyle,
+          ]}
           testID={testID ? `${testID}-edge` : undefined}
         >
-          <Animated.View
+          <View
             style={[
               StyleSheet.absoluteFill,
-              { borderRadius: ID_CARD_BASE.radius * unit, backgroundColor: palette.surface },
+              { borderRadius: ID_CARD_BASE.radius * unit, backgroundColor: palette.edge },
               continuousCorners,
-              edgePoseStyle,
             ]}
-          >
-            <View
-              style={[
-                StyleSheet.absoluteFill,
-                { borderRadius: ID_CARD_BASE.radius * unit, backgroundColor: palette.edge },
-                continuousCorners,
-              ]}
-            />
-          </Animated.View>
+          />
         </Animated.View>
         <Animated.View
           accessible
@@ -687,5 +702,14 @@ function groundShadowStyle(shadow: ReturnType<typeof groundShadow>) {
       { scaleX: shadow.scaleX },
       { scaleY: shadow.scaleY },
     ],
+  };
+}
+
+/** A face turned away and still: half a turn round, square, at rest. */
+function parkedPose(perspective: number) {
+  "worklet";
+  return {
+    opacity: 1,
+    transform: [{ perspective }, { scale: 1 }, { rotateX: "0deg" }, { rotateY: `${HALF_TURN}deg` }],
   };
 }
