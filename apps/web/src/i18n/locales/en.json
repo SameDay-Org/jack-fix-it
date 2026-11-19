@@ -1170,5 +1170,72 @@
         }
       }
     }
+  },
+  "request": {
+    "meta": {
+      "title": "Tell Jack what happened | Jack Fix It",
+      "description": "Tell Jack what's going on at home. A few quick questions, no account needed."
+    },
+    "title": "Tell Jack what happened",
+    "intro": "A few quick questions. No account needed.",
+    "noscript": "This form needs JavaScript. Turn it on in your browser to continue.",
+    "progress": "Step {{current}} of {{total}}",
+    "back": "Back",
+    "next": "Continue",
+    "optional": "{{label}} (optional)",
+    "counter": "{{length}} / {{max}}",
+    "check": "Some answers need a look:",
+    "zip": {
+      "title": "Where's the job?",
+      "support": "First, let's check that Jack works in your area.",
+      "label": "ZIP code",
+      "hint": "The 5-digit ZIP code of the home.",
+      "checking": "Checking your area…",
+      "errors": {
+        "invalid": "Enter a 5-digit ZIP code.",
+        "rate_limited": "Too many tries from here. Wait a minute, then try again.",
+        "unavailable": "We couldn't check your area right now. Try again."
+      }
+    },
+    "waitlist": {
+      "title": "We're not in your area yet",
+      "body": "Jack works in a few areas for now. Leave an email or a mobile number and we'll tell you when we come to {{zip}}.",
+      "emailLabel": "Email",
+      "phoneLabel": "Mobile number",
+      "contactHint": "One is enough.",
+      "use": "We'll use it only to tell you when Jack comes to your area.",
+      "submit": "Let me know",
+      "sending": "Sending…",
+      "otherZip": "Try another ZIP code",
+      "joinedTitle": "You're on the list",
+      "joinedBody": "We'll let you know when Jack comes to {{zip}}.",
+      "home": "Back to the home page",
+      "servedNow": "Good news: Jack works in {{zip}} now.",
+      "errors": {
+        "missing_contact": "Add an email or a mobile number.",
+        "invalid_email": "Enter an email like name@example.com.",
+        "invalid_phone": "Enter a 10-digit mobile number.",
+        "invalid": "Check the email and the mobile number.",
+        "rate_limited": "Too many tries from here. Wait a few minutes, then try again.",
+        "unavailable": "That didn't go through. Try again."
+      }
+    },
+    "describe": {
+      "title": "What's going on?",
+      "support": "Tell us in your own words: what happened, where in the home, anything that helps.",
+      "label": "Describe the job",
+      "required": "Tell us what's going on to continue.",
+      "categoryLegend": "What kind of job is it?",
+      "categoryHint": "Not sure? Leave it: our team will pick the right one.",
+      "notSure": "Not sure"
+    },
+    "questions": {
+      "support": "A few quick questions so pros can send you accurate quotes.",
+      "required": "Answer this to continue.",
+      "range": "Enter a number from {{min}} to {{max}}.",
+      "tooFew": "Pick at least {{count}}.",
+      "tooMany": "Pick up to {{count}}.",
+      "pickUpTo": "Pick up to {{count}}."
+    }
   }
 }

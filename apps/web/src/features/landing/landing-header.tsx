@@ -3,7 +3,12 @@ import Link from "next/link";
 
 import { LanguageToggle } from "@/features/site/language-toggle";
 import { type MenuLink, MobileMenu } from "@/features/site/mobile-menu";
-import { FOR_PROS_PATHS, LANDING_PATHS, SHOWCASE_PATHS } from "@/features/site/routes";
+import {
+  FOR_PROS_PATHS,
+  LANDING_PATHS,
+  REQUEST_PATHS,
+  SHOWCASE_PATHS,
+} from "@/features/site/routes";
 import { CONTAINER, FOCUS_ON_NAVY } from "@/features/site/ui";
 import { Wordmark } from "@/features/site/wordmark";
 import type { Locale } from "@/i18n/config";
@@ -17,10 +22,11 @@ const NAV_LINK = cn(
 );
 
 /**
- * The pages that share this header: the landing (#85), the page for professionals (#88) and a
- * service's page (#87).
+/**
+ * The pages that share this header: the landing (#85), the page for professionals (#88), a
+ * service's page (#87) and the web request flow (#86).
  */
-export type SitePage = "landing" | "forPros" | "service";
+export type SitePage = "landing" | "forPros" | "service" | "request";
 
 /** The page's own sections, in its header. */
 const SECTIONS = {
@@ -36,6 +42,8 @@ const SECTIONS = {
     ["ask", "seo.service.nav.ask"],
     ["areas", "seo.service.nav.areas"],
   ],
+  // A form: no sections to jump to.
+  request: [],
 } as const satisfies Record<SitePage, readonly (readonly [string, string])[]>;
 
 /**
@@ -48,7 +56,7 @@ export function LandingHeader({
   t,
   locale,
   page = "landing",
-  paths = page === "landing" ? LANDING_PATHS : FOR_PROS_PATHS,
+  paths = page === "landing" ? LANDING_PATHS : page === "request" ? REQUEST_PATHS : FOR_PROS_PATHS,
 }: {
   t: TFunction;
   locale: Locale;

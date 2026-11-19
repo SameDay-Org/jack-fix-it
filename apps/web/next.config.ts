@@ -21,6 +21,7 @@ const nextConfig: NextConfig = {
   // the origin in a Referer sent to another site. The admin panel is per-user and staff-only:
   // never stored by a browser or a proxy (#80). Its server actions keep Next's default Origin
   // check (no serverActions.allowedOrigins).
+  // The web request flow (#86) holds what a visitor types: never stored either.
   async headers() {
     // The panel: no-store, and no Referer at all (its file and photo routes say so too: a later
     // rule for the same key wins over the one for every path).
@@ -28,10 +29,13 @@ const nextConfig: NextConfig = {
       { key: "Cache-Control", value: "no-store" },
       { key: "Referrer-Policy", value: "no-referrer" },
     ];
+    const neverStored = [{ key: "Cache-Control", value: "no-store" }];
     return [
       { source: "/:path*", headers: SECURITY_HEADERS },
       { source: "/admin", headers: noStore },
       { source: "/admin/:path*", headers: noStore },
+      { source: "/request", headers: neverStored },
+      { source: "/es/request", headers: neverStored },
     ];
   },
 };
