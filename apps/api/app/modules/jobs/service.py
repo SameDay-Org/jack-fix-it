@@ -211,6 +211,15 @@ def job_earning_facts() -> Subquery:
     return JobRepository.earning_facts()
 
 
+async def job_statuses_of_requests(
+    session: AsyncSession, request_ids: Collection[uuid.UUID]
+) -> dict[uuid.UUID, JobStatus]:
+    """The status of each request's job, by request, for the customer's own request views
+    (#466): once a request is paid, its job's status is what the customer sees. One statement;
+    requests without a job are left out."""
+    return await JobRepository(session).statuses_of_requests(request_ids)
+
+
 def _actor_id(actor: UserAccount | SystemActor | AdminDecision) -> uuid.UUID | None:
     if isinstance(actor, SystemActor):
         return None
