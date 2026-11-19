@@ -14,6 +14,7 @@ from app.modules.cancellations.schemas import CancellationOut, CancelPreviewOut,
 from app.modules.cancellations.service import CancelConfig, CancellationService
 from app.modules.jobs.location import JobLocationStore, get_job_location_store
 from app.queue import JobQueue, get_job_queue
+from app.rate_limit import RateLimiter, enforce_limit, get_rate_limiter
 
 # The customer cancels their job (#69). Amounts and the refund's state are the customer's own:
 # no HTTP cache keeps any answer, errors too.
@@ -34,6 +35,40 @@ def get_cancellation_service(
     return CancellationService(session, CancelConfig.from_settings(settings), locations)
 
 
+async def limit_cancel_previews(
+    user: CustomerUser,
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> None:
+    """CANCEL_PREVIEW_LIMIT previews per customer per CANCEL_PREVIEW_WINDOW_SECONDS."""
+    await enforce_limit(
+        limiter,
+        "cancel_preview",
+        str(user.id),
+        limit=settings.cancel_preview_limit,
+        window_seconds=settings.cancel_preview_window_seconds,
+        timeout_seconds=settings.rate_limit_timeout_seconds,
+    )
+
+
+async def limit_cancels(
+    user: CustomerUser,
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> None:
+    """CANCEL_WRITE_LIMIT cancels per customer per CANCEL_WRITE_WINDOW_SECONDS, whatever
+    the job and the answer: a retry with the same Idempotency-Key counts too (it reads
+    and locks like the first)."""
+    await enforce_limit(
+        limiter,
+        "cancel_write",
+        str(user.id),
+        limit=settings.cancel_write_limit,
+        window_seconds=settings.cancel_write_window_seconds,
+        timeout_seconds=settings.rate_limit_timeout_seconds,
+    )
+
+
 Cancellations = Annotated[CancellationService, Depends(get_cancellation_service)]
 IdempotencyKey = Annotated[
     uuid.UUID | None,
@@ -51,6 +86,10 @@ IdempotencyKey = Annotated[
 _UNAUTHORIZED = _error("invalid_token: missing, invalid or expired token.")
 _FORBIDDEN = _error("forbidden: only customers cancel here (a pro's own cancel is separate).")
 _NOT_FOUND = _error("not_found: no job with this id of which the caller is the customer.")
+_RATE_LIMITED = _error(
+    "rate_limited: too many previews or cancels by this customer in the window; Retry-After "
+    "says when to try again."
+)
 _NOT_ALLOWED = (
     "cancel_not_allowed: the work started, or the job is done, confirmed, paid out, disputed "
     "or refunded (the message names its status): report a problem instead; "
@@ -62,12 +101,14 @@ _NOT_ALLOWED = (
     "/cancel-preview",
     response_model=CancelPreviewOut,
     summary="What cancelling my job now would cost",
+    dependencies=[Depends(limit_cancel_previews)],
     responses={
         401: _UNAUTHORIZED,
         403: _FORBIDDEN,
         404: _NOT_FOUND,
         409: _error(f"{_NOT_ALLOWED}. Nothing is written."),
         422: _error("validation_error: a job_id that is not a UUID."),
+        429: _RATE_LIMITED,
     },
 )
 async def cancel_preview(
@@ -84,6 +125,7 @@ async def cancel_preview(
     "/cancel",
     response_model=CancellationOut,
     summary="Cancel my job",
+    dependencies=[Depends(limit_cancels)],
     responses={
         401: _UNAUTHORIZED,
         403: _FORBIDDEN,
@@ -100,6 +142,7 @@ async def cancel_preview(
             "are dropped; a negative expected_fee_cents; an unknown field (an amount above "
             "all); a job_id or an Idempotency-Key that is not a UUID."
         ),
+        429: _RATE_LIMITED,
     },
 )
 async def cancel_job(
