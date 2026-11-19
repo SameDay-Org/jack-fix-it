@@ -15,6 +15,7 @@ function apiError(status: number, code: string): Response {
 beforeEach(() => {
   vi.stubEnv("API_INTERNAL_URL", "http://api.test.invalid:8000");
   vi.stubEnv("API_TIMEOUT_MS", "1000");
+  vi.stubEnv("REQUEST_FLOW_ENABLED", "true");
   vi.stubEnv("PHONE_COUNTRY_CODE", "");
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -23,6 +24,26 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   fetchMock.mockReset();
+});
+
+describe("with REQUEST_FLOW_ENABLED off (#483 r1)", () => {
+  // A server action can be POSTed directly whatever the page renders: each checks the flag
+  // first, and calls nothing.
+  it.each(["", "false", "1", "TRUE"])("%j: no ZIP check and no waitlist write", async (value) => {
+    vi.stubEnv("REQUEST_FLOW_ENABLED", value);
+    fetchMock.mockResolvedValue(Response.json({ zip_code: "33301", served: true }));
+    await expect(checkZip("33301")).resolves.toEqual({ kind: "error", error: "unavailable" });
+    await expect(
+      joinWaitlist({
+        zip: "99999",
+        email: "ana@example.com",
+        phone: "",
+        categoryId: null,
+        locale: "en",
+      }),
+    ).resolves.toEqual({ kind: "error", error: "unavailable" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("checkZip", () => {

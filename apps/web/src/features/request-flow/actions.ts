@@ -1,5 +1,6 @@
 "use server";
 
+import { requestFlowEnabled } from "@/features/landing/config";
 import { locales } from "@/i18n/config";
 import { ApiError, apiGet, apiPost } from "@/lib/api";
 
@@ -20,6 +21,10 @@ import type {
 // Until the API takes the visitor's address from the web server (#86 PR A), these calls reach
 // the API from the web server's address, so the API's per-address limits count every visitor
 // together. The flow stays off in production until then (REQUEST_FLOW_ENABLED).
+//
+// The flag gates each action itself, first (#483 r1): an action is reachable by a direct POST
+// whatever the page renders, so with the flow off it answers "unavailable" without reading its
+// input or calling the API.
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -29,6 +34,7 @@ function statusOf(error: unknown): number | null {
 
 /** Whether Jack serves the ZIP: `GET /v1/service-areas/check`. */
 export async function checkZip(raw: unknown): Promise<ZipCheckResult> {
+  if (!requestFlowEnabled()) return { kind: "error", error: "unavailable" };
   const zip = zipInput(raw);
   if (zip === null) return { kind: "error", error: "invalid" };
   try {
@@ -55,6 +61,7 @@ function waitlistError(error: unknown): WaitlistResult {
  * number or both; a service the API no longer offers is dropped rather than failing the visitor.
  */
 export async function joinWaitlist(input: WaitlistInput): Promise<WaitlistResult> {
+  if (!requestFlowEnabled()) return { kind: "error", error: "unavailable" };
   const zip = zipInput(input?.zip);
   if (zip === null) return { kind: "error", error: "invalid" };
   const emailText = typeof input.email === "string" ? input.email.trim() : "";
