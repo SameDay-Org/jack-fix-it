@@ -24,6 +24,7 @@ from app.modules.requests.queue import (
     RequestOrigin,
     RequestStatus,
 )
+from app.modules.users.types import UserRole
 
 
 class BucketFilter(StrEnum):
@@ -170,6 +171,11 @@ class RequestCard(QueueItem):
         "customer or the pro."
     )
     followups: list["FollowupOut"] = Field(description="By due time (#82).")
+    actions_allowed: bool = Field(
+        default=True,
+        description="Whether the caller may act on this request now (#82): it is unassigned, "
+        "held by them, or they are an admin. The API stays the guard (409 request_held).",
+    )
 
 
 class ClaimOut(BaseModel):
@@ -272,3 +278,22 @@ class FollowupsPage(BaseModel):
 
 
 RequestCard.model_rebuild()
+
+
+class FollowupsSummary(BaseModel):
+    due_today: int = Field(
+        description="The caller's open follow-ups due by the end of today in the business time "
+        "zone, overdue ones included: the length of GET /v1/admin/followups (due today)."
+    )
+
+
+class StaffMemberOut(BaseModel):
+    """An active agent or admin, as the panel's assignee pickers list them (#82): no contact."""
+
+    id: uuid.UUID
+    first_name: str | None = Field(description="Null when missing or showing a contact.")
+    role: UserRole
+
+
+class StaffList(BaseModel):
+    staff: list[StaffMemberOut] = Field(description="By first name.")

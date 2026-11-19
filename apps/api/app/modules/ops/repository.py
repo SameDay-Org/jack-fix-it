@@ -4,7 +4,7 @@ them (ADR 0003); the ops services do."""
 import uuid
 from datetime import datetime
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.ops.models import RequestFollowup, RequestNote
@@ -71,6 +71,15 @@ class FollowupRepository:
             .execution_options(populate_existing=True)
         )
         return list((await self._session.scalars(statement)).all())
+
+    async def count_open_due(self, assigned_to: uuid.UUID, due_before: datetime) -> int:
+        """How many of the staff member's follow-ups not done are due before `due_before`."""
+        statement = select(func.count()).where(
+            RequestFollowup.assigned_to == assigned_to,
+            RequestFollowup.done_at.is_(None),
+            RequestFollowup.due_at < due_before,
+        )
+        return int(await self._session.scalar(statement) or 0)
 
     async def open_due(
         self,

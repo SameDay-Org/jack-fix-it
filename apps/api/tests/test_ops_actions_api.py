@@ -12,10 +12,11 @@ from typing import Any, Final
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.integrations.storage import get_storage
 from app.modules.audit.models import AuditLog
 from app.modules.audit.types import AuditAction
 from app.modules.categories.models import Category
@@ -24,10 +25,11 @@ from app.modules.ops.models import RequestFollowup
 from app.modules.ops.router import get_ops_clock
 from app.modules.requests.models import RequestStatus, ServiceRequest
 from app.modules.requests.queue import RequestQueueReader
-from app.modules.users.types import UserRole
+from app.modules.users.models import User
+from app.modules.users.types import UserRole, UserStatus
 from app.rate_limit import get_rate_limiter
 from tests.conftest import InMemoryRateLimiter, make_settings
-from tests.job_world import JobWorld, Party, headers_for, make_job
+from tests.job_world import JobWorld, Party, headers_for, make_job, record_pushes
 from tests.test_ops_queue_api import (
     BASE,
     HELD,
@@ -37,6 +39,7 @@ from tests.test_ops_queue_api import (
 from tests.test_ops_queue_api import racers as racers
 from tests.test_ops_queue_api import storage as storage
 from tests.test_ops_queue_api import world as world
+from tests.test_pros_profile_api import FakeStorage
 
 # 10:00 EST, 9 March 2031: New York moves to EDT at 02:00 that day (the day is 23 hours).
 NOW: Final = datetime(2031, 3, 9, 15, 0, tzinfo=UTC)
@@ -239,17 +242,22 @@ async def test_notes_never_reach_a_customer_or_pro_answer(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
     world: JobWorld,
+    storage: FakeStorage,
     clock: Clock,
 ) -> None:
     """Every GET route outside /v1/admin, read as the job's customer and as its pro with the
-    job's own ids: the note's text appears in none of their answers."""
+    job's own ids: the note's text appears in none of their answers. Every answer is a real
+    one: never an internal error, which would hide a leak (the routes that presign media
+    need the storage, some the queue), and the views of the note's own request and job answer their owners."""
+    app.dependency_overrides[get_storage] = lambda: storage
+    record_pushes(app)
     job = await make_job(db_session, world, JobStatus.SCHEDULED)
     await db_session.commit()
     assert (
         await act(db_client, world.admin, job.request_id, "notes", body=NOTE)
     ).status_code == 201
     params = {"request_id": job.request_id, "job_id": job.id, "quote_id": job.quote_id}
-    read = 0
+    answered: dict[tuple[str, str], int] = {}
     for route, operations in app.openapi()["paths"].items():
         if "get" not in operations:
             continue
@@ -259,11 +267,22 @@ async def test_notes_never_reach_a_customer_or_pro_answer(
         if any(name not in params for name in names):
             continue
         url = route.format(**{name: params[name] for name in names})
-        for party in (world.customer, world.pro):
+        for name, party in (("customer", world.customer), ("pro", world.pro)):
             response = await db_client.get(url, headers=party.headers)
-            read += 1
-            assert NOTE not in response.text, url
-    assert read > 10
+            answered[(name, route)] = response.status_code
+            assert response.status_code != 500, (name, url, response.text)
+            assert NOTE not in response.text, (name, url)
+    assert len(answered) > 10
+    for owner in [
+        ("customer", "/v1/requests"),
+        ("customer", "/v1/requests/{request_id}"),
+        ("customer", "/v1/requests/{request_id}/quotes"),
+        ("customer", "/v1/requests/{request_id}/job"),
+        ("pro", "/v1/pros/me/jobs"),
+        ("pro", "/v1/pros/me/jobs/{job_id}"),
+        ("pro", "/v1/pros/me/opportunities"),
+    ]:
+        assert answered[owner] == 200, owner
 
 
 # --- Mark contacted ---------------------------------------------------------------------------
@@ -331,11 +350,17 @@ async def test_classify_only_before_dispatch_and_to_an_active_category(
         refused = await act(
             db_client, world.agent, request_id, "classify", category_id=str(retired.id)
         )
-        assert refused.status_code == 422
+        assert (refused.status_code, refused.json()["error"]["code"]) == (
+            422,
+            "category_inactive",
+        )
         unknown = await act(
             db_client, world.agent, request_id, "classify", category_id=str(uuid.uuid4())
         )
-        assert unknown.status_code == 422
+        assert (unknown.status_code, unknown.json()["error"]["code"]) == (
+            422,
+            "category_inactive",
+        )
     else:
         assert response.status_code == 409
         assert response.json()["error"]["code"] == "request_not_classifiable"
@@ -389,10 +414,16 @@ async def test_a_followup_is_due_ahead_and_given_to_staff_only_by_an_admin(
     assert mine.status_code == 201, mine.text
     assert mine.json()["assigned_to"]["id"] == str(world.agent.id)
     assert (past.status_code, far.status_code) == (422, 422)
+    assert {past.json()["error"]["code"], far.json()["error"]["code"]} == {
+        "followup_due_out_of_range"
+    }
     assert agent_gives.status_code == 403
     assert admin_gives.status_code == 201
     assert admin_gives.json()["assigned_to"]["id"] == str(world.agent.id)
-    assert to_a_customer.status_code == 422
+    assert (to_a_customer.status_code, to_a_customer.json()["error"]["code"]) == (
+        422,
+        "assignee_not_staff",
+    )
     rows = await audits(db_session, request_id, AuditAction.REQUEST_FOLLOWUP_SCHEDULE)
     assert sorted(str(row.actor_user_id) for row in rows) == sorted(
         [str(world.agent.id), str(world.admin.id)]
@@ -524,3 +555,98 @@ async def test_actions_are_limited_per_staff_member(
 
     assert answers == [201, 201, 429]
     assert other.status_code == 201
+
+
+# --- The panel's additions (82-web-plan.md section 5, agreed with the Foreman) -------------------
+
+
+async def queued_request(session: AsyncSession, world: JobWorld) -> uuid.UUID:
+    request = await make_request(session, world)
+    request_id = request.id
+    await session.commit()
+    return request_id
+
+
+async def test_the_staff_list_names_active_agents_and_admins_only(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    """For the assignee pickers: id, first name, role; never a contact, never a customer, a pro
+    or a suspended account. Staff only."""
+    suspended = await staff(db_session, UserRole.AGENT)
+    await db_session.execute(
+        update(User).where(User.id == suspended.id).values(status=UserStatus.SUSPENDED)
+    )
+    await db_session.commit()
+
+    listed = await db_client.get("/v1/admin/staff", headers=world.agent.headers)
+    refused = [
+        await db_client.get("/v1/admin/staff", headers=party.headers)
+        for party in (world.customer, world.pro)
+    ]
+
+    assert listed.status_code == 200, listed.text
+    members = {member["id"]: member for member in listed.json()["staff"]}
+    assert members[str(world.agent.id)]["role"] == "agent"
+    assert members[str(world.admin.id)]["role"] == "admin"
+    assert str(suspended.id) not in members
+    assert str(world.customer.id) not in members
+    assert all(set(member) == {"id", "first_name", "role"} for member in members.values())
+    assert [response.status_code for response in refused] == [403, 403]
+
+
+async def test_the_badge_counts_my_open_followups_due_by_tonight_overdue_included(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, clock: Clock
+) -> None:
+    """The summary equals the default list: due today or overdue, not done, the caller's own."""
+    request_id = await queued_request(db_session, world)
+    for hours in (1, 2):
+        created = await act(
+            db_client, world.agent, request_id, "followups", **followup_body(timedelta(hours=hours))
+        )
+        assert created.status_code == 201, created.text
+    tomorrow = await act(
+        db_client, world.agent, request_id, "followups", **followup_body(timedelta(days=2))
+    )
+    others = await act(
+        db_client, world.admin, request_id, "followups", **followup_body(timedelta(hours=1))
+    )
+    assert (tomorrow.status_code, others.status_code) == (201, 201)
+    done = await act(
+        db_client, world.agent, request_id, "followups", **followup_body(timedelta(hours=3))
+    )
+    finished = await db_client.post(
+        f"/v1/admin/requests/{request_id}/followups/{done.json()['id']}/done",
+        headers=world.agent.headers,
+    )
+    assert finished.status_code == 200, finished.text
+    # Hours later the first ones are overdue: still counted.
+    clock.now += timedelta(hours=2, minutes=30)
+
+    summary = await db_client.get("/v1/admin/followups/summary", headers=world.agent.headers)
+    listed = await db_client.get("/v1/admin/followups", headers=world.agent.headers)
+
+    assert summary.status_code == 200, summary.text
+    assert summary.json() == {"due_today": 2}
+    assert len(listed.json()["items"]) == summary.json()["due_today"]
+    customer = await db_client.get("/v1/admin/followups/summary", headers=world.customer.headers)
+    assert customer.status_code == 403
+
+
+async def test_the_card_says_whether_the_caller_may_act(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    """Unassigned: anyone on staff; held: its holder and admins, not another agent."""
+    request_id = await queued_request(db_session, world)
+    other = await staff(db_session, UserRole.AGENT)
+    card = f"/v1/admin/requests/{request_id}"
+
+    open_card = await db_client.get(card, headers=other.headers)
+    claimed = await db_client.post(f"{card}/claim", headers=world.agent.headers)
+    held = {
+        name: (await db_client.get(card, headers=party.headers)).json()["actions_allowed"]
+        for name, party in (("holder", world.agent), ("other", other), ("admin", world.admin))
+    }
+
+    assert open_card.json()["actions_allowed"] is True
+    assert claimed.status_code == 200, claimed.text
+    assert held == {"holder": True, "other": False, "admin": True}

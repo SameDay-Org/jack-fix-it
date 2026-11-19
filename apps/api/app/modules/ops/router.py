@@ -24,11 +24,13 @@ from app.modules.ops.schemas import (
     FollowupIn,
     FollowupOut,
     FollowupsPage,
+    FollowupsSummary,
     NoteIn,
     NoteOut,
     QueuePage,
     QueueSummary,
     RequestCard,
+    StaffList,
 )
 from app.modules.ops.service import OpsConfig, OpsQueueService
 from app.modules.requests.queue import RequestStatus
@@ -39,6 +41,8 @@ from app.rate_limit import RateLimiter, enforce_limit, get_rate_limiter
 staff_router = APIRouter(prefix="/admin/requests", tags=["ops"], route_class=NoStoreRoute)
 # A staff member's follow-ups across requests (#82).
 followups_router = APIRouter(prefix="/admin/followups", tags=["ops"], route_class=NoStoreRoute)
+# The active agents and admins, for the panel's assignee pickers (#82). Staff only.
+staff_members_router = APIRouter(prefix="/admin/staff", tags=["ops"], route_class=NoStoreRoute)
 
 
 def _error(description: str) -> dict[str, Any]:
@@ -281,7 +285,7 @@ async def staff_mark_contacted(
             "request is past reviewing (dispatch took it)."
         ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
-            "validation_error: a category that is not active, or a bad id."
+            "category_inactive: the category is not active; validation_error: a bad id."
         ),
     },
 )
@@ -306,8 +310,9 @@ async def staff_classify_request(
             "someone else."
         ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
-            "validation_error: due in the past or more than OPS_FOLLOWUP_MAX_DAYS ahead, an "
-            "assignee who is not an active agent or admin, a note empty or over 500 characters."
+            "followup_due_out_of_range: due in the past or more than OPS_FOLLOWUP_MAX_DAYS "
+            "ahead; assignee_not_staff: the assignee is not an active agent or admin; "
+            "validation_error: a note empty or over 500 characters, a bad id."
         ),
     },
 )
@@ -368,3 +373,27 @@ async def staff_list_followups(
     """The follow-ups not done, the most overdue first. Each names its request by code and
     status: never a contact."""
     return await actions.due_followups(user, assignee=assignee, due=due, limit=limit, cursor=cursor)
+
+
+@followups_router.get(
+    "/summary",
+    response_model=FollowupsSummary,
+    summary="How many of my follow-ups are due today (staff)",
+    responses={**_STAFF_ACCESS},
+)
+async def staff_followups_summary(user: PanelUser, actions: Actions) -> FollowupsSummary:
+    """The caller's open follow-ups due by the end of today in the business time zone, overdue
+    ones included: the nav badge, equal to the default follow-ups list's length."""
+    return await actions.followups_summary(user)
+
+
+@staff_members_router.get(
+    "",
+    response_model=StaffList,
+    summary="The active agents and admins (staff)",
+    responses={**_STAFF_ACCESS},
+)
+async def staff_members(user: PanelUser, actions: Actions) -> StaffList:
+    """Id, first name and role of every active agent and admin, for assigning a follow-up and
+    filtering the follow-ups list. No contact."""
+    return await actions.staff_members(user)

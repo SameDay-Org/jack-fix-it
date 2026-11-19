@@ -54,8 +54,10 @@ from app.modules.audit.types import (
 )
 from app.modules.categories.service import CategoryService
 from app.modules.ops.errors import (
+    AssigneeNotStaffError,
+    CategoryInactiveError,
+    FollowupDueOutOfRangeError,
     FollowupNotFoundError,
-    InvalidOpsActionError,
     InvalidQueueQueryError,
     QueueRequestNotFoundError,
     RequestHeldError,
@@ -71,8 +73,11 @@ from app.modules.ops.schemas import (
     FollowupItem,
     FollowupOut,
     FollowupsPage,
+    FollowupsSummary,
     NoteOut,
     QueueAgent,
+    StaffList,
+    StaffMemberOut,
 )
 from app.modules.requests.queue import LockedRequest, RequestQueueReader, RequestStatus
 from app.modules.users.service import UserService
@@ -203,7 +208,7 @@ class OpsActions:
             raise RequestNotClassifiableError
         if not await self._categories.is_active(category_id):
             await self._session.rollback()
-            raise InvalidOpsActionError
+            raise CategoryInactiveError
         [category] = await self._categories.summaries([category_id])
         if locked.category_id != category_id:
             before = None if locked.category_id is None else str(locked.category_id)
@@ -226,7 +231,7 @@ class OpsActions:
         now = self._clock()
         if not now < data.due_at <= now + self._config.followup_max_ahead:
             await self._session.rollback()
-            raise InvalidOpsActionError
+            raise FollowupDueOutOfRangeError
         assignee = data.assigned_to or staff.id
         if assignee != staff.id:
             if staff.role is not UserRole.ADMIN:
@@ -235,7 +240,7 @@ class OpsActions:
             account = await self._users.get_by_id(assignee)
             if account is None or account.role not in _STAFF or account.status != UserStatus.ACTIVE:
                 await self._session.rollback()
-                raise InvalidOpsActionError
+                raise AssigneeNotStaffError
         followup = await self._followups.add(
             RequestFollowup(
                 request_id=locked.id,
@@ -288,6 +293,30 @@ class OpsActions:
             {"followup_id": str(followup.id), "done_at": now.isoformat()},
         )
         return out
+
+    async def staff_members(self, staff: UserAccount) -> StaffList:
+        """The active agents and admins, for the panel's assignee pickers. The caller must be
+        active staff now. Ends its transaction."""
+        try:
+            await self._active(staff)
+            return StaffList(
+                staff=[
+                    StaffMemberOut(id=user_id, first_name=first, role=role)
+                    for user_id, first, role in await self._users.active_staff()
+                ]
+            )
+        finally:
+            await self._session.rollback()
+
+    async def followups_summary(self, staff: UserAccount) -> FollowupsSummary:
+        """The caller's open follow-ups due by the end of today in the business time zone,
+        overdue ones included: the default list's length, for the panel's badge. Ends its
+        transaction."""
+        try:
+            due = await self._followups.count_open_due(staff.id, await self._end_of_today())
+            return FollowupsSummary(due_today=due)
+        finally:
+            await self._session.rollback()
 
     async def due_followups(
         self,

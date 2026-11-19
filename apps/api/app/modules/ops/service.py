@@ -197,6 +197,10 @@ class OpsQueueService:
         if row is None:
             raise QueueRequestNotFoundError
         card = await self._card(row)
+        holder = card.assigned_agent
+        card.actions_allowed = (
+            holder is None or holder.id == staff.id or staff.role is UserRole.ADMIN
+        )
         # Committed before the answer: an audit write that fails answers 500, so no contact
         # is shown unaudited.
         try:

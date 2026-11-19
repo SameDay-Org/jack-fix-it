@@ -32,14 +32,29 @@ class RequestNotClassifiableError(ConflictError):
     message = "This request can no longer be classified."
 
 
-class InvalidOpsActionError(AppError):
-    """What the schema cannot check alone in a BDC action (#82): a category that is not active,
-    a follow-up due in the past or too far ahead, an assignee who is not an active agent or
-    admin. The same body as any other validation error."""
+class CategoryInactiveError(AppError):
+    """A classification to a category that is not active (#82): its own code, so the panel
+    says what to fix (82-web-plan.md section 5)."""
 
     status_code = 422
-    code = "validation_error"
-    message = "The request is invalid."
+    code = "category_inactive"
+    message = "This category is not active."
+
+
+class FollowupDueOutOfRangeError(AppError):
+    """A follow-up due in the past, or more than OPS_FOLLOWUP_MAX_DAYS ahead (#82)."""
+
+    status_code = 422
+    code = "followup_due_out_of_range"
+    message = "A follow-up is due between now and the furthest day allowed."
+
+
+class AssigneeNotStaffError(AppError):
+    """A follow-up given to someone who is not an active agent or admin (#82)."""
+
+    status_code = 422
+    code = "assignee_not_staff"
+    message = "A follow-up goes to an active agent or admin."
 
 
 class FollowupNotFoundError(NotFoundError):
