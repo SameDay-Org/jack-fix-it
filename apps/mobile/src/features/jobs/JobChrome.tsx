@@ -12,14 +12,15 @@ const SHEET_BOTTOM = 24;
 
 /**
  * The round way back, over the hero's top left corner: a translucent white pill over the navy
- * drawn map, a light glass one over the live map (#353), whose streets are light.
+ * drawn map, a light glass one with a navy arrow over a light hero: the live map (#353), whose
+ * streets are light, or a photo of the work (#477), where the white pill would disappear.
  */
-export function MapBack({ onMap = false }: { onMap?: boolean }) {
+export function MapBack({ overLight = false }: { overLight?: boolean }) {
   const { t } = useTranslation();
   const button = (
     <Button
       glyph="back"
-      variant={onMap ? "ghost" : "hero"}
+      variant={overLight ? "ghost" : "hero"}
       label={t("common.back")}
       onPress={() => backToPrevious("/")}
       testID="job-back"
@@ -27,8 +28,8 @@ export function MapBack({ onMap = false }: { onMap?: boolean }) {
   );
   return (
     <View className="absolute left-4 top-2">
-      {onMap ? (
-        <GlassSurface tone="light" shape="pill" interactive>
+      {overLight ? (
+        <GlassSurface tone="light" shape="pill" interactive testID="job-back-glass">
           {button}
         </GlassSurface>
       ) : (
