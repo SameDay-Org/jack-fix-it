@@ -479,7 +479,7 @@
     },
     "logout": "Cerrar sesión",
     "home": {
-      "welcome": "Te damos la bienvenida, {{email}}",
+      "welcome": "Te damos la bienvenida, {{name}}",
       "openQueue": "Abrir la cola de operaciones"
     },
     "support": {
