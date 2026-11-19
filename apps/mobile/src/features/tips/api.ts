@@ -17,12 +17,7 @@ import type { PaymentSheetOut } from "@/features/payments/paymentStore";
 
 /** The tip's state on the server; `null` while the customer has chosen nothing yet. */
 export type TipStatus =
-  | "declined"
-  | "requires_payment"
-  | "processing"
-  | "succeeded"
-  | "failed"
-  | "canceled";
+  "declined" | "requires_payment" | "processing" | "succeeded" | "failed" | "canceled";
 
 export type TipChoice = "none" | "percent" | "custom";
 

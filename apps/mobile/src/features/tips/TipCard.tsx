@@ -74,12 +74,7 @@ export function TipCard({ requestId, job }: { requestId: string; job: CustomerJo
           className="flex-row flex-wrap gap-2"
           testID="tip-options"
         >
-          <Chip
-            label={t("tips.none")}
-            onPress={state.skip}
-            disabled={busy}
-            testID="tip-none"
-          />
+          <Chip label={t("tips.none")} onPress={state.skip} disabled={busy} testID="tip-none" />
           {tip.options.presets.map((preset) => (
             <Chip
               key={preset.percent}

@@ -105,6 +105,14 @@ const flush = () =>
   act(async () => {
     await jest.runOnlyPendingTimersAsync();
   });
+/**
+ * One more fake millisecond: enough for a cache notification, without draining the poll's and the
+ * wait's timers (they re-arm while the card waits, so draining them never ends).
+ */
+const tick = () =>
+  act(async () => {
+    await jest.advanceTimersByTimeAsync(1);
+  });
 const chip = (name: string) => screen.getByRole("radio", { name });
 const payButton = () => screen.getByTestId("tip-pay");
 const tipCalls = () => jest.mocked(apiPost).mock.calls.filter(([path]) => path === TIP_PATH);
@@ -173,7 +181,7 @@ describe("TipCard (#273)", () => {
     await act(async () => {
       await jest.advanceTimersByTimeAsync(5_000);
     });
-    await flush();
+    await tick();
     expect(screen.getByTestId("tip-done")).toHaveTextContent("You tipped Dan $9.99. Thank you!");
     expect(Haptics.notificationAsync).toHaveBeenCalledTimes(1);
   });
@@ -212,7 +220,7 @@ describe("TipCard (#273)", () => {
       await jest.advanceTimersByTimeAsync(5_000);
     });
 
-    await flush();
+    await tick();
     expect(screen.getByTestId("tip-failed")).toHaveTextContent(
       "The tip didn't go through. Your job is still confirmed.",
     );

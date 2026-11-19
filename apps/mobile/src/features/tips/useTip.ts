@@ -111,9 +111,7 @@ export function useTip(requestId: string, job: CustomerJob): TipState {
   useEffect(() => {
     if (!landed || !tip || announced.current) return;
     announced.current = true;
-    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-      () => undefined,
-    );
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
     AccessibilityInfo.announceForAccessibility(
       t("tips.done", {
         name: proNames(t, job).lead,
@@ -122,7 +120,13 @@ export function useTip(requestId: string, job: CustomerJob): TipState {
     );
   }, [landed, tip, job, t]);
 
-  const phase: TipPhase = working ? "working" : waiting ? (expired ? "delayed" : "confirming") : "idle";
+  const phase: TipPhase = working
+    ? "working"
+    : waiting
+      ? expired
+        ? "delayed"
+        : "confirming"
+      : "idle";
   const failure =
     phase === "idle" ? (localFailure ?? (status === "failed" ? "declined" : null)) : null;
 

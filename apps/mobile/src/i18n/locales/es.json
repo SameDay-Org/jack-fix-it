@@ -546,13 +546,7 @@
   },
   "launch": {
     "headline": "Pase lo que pase en casa, lo {{word}}.",
-    "words": [
-      "arreglamos",
-      "limpiamos",
-      "pintamos",
-      "podamos",
-      "mudamos"
-    ],
+    "words": ["arreglamos", "limpiamos", "pintamos", "podamos", "mudamos"],
     "skip": "Saltar introducción"
   },
   "media": {
