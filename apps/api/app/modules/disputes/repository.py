@@ -213,6 +213,22 @@ class DisputePhotoRepository:
         self._session.add_all(photos)
         await self._session.flush()
 
+    async def stale_pending(
+        self, before: datetime, limit: int
+    ) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """(dispute id, photo id) of the photos still pending that were attached before
+        `before` (#473), oldest first, at most `limit`."""
+        statement = (
+            select(DisputePhoto.dispute_id, DisputePhoto.id)
+            .where(
+                DisputePhoto.safe_status == MediaSafeStatus.PENDING,
+                DisputePhoto.created_at < before,
+            )
+            .order_by(DisputePhoto.created_at, DisputePhoto.id)
+            .limit(limit)
+        )
+        return [(parent, photo) for parent, photo in await self._session.execute(statement)]
+
     async def pending(
         self, dispute_id: uuid.UUID, photo_ids: Collection[uuid.UUID]
     ) -> list[DisputePhoto]:

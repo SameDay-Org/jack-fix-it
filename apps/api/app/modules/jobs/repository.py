@@ -346,6 +346,19 @@ class JobPhotoRepository:
         self._session.add_all(photos)
         await self._session.flush()
 
+    async def stale_pending(
+        self, before: datetime, limit: int
+    ) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """(job id, photo id) of the photos still pending that were taken before `before`
+        (#473), oldest first, at most `limit`."""
+        statement = (
+            select(JobPhoto.job_id, JobPhoto.id)
+            .where(JobPhoto.safe_status == MediaSafeStatus.PENDING, JobPhoto.created_at < before)
+            .order_by(JobPhoto.created_at, JobPhoto.id)
+            .limit(limit)
+        )
+        return [(job_id, photo_id) for job_id, photo_id in await self._session.execute(statement)]
+
     async def pending(self, job_id: uuid.UUID, photo_ids: Collection[uuid.UUID]) -> list[JobPhoto]:
         """Those of the job's photos `photo_ids` still without a safe copy, oldest first."""
         statement = (
