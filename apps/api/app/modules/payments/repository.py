@@ -413,6 +413,15 @@ class RefundRepository:
         )
         return (await self._session.scalars(statement)).one_or_none()
 
+    async def all_of_dispute(self, dispute_id: uuid.UUID) -> list[Refund]:
+        """Every refund of the dispute, abandoned ones included, unlocked."""
+        statement = (
+            select(Refund)
+            .where(Refund.dispute_id == dispute_id)
+            .execution_options(populate_existing=True)
+        )
+        return list((await self._session.scalars(statement)).all())
+
     async def abandoned_of_dispute(self, dispute_id: uuid.UUID) -> int:
         """How many of the dispute's refunds staff abandoned (#434)."""
         statement = select(func.count()).where(
@@ -457,6 +466,7 @@ class RefundRepository:
             .values(
                 status=RefundStatus.PENDING,
                 last_error_code=None,
+                last_error_definitive=False,
                 requested_at=now,
                 attempts=Refund.attempts + 1,
             )
@@ -464,9 +474,12 @@ class RefundRepository:
         )
         return await self._session.scalar(statement)
 
-    async def mark_failed(self, refund_id: uuid.UUID, attempt: int, code: str) -> bool:
-        """Ends attempt number `attempt` as failed with `code`. False (nothing written) when a
-        later attempt started meanwhile or the refund was stored."""
+    async def mark_failed(
+        self, refund_id: uuid.UUID, attempt: int, code: str, *, definitive: bool = False
+    ) -> bool:
+        """Ends attempt number `attempt` as failed with `code`, `definitive` when it was
+        Stripe's definitive answer to the create. False (nothing written) when a later attempt
+        started meanwhile or the refund was stored."""
         statement = (
             update(Refund)
             .where(
@@ -475,7 +488,9 @@ class RefundRepository:
                 Refund.status == RefundStatus.PENDING,
                 Refund.stripe_refund_id.is_(None),
             )
-            .values(status=RefundStatus.FAILED, last_error_code=code)
+            .values(
+                status=RefundStatus.FAILED, last_error_code=code, last_error_definitive=definitive
+            )
             .returning(Refund.id)
         )
         return (await self._session.scalar(statement)) is not None

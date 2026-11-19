@@ -98,7 +98,25 @@ class DisputeRefund:
     attempts: int
     idempotency_key: str
     last_error_code: str | None
+    last_error_definitive: bool
     requested_at: datetime | None
+
+    @property
+    def refused_for_good(self) -> bool:
+        """Its last attempt failed with Stripe's definitive answer to the create: the same
+        key gets the same refusal, so it can never make a refund (#434)."""
+        return self.status is RefundStatus.FAILED and self.last_error_definitive
+
+    @property
+    def last_attempt_failed(self) -> bool:
+        """Its last attempt ended failed, with no Stripe refund stored."""
+        return self.status is RefundStatus.FAILED
+
+    @property
+    def created_then_dead(self) -> bool:
+        """Stripe accepted it and its stored status is failed or canceled (terminal); a caller
+        that acts on it reads Stripe again first."""
+        return self.status is RefundStatus.CREATED and self.dead
 
     @property
     def abandoned(self) -> bool:
@@ -251,6 +269,10 @@ class RefundLedger:
         refund = await self._refunds.current_of_dispute_for_update(dispute_id)
         return None if refund is None else _dispute_refund(refund)
 
+    async def all_of_dispute(self, dispute_id: uuid.UUID) -> list[DisputeRefund]:
+        """Every refund row of the dispute, abandoned ones included, unlocked."""
+        return [_dispute_refund(row) for row in await self._refunds.all_of_dispute(dispute_id)]
+
     async def abandon(self, refund: DisputeRefund) -> bool:
         """Staff give the refund up (#434); False when it was abandoned already. The caller
         holds its lock (locked_of_dispute), checked it cannot move money, and commits it with
@@ -328,11 +350,15 @@ class RefundLedger:
             initiated_by=initiated_by,
         )
 
-    async def failed(self, attempt: RefundAttempt, code: str) -> None:
+    async def failed(self, attempt: RefundAttempt, code: str, *, definitive: bool = False) -> None:
         """Ends the attempt as failed with `code` (cut to the column), unless a later one
-        started or Stripe's refund was stored."""
+        started or Stripe's refund was stored; `definitive` when it was Stripe's definitive
+        answer to the create (#434: only such a refund may be abandoned)."""
         await self._refunds.mark_failed(
-            attempt.refund_id, attempt.number, code[:REFUND_ERROR_CODE_LENGTH]
+            attempt.refund_id,
+            attempt.number,
+            code[:REFUND_ERROR_CODE_LENGTH],
+            definitive=definitive,
         )
 
     async def observe(self, refund: DisputeRefund, made: RefundFacts) -> Observed:
@@ -390,6 +416,7 @@ def _dispute_refund(refund: Refund) -> DisputeRefund:
         attempts=refund.attempts,
         idempotency_key=refund.idempotency_key,
         last_error_code=refund.last_error_code,
+        last_error_definitive=refund.last_error_definitive,
         requested_at=refund.requested_at,
     )
 

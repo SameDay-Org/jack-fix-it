@@ -54,6 +54,9 @@ class AuditAction(StrEnum):
     # Staff abandoned a dispute's refund Stripe refused for good, failed or canceled, once Stripe
     # showed none that could still move money, so an admin may decide again (#434).
     DISPUTE_REFUND_ABANDON = "dispute.refund_abandon"
+    # An abandon the operator confirmed that was refused, or could not finish (#450 round 1):
+    # its outcome code, so a confirmed attempt never leaves no trace.
+    DISPUTE_REFUND_ABANDON_REFUSED = "dispute.refund_abandon_refused"
 
 
 class AuditEntityType(StrEnum):

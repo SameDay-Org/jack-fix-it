@@ -3,6 +3,7 @@ good, failed or canceled, once Stripe shows none for the dispute that could stil
 an admin then decides the dispute again. Stripe is faked (the resolution tests' fake); the
 script runs on the rolled-back test session, its audit row checked there."""
 
+import dataclasses
 import io
 import logging
 import uuid
@@ -17,7 +18,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.integrations.stripe_errors import StripeRejectedError
+from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.integrations.stripe_refunds import FoundRefunds, RefundFacts, get_stripe_refunds
 from app.modules.audit.models import AuditLog
 from app.modules.disputes.models import DisputeStatus
@@ -58,7 +59,9 @@ REASON: Final = "zq434 ticket 77"
 
 @pytest.fixture
 def settings() -> Settings:
-    return make_settings(refund_stuck_pending_minutes=int(STUCK.total_seconds() // 60))
+    return make_settings(
+        refund_stuck_pending_minutes=int(STUCK.total_seconds() // 60), refund_abandon_enabled=True
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -123,6 +126,13 @@ async def abandon(
         assert OPERATOR_DOMAIN not in text
         assert REASON not in text
     return code, terminal
+
+
+async def refused_rows(session: AsyncSession, case: Case) -> list[AuditLog]:
+    statement = select(AuditLog).where(
+        AuditLog.action == "dispute.refund_abandon_refused", AuditLog.entity_id == case.dispute_id
+    )
+    return list((await session.scalars(statement)).all())
 
 
 async def abandon_rows(session: AsyncSession, case: Case) -> list[AuditLog]:
@@ -263,19 +273,30 @@ async def _pending_refund(
     await session.commit()
 
 
+DASHBOARD: Final = "re_probe76dash"
+
+
 @pytest.mark.parametrize(
     ("situation", "expected"),
     [
         ("resolved", "is resolved"),
         ("no_refund", "has no refund to abandon"),
-        ("in_flight", "is under way"),
-        ("live_at_stripe", "may still give the money back"),
-        ("stripe_lists_a_live_one", "not failed or canceled"),
+        # An attempt with no outcome is never abandoned, however old: age proves nothing.
+        ("in_flight", "is not final"),
+        ("aged_in_flight", "is not final"),
+        ("timeout_failed", "is not final"),
+        ("live_at_stripe", "is not final"),
+        ("stripe_lists_a_live_one", "for this dispute that is not failed or canceled"),
+        ("dashboard_pending", "this dispute did not create"),
+        ("dashboard_requires_action", "this dispute did not create"),
+        ("dashboard_succeeded", "this dispute did not create"),
+        ("another_dispute_s_refund", "this dispute did not create"),
         ("listing_incomplete", "more refunds for this payment than one page"),
+        ("listing_error", "not reachable"),
         ("not_confirmed", "Not confirmed"),
     ],
 )
-async def test_abandoning_is_refused_while_the_refund_could_still_move_money(
+async def test_abandoning_is_refused_unless_stripe_s_answer_is_final_and_nothing_can_move_money(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
     world: JobWorld,
@@ -290,9 +311,14 @@ async def test_abandoning_is_refused_while_the_refund_could_still_move_money(
     terminal = Terminal(["n"] if situation == "not_confirmed" else ["y"])
     if situation == "resolved":
         assert (await resolve(db_client, world, case, "release")).status_code == 200
-    elif situation == "in_flight":
-        # Stamped just now, as the script's own (real) clock reads it.
-        await _pending_refund(db_session, case, world, attempts=1, requested_at=datetime.now(UTC))
+    elif situation in ("in_flight", "aged_in_flight"):
+        started = datetime.now(UTC) - (
+            timedelta(days=3) if situation == "aged_in_flight" else timedelta(0)
+        )
+        await _pending_refund(db_session, case, world, attempts=1, requested_at=started)
+    elif situation == "timeout_failed":
+        refunds.errors["create"] = [StripeUnavailableError(request_id="req_timeout")]
+        assert (await resolve(db_client, world, case, "refund")).status_code == 503
     elif situation == "live_at_stripe":
         refunds.status = "pending"
         assert (await resolve(db_client, world, case, "refund")).status_code == 409
@@ -305,8 +331,20 @@ async def test_abandoning_is_refused_while_the_refund_could_still_move_money(
                 RefundFacts("re_probe76live", TOTAL, "usd", str(case.dispute_id), "pending", None),
                 case.payment_intent_id,
             )
+        elif situation.startswith("dashboard_"):
+            status = situation.removeprefix("dashboard_")
+            refunds.add(
+                RefundFacts(DASHBOARD, 500, "usd", None, status, None), case.payment_intent_id
+            )
+        elif situation == "another_dispute_s_refund":
+            refunds.add(
+                RefundFacts(DASHBOARD, 500, "usd", str(uuid.uuid4()), "succeeded", None),
+                case.payment_intent_id,
+            )
         elif situation == "listing_incomplete":
             refunds.list_complete = False
+        elif situation == "listing_error":
+            refunds.errors["list"] = [StripeUnavailableError(request_id="req_list")]
     rows_before = [(r.id, r.status, r.attempts) for r in await refund_rows(db_session, case)]
 
     code, terminal = await abandon(db_session, settings, refunds, case, caplog, terminal)
@@ -317,6 +355,139 @@ async def test_abandoning_is_refused_while_the_refund_could_still_move_money(
         rows_before
     )
     assert await abandon_rows(db_session, case) == []
+    # Refused on the first look, before the operator confirmed: nothing written at all.
+    assert await refused_rows(db_session, case) == []
+
+
+@pytest.mark.parametrize("now", ["pending", "succeeded"])
+async def test_a_refund_stored_failed_is_read_again_and_refused_unless_stripe_says_so_now(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    refunds: FakeStripeRefunds,
+    settings: Settings,
+    caplog: pytest.LogCaptureFixture,
+    now: str,
+) -> None:
+    """The stored status is never trusted: the apply reads the refund by its id."""
+    case = await disputed(db_session, world)
+    refunds.status = "failed"
+    assert (await resolve(db_client, world, case, "refund")).status_code == 409
+    [made] = refunds.refunds.values()
+    refunds.set_status(made.refund_id, now)
+
+    code, terminal = await abandon(db_session, settings, refunds, case, caplog)
+
+    assert code == 1
+    assert "does not show this refund failed or canceled now" in terminal.text
+    [row] = await refund_rows(db_session, case)
+    assert (row.status, row.stripe_status) == (RefundStatus.CREATED, "failed")
+
+
+async def test_the_repair_is_off_until_the_setting_turns_it_on(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    refunds: FakeStripeRefunds,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    case = await refused_by_stripe(db_client, db_session, world, refunds)
+
+    off, terminal = await abandon(
+        db_session, make_settings(refund_abandon_enabled=False), refunds, case, caplog
+    )
+
+    assert off == 1
+    assert "REFUND_ABANDON_ENABLED" in terminal.text
+    assert refunds.lists == []  # Stripe not even read
+    [row] = await refund_rows(db_session, case)
+    assert row.status is RefundStatus.FAILED
+    assert (await abandon_rows(db_session, case), await refused_rows(db_session, case)) == ([], [])
+
+
+@pytest.mark.parametrize("meanwhile", ["live_refund", "stripe_unavailable"])
+async def test_a_confirmed_attempt_that_is_refused_is_audited_before_the_answer(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    settings: Settings,
+    operator: uuid.UUID,
+    caplog: pytest.LogCaptureFixture,
+    meanwhile: str,
+) -> None:
+    """After the operator confirmed, the apply's own Stripe read finds a refund that can move
+    money (a dashboard refund made meanwhile), or Stripe is unreachable: the outcome is on
+    record (a code, no provider text) before the script answers 1."""
+    stripe = ListingFake()
+    app.dependency_overrides[get_stripe_refunds] = lambda: stripe
+    case = await refused_by_stripe(db_client, db_session, world, stripe)
+    lists = 0
+
+    async def meanwhile_at_apply() -> None:
+        # Runs after a listing's snapshot: the first look's, so the apply's own read sees it.
+        nonlocal lists
+        lists += 1
+        if lists == 1:
+            if meanwhile == "live_refund":
+                stripe.add(
+                    RefundFacts(DASHBOARD, 500, "usd", None, "pending", None),
+                    case.payment_intent_id,
+                )
+            else:
+                stripe.errors["list"] = [StripeUnavailableError(request_id="req_gone")]
+
+    stripe.on_list = meanwhile_at_apply
+
+    code, _ = await abandon(db_session, settings, stripe, case, caplog)
+
+    assert code == 1
+    [row] = await refund_rows(db_session, case)
+    assert row.status is RefundStatus.FAILED
+    assert await abandon_rows(db_session, case) == []
+    [refused] = await refused_rows(db_session, case)
+    expected = "refused_unattributed_refund" if meanwhile == "live_refund" else "stripe_unavailable"
+    assert (refused.actor_user_id, refused.after) == (
+        operator,
+        {"outcome": expected, "refund_id": str(row.id)},
+    )
+
+
+async def test_an_unknown_refund_of_an_abandoned_dispute_that_succeeds_alarms_staff(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+    settings: Settings,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A refund no row holds whose metadata names a dispute with an abandoned refund: Stripe is
+    read, staff get an ERROR with the ids, and nothing settles."""
+    case = await refused_by_stripe(db_client, db_session, world, refunds)
+    assert (await abandon(db_session, settings, refunds, case, caplog))[0] == 0
+    late = RefundFacts("re_probe76late", TOTAL, "usd", str(case.dispute_id), "succeeded", None)
+    refunds.add(late, case.payment_intent_id)
+    base = refund_event("refund.updated", late.refund_id, "succeeded")
+    named = {
+        "id": late.refund_id,
+        "object": "refund",
+        "metadata": {"dispute_id": str(case.dispute_id)},
+    }
+    event = dataclasses.replace(base, payload={**base.payload, "data": {"object": named}})
+
+    await deliver(db_session, refunds, queue, event)
+
+    assert (await dispute_row(db_session, case)).status is DisputeStatus.OPEN
+    assert queue.jobs == {}
+    [error] = [
+        r for r in caplog.records if r.getMessage() == "refund_event_abandoned_refund_succeeded"
+    ]
+    assert (error.levelno, error.__dict__["dispute_id"], error.__dict__["job_id"]) == (
+        logging.ERROR,
+        str(case.dispute_id),
+        str(case.job_id),
+    )
 
 
 async def test_a_refund_that_changes_while_stripe_is_read_is_not_abandoned(

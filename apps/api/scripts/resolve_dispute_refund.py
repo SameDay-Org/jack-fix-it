@@ -33,7 +33,6 @@ import uuid
 from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
-from datetime import timedelta
 from typing import NoReturn, TextIO
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -124,9 +123,7 @@ async def run(
                 operator = await operator_of(session, args)
             finally:
                 await session.rollback()
-            repair = DisputeRefundRepair(
-                session, stripe, timedelta(minutes=settings.refund_stuck_pending_minutes)
-            )
+            repair = DisputeRefundRepair(session, stripe, enabled=settings.refund_abandon_enabled)
             await repair.abandon(dispute_id, operator, apply=False)
             print(
                 f"Will abandon the refund of dispute {dispute_id}: Stripe shows none for it that "
@@ -137,7 +134,7 @@ async def run(
             # Off the event loop: nothing is locked while the operator reads, and the apply
             # below reads Stripe and checks everything again.
             if not (args.yes or await confirm_off_loop(lambda: _confirmed(io))):
-                raise RefundRepairRefusedError("Not confirmed; nothing changed.")
+                raise RefundRepairRefusedError("not_confirmed", "Not confirmed; nothing changed.")
             await repair.abandon(dispute_id, operator, apply=True)
         print(f"The refund of dispute {dispute_id} is abandoned.", file=io.out)
         return 0

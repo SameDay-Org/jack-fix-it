@@ -42,6 +42,14 @@ def upgrade() -> None:
         TABLE,
         "status = 'abandoned' OR (status = 'created') = (stripe_status IS NOT NULL)",
     )
+    # Whether the last attempt's failure was Stripe's definitive answer to the create (a 4xx
+    # error with a Stripe code: the same key gets the same refusal back, so that create can
+    # never make a refund): only such a refund may be abandoned (#450 round 1). The previous
+    # code never writes it; false by default.
+    op.add_column(
+        TABLE,
+        sa.Column("last_error_definitive", sa.Boolean(), server_default=sa.false(), nullable=False),
+    )
     # One refund per dispute that is not abandoned: the one the dispute's decision carries out.
     op.create_index(
         op.f(CURRENT_INDEX),
@@ -65,6 +73,7 @@ def downgrade() -> None:
             "Take a backup and settle them by hand before downgrading."
         )
     op.drop_index(op.f(CURRENT_INDEX), table_name=TABLE)
+    op.drop_column(TABLE, "last_error_definitive")
     op.drop_constraint(op.f(STRIPE_STATUS_CHECK), TABLE, type_="check")
     op.create_check_constraint(
         op.f(STRIPE_STATUS_CHECK), TABLE, "(status = 'created') = (stripe_status IS NOT NULL)"
