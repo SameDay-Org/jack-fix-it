@@ -434,6 +434,19 @@ class RefundRepository:
         )
         return list((await self._session.scalars(statement)).all())
 
+    async def all_of_dispute_for_update(self, dispute_id: uuid.UUID) -> list[Refund]:
+        """Every refund of the dispute, abandoned ones included, locked until the transaction
+        ends (in id order, so two lockers never deadlock), read as last committed. Take the
+        job's and the dispute's locks first."""
+        statement = (
+            select(Refund)
+            .where(Refund.dispute_id == dispute_id)
+            .order_by(Refund.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return list((await self._session.scalars(statement)).all())
+
     async def abandoned_of_dispute(self, dispute_id: uuid.UUID) -> int:
         """How many of the dispute's refunds staff abandoned (#434)."""
         statement = select(func.count()).where(

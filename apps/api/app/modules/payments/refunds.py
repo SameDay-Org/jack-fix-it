@@ -274,6 +274,12 @@ class RefundLedger:
         """Every refund row of the dispute, abandoned ones included, unlocked."""
         return [_dispute_refund(row) for row in await self._refunds.all_of_dispute(dispute_id)]
 
+    async def locked_all_of_dispute(self, dispute_id: uuid.UUID) -> list[DisputeRefund]:
+        """Every refund row of the dispute, abandoned ones included, locked until the
+        transaction ends. Take the job's and the dispute's locks first."""
+        rows = await self._refunds.all_of_dispute_for_update(dispute_id)
+        return [_dispute_refund(row) for row in rows]
+
     async def abandon(self, refund: DisputeRefund) -> bool:
         """Staff give the refund up (#434); False when it was abandoned already. The caller
         holds its lock (locked_of_dispute), checked it cannot move money, and commits it with
