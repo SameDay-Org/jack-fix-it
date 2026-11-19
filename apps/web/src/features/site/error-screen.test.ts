@@ -76,6 +76,7 @@ describe("the error screens (#462)", () => {
       "The panel can't reach the server right now",
     );
     expect(buttons()).toEqual(["Try again"]);
+    expect(container.querySelectorAll("main")).toHaveLength(1); // the page's one main landmark
   });
 
   it("a panel page: the staff member's language, a retry and the way back to the panel", async () => {
@@ -87,6 +88,7 @@ describe("the error screens (#462)", () => {
     );
     expect(buttons()).toEqual(["Volver a intentar", "Volver al panel"]);
     expect(container.querySelector("a")?.getAttribute("href")).toBe("/admin");
+    expect(container.querySelector("main")).toBeNull(); // inside the panel's own main
   });
 
   it("gets its words from the layouts above it, from the catalogs", async () => {

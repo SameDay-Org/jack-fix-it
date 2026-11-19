@@ -62,8 +62,10 @@ export function ErrorScreen({
     );
   }
 
+  // The whole panel's screen is the page (its main landmark); a page's sits in the panel's main.
+  const Frame = variant === "panel" ? "main" : "div";
   return (
-    <div
+    <Frame
       className={
         variant === "panel"
           ? "flex min-h-dvh items-center justify-center bg-gray-50 px-4 py-10"
@@ -91,6 +93,6 @@ export function ErrorScreen({
           ) : null}
         </div>
       </section>
-    </div>
+    </Frame>
   );
 }
