@@ -17,6 +17,7 @@ import { METRICS } from "../../auth/__tests__/helpers";
 import type { RequestSummary } from "../../history/useMyRequests";
 import { HistoryScreen } from "../../history/HistoryScreen";
 import { CATEGORIES, newQueryClient, signedIn } from "../../home/__tests__/helpers";
+import { EMPTY_PROFILE } from "../../pro-profile/__tests__/helpers";
 import { HomeScreen } from "../../home/HomeScreen";
 import { freezeClock, NOW } from "../../quotes/__tests__/helpers";
 import { TabsLayout } from "../../tabs/TabsLayout";
@@ -208,6 +209,8 @@ beforeEach(() => {
       if (path === REQUESTS_PATH) return { items: mockApi.requests, next_cursor: null };
       // The Account tab counts a customer's saved addresses.
       if (path === "/v1/addresses") return { items: [] };
+      // The Account tab reads a pro's own profile: the card's verified seal comes from it.
+      if (path === "/v1/pros/me") return EMPTY_PROFILE;
       if (path === JOB_PATH) {
         const found = mockApi.jobs[options?.params?.request_id ?? ""];
         if (!found) throw new ApiError(404, "not_found");

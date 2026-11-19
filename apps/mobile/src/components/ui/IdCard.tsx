@@ -1,15 +1,12 @@
 import * as Haptics from "expo-haptics";
 import { Gyroscope } from "expo-sensors";
-import { useEffect, useId, useRef, useState, type ComponentProps } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Image,
   StyleSheet,
-  Text,
   View,
   type AccessibilityActionEvent,
   type AccessibilityRole,
-  type TextStyle,
   type ViewStyle,
 } from "react-native";
 import {
@@ -22,23 +19,42 @@ import Animated, {
   Easing,
   ReduceMotion,
   runOnJS,
+  useAnimatedReaction,
   useAnimatedStyle,
+  useDerivedValue,
   useReducedMotion,
   useSharedValue,
   withSpring,
   withTiming,
   type SharedValue,
 } from "react-native-reanimated";
-import Svg, { Defs, LinearGradient, Path, Rect, Stop } from "react-native-svg";
+import Svg, { Rect } from "react-native-svg";
 
-import { SILHOUETTE_PATH, SILHOUETTE_VIEW_BOX } from "@/components/icons";
-import { bubbleShadow, continuousCorners, tokens, withOpacity } from "@/theme";
+import { continuousCorners, tokens } from "@/theme";
 
 import {
+  Back,
+  CardBase,
+  Front,
+  PALETTE,
+  type FaceMotion,
+  type MotionStyle,
+  type Palette,
+} from "./IdCardFaces";
+import {
+  cardScale,
+  clampTilt,
   formatPublicCode,
+  groundShadow,
   ID_CARD_BASE,
+  ID_CARD_BASE_HEIGHT,
+  ID_CARD_BASE_WIDTH,
   idCardGeometry,
+  MAX_TILT,
+  parallaxOffset,
   placeOf,
+  SHEEN_REST,
+  sheenPose,
   type IdCardFace,
   type IdCardVariant,
 } from "./idCardModel";
@@ -56,8 +72,15 @@ export type IdCardProps = {
   /** The 8-character public code (#290); the back engraves it grouped, `K7Q2-9MXA`. */
   publicCode?: string;
   /**
-   * The image for the share sheet: the exact ID-1 proportions, safe margins, no phone, no 3D, no
-   * gestures and no font scaling, so the PNG looks the same on every phone.
+   * The platform approved this pro (`verification_status` "approved"): the verified seal follows
+   * the name. Only ever from the API: never set it for anyone the API has not approved.
+   */
+  verified?: boolean;
+  /** When the person joined, formatted by the caller ("November 2026"): the footer's line. */
+  memberSince?: string;
+  /**
+   * The image for the share sheet: the exact ID-1 proportions, no phone, no 3D, no gestures, no
+   * moving light, so the PNG looks the same on every phone.
    */
   shareable?: boolean;
   /**
@@ -71,71 +94,11 @@ export type IdCardProps = {
   testID?: string;
 };
 
-type TypeStyle = keyof typeof tokens.fontSize;
-
-type Palette = {
-  surface: string;
-  /** The bottom of the card darkens into this color, so a flat fill reads as a lit surface. */
-  shade: string;
-  shadeOpacity: number;
-  text: string;
-  muted: string;
-  edge: string;
-  /** The photo frame before a photo is set, and behind it while it loads. */
-  well: string;
-  wellEdge: string;
-  silhouette: string;
-  /** The band of light that slides across the card as it tilts. */
-  sheen: string;
-  sheenOpacity: number;
-  stripe: string;
-  /** The engraved code and the edge that gives it depth, both at AA on the surface. */
-  engraved: string;
-  engravedEdge: string;
-};
-
-const PALETTE: Record<IdCardVariant, Palette> = {
-  customer: {
-    surface: tokens.colors.white,
-    shade: tokens.colors["navy-900"],
-    shadeOpacity: 0.05,
-    text: tokens.colors["navy-900"],
-    muted: tokens.colors["gray-500"],
-    edge: withOpacity("navy-900", 0.08),
-    well: tokens.colors["gray-50"],
-    wellEdge: withOpacity("navy-900", 0.06),
-    silhouette: withOpacity("navy-900", 0.18),
-    // On white, passing light reads as a passing shade.
-    sheen: tokens.colors["navy-900"],
-    sheenOpacity: 0.07,
-    stripe: tokens.colors["navy-900"],
-    // navy-900 at 0.7 over white reads 6.6:1; the white edge below it is the debossed lip.
-    engraved: withOpacity("navy-900", 0.7),
-    engravedEdge: tokens.colors.white,
-  },
-  pro: {
-    surface: tokens.colors["green-700"],
-    shade: tokens.colors["navy-900"],
-    shadeOpacity: 0.35,
-    text: tokens.colors.white,
-    muted: tokens.colors.white,
-    edge: withOpacity("white", 0.14),
-    well: withOpacity("navy-900", 0.22),
-    wellEdge: withOpacity("white", 0.12),
-    silhouette: withOpacity("white", 0.4),
-    sheen: tokens.colors.white,
-    sheenOpacity: 0.18,
-    stripe: tokens.colors["navy-900"],
-    // No dark ink reaches AA on green-700 (solid navy-900 is 3.7:1): white (4.89:1) with a navy edge.
-    engraved: tokens.colors.white,
-    engravedEdge: withOpacity("navy-900", 0.55),
-  },
-};
-
 const HALF_TURN = 180;
-/** The most the card leans, drag and gyroscope together, in degrees. */
-const MAX_TILT = 22;
-/** The lean of a drag across the whole card: the limit comes before the flip threshold. */
+/** Within this many degrees of its own rest a hidden face is parked: turned away, not tracked. */
+const PARKED = 0.5;
+/** The lean of a drag across the whole card: it reaches `MAX_TILT` at about half the width, a
+ * little past the swipe that turns the card over (`FLIP_FRACTION`). */
 const DRAG_TILT = 48;
 /** A horizontal drag this long activates the pan; a vertical one this long leaves it to the list. */
 const PAN_ACTIVATE_DP = 8;
@@ -143,9 +106,8 @@ const PAN_FAIL_DP = 12;
 /** A release faster than this, or past this fraction of the width, turns the card over. */
 const FLING_VELOCITY = 600;
 const FLIP_FRACTION = 0.35;
-/** The card rises to the finger, and a little more at the middle of a flip. */
+/** The card rises to the finger (and a little more mid-flip: `cardScale`). */
 const LIFT_SCALE = 1.03;
-const FLIP_LIFT = 0.05;
 /** The gyroscope nudges the card like a thing with inertia: a steady turn of 1 rad/s leans it to the
  * cap, and it settles back in about half a second once the phone holds still. */
 const GYRO_INTERVAL_MS = 33;
@@ -153,409 +115,210 @@ const GYRO_GAIN = 2;
 const GYRO_DECAY = 0.86;
 const MAX_GYRO_TILT = 14;
 const GYRO_TIMING = { duration: GYRO_INTERVAL_MS, easing: Easing.linear };
-// Springs: a flip with a hint of overshoot, a settle that never oscillates, a lift that is instant.
-const FLIP_SPRING = { damping: 18, stiffness: 180 };
-const SETTLE_SPRING = { damping: 16, stiffness: 200 };
+// Springs (damping ratio = damping / (2 * sqrt(stiffness))): a flip at 0.72, a few degrees past
+// the half turn and back; a settle at 0.78, a hair of overshoot; a lift at 0.56, quick to the finger.
+const FLIP_SPRING = { damping: 19, stiffness: 175 };
+const SETTLE_SPRING = { damping: 22, stiffness: 200 };
 const LIFT_SPRING = { damping: 20, stiffness: 320 };
 // The crossfade is the Reduce Motion flip itself, so Reanimated must not skip it to the end.
 const FADE = { duration: tokens.motion.transitionMs, reduceMotion: ReduceMotion.Never };
-/** The silhouette's width inside the photo frame, and the overlap that hides its flat bottom edge. */
-const SILHOUETTE_FRACTION = 0.62;
-const SILHOUETTE_BLEED = -1;
 /**
- * The sheen covers one and a half cards (Android rasterizes an SVG view at its pixel size), a
- * quarter past each edge: sliding it by a fifth of the card never shows an edge of the gradient.
+ * How high each layer floats over the face, in design dp (negative: under it). A lean slides them
+ * against each other: the print sinks under the laminate; the photo plate, the ink and the PRO
+ * badge stand on it.
  */
-const SHEEN_FRAME: ViewStyle = {
-  position: "absolute",
-  left: "-25%",
-  top: "-25%",
-  width: "150%",
-  height: "150%",
-};
-/** How far the sheen slides at the full lean, as a fraction of the card, and its strength at rest. */
-const SHEEN_TRAVEL = 0.2;
-const SHEEN_REST = 0.6;
-/** Letter spacing at the design width, in dp: the eyebrow line, the PRO pill and the engraved code. */
-const HELLO_TRACKING = 0.4;
-const PRO_TRACKING = 1.5;
-const CODE_TRACKING = 3;
-/** The code's engraved edge: one design dp below the glyphs, softened by as much. */
-const ENGRAVE_DEPTH = 1;
-/** Vertical gaps in the name column at the design width, in dp. */
-const PLACE_GAP = 4;
-const PHONE_GAP = 2;
-/** The phone line's floor as it shrinks to keep the whole number on one line (iOS: see the name's). */
-const PHONE_MIN_SCALE = 0.5;
-/**
- * The name column: two lines, and a long name shrinks before it takes a third. The floor holds on
- * iOS; Android's native fit has no floor (RN 0.88 never hands it `minimumFontScale`), so a very
- * long name keeps shrinking there until two lines fit.
- */
-const NAME_LINES = 2;
-const NAME_MIN_SCALE = 0.6;
-const NAME_LINE_HEIGHT = 32;
-/**
- * Two hidden lines in the name's own type: they hold the name's room at whatever size the font
- * scale (Android's non-linear one included) gives its lines, so a name that wraps as someone types
- * never moves the place and phone below. Not shown to anyone.
- */
-const NAME_ROOM = Array.from({ length: NAME_LINES }, () => "M").join("\n");
-/** The ascender space above the capitals, as a fraction of the font size: lifted off, the name's
- * capitals sit level with the photo's top edge (measured on Android at 25 dp: 7 dp of gap). */
-const NAME_CAP_GAP = 0.2;
-const PLACE_LINES = 1;
+const DEPTH = { print: -5, ink: 4.5 } as const;
+/** How far the foil's bright streak travels at the full lean, as a fraction of its band. */
+const FOIL_TRAVEL = 0.8;
+/** The plastic's edge shows a little at rest too, as from a camera slightly above the card. */
+const EDGE_REST_DROP = 0.5;
+/** Room around the card for its shadow, in design dp. */
+const SHADOW_ROOM = 28;
+/** The ground shadow's layers: spread and drop in design dp, opacity each (they add up). */
+const SHADOW_LAYERS = [
+  { spread: 0.5, drop: 1, opacity: 0.07 },
+  { spread: 1, drop: 2, opacity: 0.05 },
+  { spread: 2, drop: 3, opacity: 0.04 },
+  { spread: 3, drop: 4.5, opacity: 0.032 },
+  { spread: 4.5, drop: 6, opacity: 0.025 },
+  { spread: 6.5, drop: 8, opacity: 0.018 },
+  { spread: 9, drop: 10.5, opacity: 0.012 },
+] as const;
 
-function clamp(value: number, limit: number): number {
+type Tilt = { x: SharedValue<number>; y: SharedValue<number> };
+
+/** Which face looks out: the front until the turn passes edge-on, then the back. */
+type Side = "front" | "back";
+
+/**
+ * Whether `side` looks out when the card is turned `angle` degrees around Y (the flip plus the
+ * lean). Every animated view costs a shadow-tree commit per frame on Android (Reanimated's
+ * synchronous UI-props path is off in this build), so the layers of the face that looks away hold
+ * still: they snap to the lean as the card passes edge-on, unseen.
+ */
+function looksOut(angle: number, side: Side): boolean {
   "worklet";
-  return Math.min(limit, Math.max(-limit, value));
+  return Math.cos((angle * Math.PI) / HALF_TURN) > 0 === (side === "front");
 }
 
-function typeStyle(style: TypeStyle, unit: number, lineHeight?: number): TextStyle {
-  const { size, lineHeight: tokenLineHeight, fontWeight } = tokens.fontSize[style];
+/**
+ * What a held-still layer returns: always the same objects, because Reanimated skips a view's
+ * update only when every value is the very same reference (a new `[]` each frame still commits).
+ */
+const STILL_LAYER = { transform: [] };
+const STILL_SHEEN = { opacity: SHEEN_REST, transform: [] };
+
+type Layer = { tilt: Tilt; turn: SharedValue<number>; side: Side; still: boolean };
+
+/** One layer's parallax at `depth` design dp; still under Reduce Motion and while turned away. */
+function useLayerStyle({ tilt, turn, side, still }: Layer, depth: number, unit: number) {
+  return useAnimatedStyle(() => {
+    if (still || !looksOut(turn.value + tilt.y.value, side)) return STILL_LAYER;
+    const offset = parallaxOffset(tilt.x.value, tilt.y.value, depth * unit);
+    return { transform: [{ translateX: offset.x }, { translateY: offset.y }] };
+  });
+}
+
+/** The foil's streak, sliding across its band of `band` dp as the card leans. */
+function useFoilStyle({ tilt, turn, side, still }: Layer, band: number) {
+  return useAnimatedStyle(() => {
+    if (still || !looksOut(turn.value + tilt.y.value, side)) return STILL_LAYER;
+    const sweep = clampTilt(tilt.y.value - tilt.x.value * 0.5) / MAX_TILT;
+    return { transform: [{ translateX: sweep * band * FOIL_TRAVEL }] };
+  });
+}
+
+/** The band of light follows the lean, and brightens with it; under Reduce Motion it holds still. */
+function useSheenStyle({ tilt, turn, side, still }: Layer, width: number, height: number) {
+  return useAnimatedStyle(() => {
+    if (still || !looksOut(turn.value + tilt.y.value, side)) return STILL_SHEEN;
+    const pose = sheenPose(tilt.x.value, tilt.y.value, width, height);
+    return {
+      opacity: pose.strength,
+      transform: [{ translateX: pose.translateX }, { translateY: pose.translateY }],
+    };
+  });
+}
+
+type Geometry = { width: number; height: number; unit: number };
+
+/**
+ * The front's moving layers: the print, the ink (with the photo plate and the PRO badge), the two
+ * foils and the light. Every view gets its own animated style: a style shared by two views only
+ * drives one of them in Jest.
+ */
+function useFrontMotion(layer: Omit<Layer, "side">, { width, height, unit }: Geometry): FaceMotion {
+  const front: Layer = { ...layer, side: "front" };
   return {
-    fontSize: size * unit,
-    lineHeight: (lineHeight ?? tokenLineHeight) * unit,
-    fontWeight: String(fontWeight) as TextStyle["fontWeight"],
+    print: useLayerStyle(front, DEPTH.print, unit),
+    ink: useLayerStyle(front, DEPTH.ink, unit),
+    foil: useFoilStyle(front, width),
+    badgeFoil: useFoilStyle(front, ID_CARD_BASE.photo.width * unit * ID_CARD_BASE.proBadge.width),
+    sheen: useSheenStyle(front, width, height),
   };
 }
 
-type FaceShellProps = {
-  palette: Palette;
-  unit: number;
-  gradientId: string;
-};
-
-/** The surface under both faces: a lit fill, darker toward the bottom. */
-function Shade({ palette, gradientId }: Omit<FaceShellProps, "unit">) {
-  const id = `${gradientId}-shade`;
-  return (
-    <Svg pointerEvents="none" style={StyleSheet.absoluteFill}>
-      <Defs>
-        <LinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor={palette.shade} stopOpacity={0} />
-          <Stop offset="1" stopColor={palette.shade} stopOpacity={palette.shadeOpacity} />
-        </LinearGradient>
-      </Defs>
-      <Rect width="100%" height="100%" fill={`url(#${id})`} />
-    </Svg>
-  );
+/** The back's moving layers: the print, the ink and the light. */
+function useBackMotion(layer: Omit<Layer, "side">, { width, height, unit }: Geometry): FaceMotion {
+  const back: Layer = { ...layer, side: "back" };
+  return {
+    print: useLayerStyle(back, DEPTH.print, unit),
+    ink: useLayerStyle(back, DEPTH.ink, unit),
+    sheen: useSheenStyle(back, width, height),
+  };
 }
 
-/** A soft diagonal band of light, slid by the tilt (an animated style on the frame). */
-function Sheen({
+/** The shadow the card casts: soft layered rounded rects, drawn once, moved on the UI thread. */
+function GroundShadow({
   palette,
-  gradientId,
+  unit,
   style,
   testID,
-}: Omit<FaceShellProps, "unit"> & {
-  style: ComponentProps<typeof Animated.View>["style"];
+}: {
+  palette: Palette;
+  unit: number;
+  style: MotionStyle;
   testID?: string;
 }) {
-  const id = `${gradientId}-sheen`;
+  const room = SHADOW_ROOM;
+  const radius = ID_CARD_BASE.radius;
   return (
-    <Animated.View pointerEvents="none" style={[SHEEN_FRAME, style]} testID={testID}>
-      <Svg width="100%" height="100%">
-        <Defs>
-          <LinearGradient id={id} x1="0" y1="0" x2="1" y2="1">
-            <Stop offset="0.32" stopColor={palette.sheen} stopOpacity={0} />
-            <Stop offset="0.5" stopColor={palette.sheen} stopOpacity={1} />
-            <Stop offset="0.68" stopColor={palette.sheen} stopOpacity={0} />
-          </LinearGradient>
-        </Defs>
-        <Rect width="100%" height="100%" fill={`url(#${id})`} />
+    <Animated.View
+      pointerEvents="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={[
+        {
+          position: "absolute",
+          top: -room * unit,
+          left: -room * unit,
+          right: -room * unit,
+          bottom: -room * unit,
+        },
+        style,
+      ]}
+      testID={testID}
+    >
+      <Svg
+        width="100%"
+        height="100%"
+        viewBox={`0 0 ${ID_CARD_BASE_WIDTH + room * 2} ${ID_CARD_BASE_HEIGHT + room * 2}`}
+      >
+        {SHADOW_LAYERS.map(({ spread, drop, opacity }) => (
+          <Rect
+            key={spread}
+            x={room - spread}
+            y={room - spread + drop}
+            width={ID_CARD_BASE_WIDTH + spread * 2}
+            height={ID_CARD_BASE_HEIGHT + spread * 2}
+            rx={radius + spread}
+            fill={palette.shadow}
+            opacity={opacity}
+          />
+        ))}
       </Svg>
     </Animated.View>
   );
 }
 
-type FrontProps = {
-  variant: IdCardVariant;
-  palette: Palette;
-  unit: number;
-  name: string;
-  place: string;
-  phone?: string;
-  photoUri?: string;
-  scaleFonts: boolean;
-  onPhotoLoadEnd?: () => void;
-  testID?: string;
-};
-
-function Front({
-  variant,
-  palette,
-  unit,
-  name,
-  place,
-  phone,
-  photoUri,
-  scaleFonts,
-  onPhotoLoadEnd,
-  testID,
-}: FrontProps) {
-  const { t } = useTranslation();
-  const { padding, headerGap, columnGap, photo, proBadge } = ID_CARD_BASE;
-  const photoWidth = photo.width * unit;
-  const silhouette = Math.round(photoWidth * SILHOUETTE_FRACTION);
-  const nameType = typeStyle("title-1", unit, NAME_LINE_HEIGHT);
-  const placeType = typeStyle("callout", unit);
-
-  return (
-    <View style={{ padding: padding * unit }}>
-      <Text
-        allowFontScaling={scaleFonts}
-        numberOfLines={1}
-        style={[
-          typeStyle("caption", unit),
-          { color: palette.muted, textAlign: "center", letterSpacing: HELLO_TRACKING * unit },
-        ]}
-      >
-        {t("idCard.hello")}
-      </Text>
-      <View style={{ flexDirection: "row", marginTop: headerGap * unit }}>
-        <View style={{ alignItems: "center" }}>
-          <View
-            style={[
-              {
-                width: photoWidth,
-                height: photo.height * unit,
-                borderRadius: photo.radius * unit,
-                borderWidth: 1,
-                borderColor: palette.wellEdge,
-                backgroundColor: palette.well,
-                overflow: "hidden",
-                alignItems: "center",
-                justifyContent: "flex-end",
-              },
-              continuousCorners,
-            ]}
-          >
-            <Svg
-              width={silhouette}
-              height={silhouette}
-              viewBox={`0 0 ${SILHOUETTE_VIEW_BOX} ${SILHOUETTE_VIEW_BOX}`}
-              style={{ marginBottom: SILHOUETTE_BLEED }}
-            >
-              <Path d={SILHOUETTE_PATH} fill={palette.silhouette} />
-            </Svg>
-            {photoUri ? (
-              <Image
-                // One native image per URI: a late end from the previous photo never reaches this one.
-                key={photoUri}
-                source={{ uri: photoUri }}
-                resizeMode="cover"
-                onLoadEnd={onPhotoLoadEnd}
-                style={StyleSheet.absoluteFill}
-                testID={testID ? `${testID}-photo` : undefined}
-              />
-            ) : null}
-          </View>
-          {variant === "pro" ? (
-            <View
-              style={{
-                marginTop: proBadge.gap * unit,
-                paddingHorizontal: proBadge.paddingX * unit,
-                paddingVertical: proBadge.paddingY * unit,
-                borderRadius: tokens.radius.pill,
-                backgroundColor: tokens.colors["green-500"],
-              }}
-            >
-              <Text
-                allowFontScaling={scaleFonts}
-                numberOfLines={1}
-                style={[
-                  typeStyle("caption", unit),
-                  { color: tokens.colors["navy-900"], letterSpacing: PRO_TRACKING * unit },
-                ]}
-              >
-                {t("idCard.pro")}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-        <View style={{ flex: 1, marginStart: columnGap * unit }}>
-          <View style={{ marginTop: -(nameType.fontSize ?? 0) * NAME_CAP_GAP }}>
-            <Text
-              allowFontScaling={scaleFonts}
-              numberOfLines={NAME_LINES}
-              accessible={false}
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-              style={[nameType, { includeFontPadding: false, opacity: 0 }]}
-              testID={testID ? `${testID}-name-room` : undefined}
-            >
-              {NAME_ROOM}
-            </Text>
-            {/* Over its room, never in the flow: however it wraps, nothing below it moves. */}
-            <Text
-              allowFontScaling={scaleFonts}
-              numberOfLines={NAME_LINES}
-              adjustsFontSizeToFit
-              minimumFontScale={NAME_MIN_SCALE}
-              style={[
-                nameType,
-                {
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  color: palette.text,
-                  includeFontPadding: false,
-                },
-              ]}
-              testID={testID ? `${testID}-name` : undefined}
-            >
-              {name}
-            </Text>
-          </View>
-          <Text
-            allowFontScaling={scaleFonts}
-            numberOfLines={PLACE_LINES}
-            style={[
-              placeType,
-              {
-                color: palette.muted,
-                marginTop: PLACE_GAP * unit,
-                minHeight: (placeType.lineHeight ?? 0) * PLACE_LINES,
-              },
-            ]}
-          >
-            {place}
-          </Text>
-          {phone ? (
-            <Text
-              allowFontScaling={scaleFonts}
-              numberOfLines={1}
-              // A number cut short is a wrong number: at large text it shrinks to fit instead.
-              adjustsFontSizeToFit
-              minimumFontScale={PHONE_MIN_SCALE}
-              style={[
-                typeStyle("footnote", unit),
-                {
-                  color: palette.muted,
-                  marginTop: PHONE_GAP * unit,
-                  fontVariant: ["tabular-nums"],
-                },
-              ]}
-            >
-              {phone}
-            </Text>
-          ) : null}
-        </View>
-      </View>
-    </View>
-  );
-}
-
-type BackProps = { palette: Palette; unit: number; publicCode?: string; scaleFonts: boolean };
-
-function Back({ palette, unit, publicCode, scaleFonts }: BackProps) {
-  const { stripe, padding } = ID_CARD_BASE;
-  return (
-    <View style={{ flex: 1 }}>
-      <View
-        style={{
-          marginTop: stripe.top * unit,
-          height: stripe.height * unit,
-          backgroundColor: palette.stripe,
-        }}
-      />
-      <View
-        style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: padding * unit }}
-      >
-        {publicCode ? (
-          <Text
-            allowFontScaling={scaleFonts}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            style={[
-              typeStyle("headline", unit),
-              {
-                color: palette.engraved,
-                letterSpacing: CODE_TRACKING * unit,
-                fontVariant: ["tabular-nums"],
-                textShadowColor: palette.engravedEdge,
-                textShadowOffset: { width: 0, height: ENGRAVE_DEPTH * unit },
-                textShadowRadius: ENGRAVE_DEPTH * unit,
-              },
-            ]}
-          >
-            {formatPublicCode(publicCode)}
-          </Text>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
-type SheenInputs = {
-  dragX: SharedValue<number>;
-  dragY: SharedValue<number>;
-  gyroX: SharedValue<number>;
-  gyroY: SharedValue<number>;
-  reduceMotion: boolean;
-  palette: Palette;
-  width: number;
-  height: number;
-};
-
-/** The band of light follows the lean, and brightens with it; under Reduce Motion it holds still. */
-function useSheenStyle({
-  dragX,
-  dragY,
-  gyroX,
-  gyroY,
-  reduceMotion,
-  palette,
-  width,
-  height,
-}: SheenInputs) {
-  return useAnimatedStyle(() => {
-    if (reduceMotion) return { opacity: palette.sheenOpacity, transform: [] };
-    const tiltX = clamp(dragX.value + gyroX.value, MAX_TILT);
-    const tiltY = clamp(dragY.value + gyroY.value, MAX_TILT);
-    const lean = Math.min(1, (Math.abs(tiltX) + Math.abs(tiltY)) / MAX_TILT);
-    return {
-      opacity: palette.sheenOpacity * (SHEEN_REST + (1 - SHEEN_REST) * lean),
-      transform: [
-        { translateX: (tiltY / MAX_TILT) * width * SHEEN_TRAVEL },
-        { translateY: (-tiltX / MAX_TILT) * height * SHEEN_TRAVEL },
-      ],
-    };
-  });
-}
-
-function surfaceStyle(palette: Palette, unit: number): ViewStyle[] {
+function faceStyle(palette: Palette, width: number, height: number, unit: number): ViewStyle[] {
   return [
     {
+      width,
+      height,
       borderRadius: ID_CARD_BASE.radius * unit,
       backgroundColor: palette.surface,
-      borderWidth: 1,
-      borderColor: palette.edge,
+      backfaceVisibility: "hidden",
     },
-    bubbleShadow,
     continuousCorners,
   ];
 }
 
 function clipStyle(unit: number): ViewStyle[] {
-  // The clip is its own view: a rounded `overflow: hidden` on the shadowed surface would cut the
-  // shadow off on iOS.
-  return [{ borderRadius: ID_CARD_BASE.radius * unit - 1, overflow: "hidden" }, continuousCorners];
+  return [
+    StyleSheet.absoluteFill,
+    { borderRadius: ID_CARD_BASE.radius * unit, overflow: "hidden" },
+    continuousCorners,
+  ];
 }
 
 /**
- * The ID card (#250, #291): "Hello, I'm:", the photo, the name, the city and state, the person's
- * own phone, and on the back the public code. Dark green for a pro, white for a customer.
+ * The ID card (#250, #291, v2): "Hello, I'm:", the framed photo, the name (with the verified seal
+ * when the API approved the pro), the city and state, the person's own phone, the member-since
+ * line; on the back the engraved public code. Pearl white for a customer, deep green with lime foil
+ * for a pro: two materials, not two fills.
  *
- * It is a physical object: it leans toward a drag and with the phone's motion (`expo-sensors`
- * gyroscope), a band of light slides across it, a tap or a swipe turns it over (both faces are
- * one view each, so Android's backface rule and iOS's double-sided layers hide the face that looks
- * away). Under Reduce Motion nothing leans or spins and the flip is a crossfade. Every face is one
- * accessible element, and the flip is its action.
+ * It is a physical object: a slab of plastic with an edge, standing over its own shadow. It leans
+ * toward a drag and with the phone's motion (`expo-sensors` gyroscope); the print under the laminate
+ * and the ink on it (photo plate, text, PRO badge) slide against each other, a band of light and
+ * the foil's streak move across it, and the shadow moves the other way. A tap or a swipe turns it over (each face is its
+ * own view, so Android's backface rule and iOS's double-sided layers hide the face that looks
+ * away), with a haptic tick as it passes edge-on. Under Reduce Motion nothing leans, slides or
+ * spins: the flip is a crossfade. Every face is one accessible element, and the flip is its action.
  *
- * Props update in place: nothing here is keyed on them, so a parent can type into the card.
+ * The card is an image-like object at ID-1 proportions: its type ignores the font scale, and its
+ * accessibility label carries everything it shows. Props update in place: nothing here is keyed on
+ * them, so a parent can type into the card.
  */
 export function IdCard({
   variant,
@@ -566,6 +329,8 @@ export function IdCard({
   phone,
   photoUri,
   publicCode,
+  verified = false,
+  memberSince,
   shareable = false,
   interactive = true,
   onFlip,
@@ -577,16 +342,14 @@ export function IdCard({
   const reduceMotion = useReducedMotion();
   const gradientId = useId().replace(/:/g, "");
   const palette = PALETTE[variant];
-  const { height, unit } = idCardGeometry(width);
+  const geometry = idCardGeometry(width);
+  const { height, unit } = geometry;
   const perspective = ID_CARD_BASE.perspective * unit;
   const live = interactive && !shareable;
+  const still = reduceMotion || shareable;
   const place = placeOf(city, state);
 
   const [face, setFace] = useState<IdCardFace>("front");
-  // The faces' height once laid out. react-native-svg resolves the shade's and the sheen's
-  // percentages at the size they first drew at: a card that grows after (large text, a phone
-  // line typed in) draws them again at its new height.
-  const [faceHeight, setFaceHeight] = useState(0);
   /** The face shown, readable at once from a gesture's JS callback (state would lag a render). */
   const shown = useSharedValue<IdCardFace>("front");
 
@@ -599,6 +362,15 @@ export function IdCard({
   const turn = useSharedValue(0);
   /** The Reduce Motion flip: 0 front, 1 back. */
   const fade = useSharedValue(0);
+  /**
+   * A person's flip ticks once: as the card passes edge-on, or at the tap that reverses it before
+   * then. A card set back at rest never ticks. `tickDone`: this flip has ticked.
+   */
+  const tickArmed = useSharedValue(false);
+  const tickDone = useSharedValue(false);
+  const tiltX = useDerivedValue(() => clampTilt(dragX.value + gyroX.value));
+  const tiltY = useDerivedValue(() => clampTilt(dragY.value + gyroY.value));
+  const tilt: Tilt = { x: tiltX, y: tiltY };
 
   // Gestures reach JS a moment after they end: a tap queued just as the card is set at rest must
   // not turn it over again after the rest has brought its front back.
@@ -606,6 +378,10 @@ export function IdCard({
   useEffect(() => {
     liveRef.current = live;
   }, [live]);
+
+  const tick = () => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+  };
 
   /** Turns the card over; `direction` is the way a swipe sent it (a tap turns it to the right). */
   const flip = (direction: 1 | -1) => {
@@ -615,10 +391,15 @@ export function IdCard({
     setFace(next);
     if (reduceMotion) {
       fade.value = withTiming(next === "back" ? 1 : 0, FADE);
+      // A crossfade has no edge-on moment: the tick comes with the tap.
+      tick();
     } else {
+      // Reversed before it passed edge-on: the flip it cuts short ticks now.
+      if (tickArmed.value && !tickDone.value) tick();
+      tickArmed.value = true;
+      tickDone.value = false;
       turn.value = withSpring(next === "back" ? HALF_TURN * direction : 0, FLIP_SPRING);
     }
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
     onFlip?.(next);
   };
 
@@ -633,10 +414,11 @@ export function IdCard({
   useEffect(() => {
     if (live || shown.value === "front") return;
     shown.value = "front";
+    tickArmed.value = false;
     if (reduceMotion) fade.value = withTiming(0, FADE);
     else turn.value = withSpring(0, FLIP_SPRING);
     onFlip?.("front");
-  }, [live, reduceMotion, shown, fade, turn, onFlip]);
+  }, [live, reduceMotion, shown, fade, turn, tickArmed, onFlip]);
 
   const gyro = live && !reduceMotion;
   useEffect(() => {
@@ -651,8 +433,8 @@ export function IdCard({
       subscription = Gyroscope.addListener(({ x, y }) => {
         // Rotation rates in rad/s around the phone's x (pitch) and y (roll) axes. The card
         // counter-turns, as a loose card would lag behind the phone, then settles.
-        nudgeX = clamp(nudgeX * GYRO_DECAY + x * GYRO_GAIN, MAX_GYRO_TILT);
-        nudgeY = clamp(nudgeY * GYRO_DECAY - y * GYRO_GAIN, MAX_GYRO_TILT);
+        nudgeX = clampTilt(nudgeX * GYRO_DECAY + x * GYRO_GAIN, MAX_GYRO_TILT);
+        nudgeY = clampTilt(nudgeY * GYRO_DECAY - y * GYRO_GAIN, MAX_GYRO_TILT);
         gyroX.value = withTiming(nudgeX, GYRO_TIMING);
         gyroY.value = withTiming(nudgeY, GYRO_TIMING);
       });
@@ -678,8 +460,8 @@ export function IdCard({
       "worklet";
       if (reduceMotion) return;
       // The side under the finger dips away: a drag to the right turns the right edge back.
-      dragY.value = clamp((event.translationX / width) * DRAG_TILT, MAX_TILT);
-      dragX.value = clamp((-event.translationY / height) * DRAG_TILT, MAX_TILT);
+      dragY.value = clampTilt((event.translationX / width) * DRAG_TILT);
+      dragX.value = clampTilt((-event.translationY / height) * DRAG_TILT);
     },
     onDeactivate: (event) => {
       "worklet";
@@ -709,51 +491,100 @@ export function IdCard({
   });
   const gesture = useExclusiveGestures(pan, tap);
 
+  // After the effects that write `turn` (a value a hook reads is frozen for the React Compiler).
+  // The flip's midpoint: the card passes edge-on (the haptic tick of a person's flip).
+  useAnimatedReaction(
+    () => Math.abs(turn.value) >= HALF_TURN / 2,
+    (past, before) => {
+      // A flip crosses the half turn once (its overshoot stays past it); a card set back at rest
+      // is disarmed first.
+      if (before === null || past === before || !tickArmed.value || tickDone.value) return;
+      tickDone.value = true;
+      runOnJS(tick)();
+    },
+  );
+
+  // Poses that hold still return the same objects every frame, so Reanimated skips their update.
+  const parked = parkedPose(perspective);
+  const flat = { opacity: 1, transform: [{ perspective }] };
+
+  /** The card's pose: its lift (and the extra lift mid-flip) and its lean. */
   const frontStyle = useAnimatedStyle(() => {
-    if (reduceMotion) return { opacity: 1 - fade.value, transform: [{ perspective }] };
-    const tiltX = clamp(dragX.value + gyroX.value, MAX_TILT);
-    const tiltY = clamp(dragY.value + gyroY.value, MAX_TILT);
-    const scale = lift.value + Math.sin((Math.abs(turn.value) * Math.PI) / HALF_TURN) * FLIP_LIFT;
+    // Under Reduce Motion the front stays opaque and the back fades in over it: the slab behind
+    // never shows through a half-faded pair.
+    if (reduceMotion) return flat;
+    // Resting on its back, the front waits turned away: no commit per frame for a hidden face.
+    if (Math.abs(turn.value) >= HALF_TURN - PARKED) return parked;
+    const scale = cardScale(lift.value, turn.value);
     return {
       opacity: 1,
       transform: [
         { perspective },
         { scale },
-        { rotateX: `${tiltX}deg` },
-        { rotateY: `${turn.value + tiltY}deg` },
+        { rotateX: `${tilt.x.value}deg` },
+        { rotateY: `${turn.value + tilt.y.value}deg` },
       ],
     };
   });
 
   const backStyle = useAnimatedStyle(() => {
-    if (reduceMotion) return { opacity: fade.value, transform: [{ perspective }] };
-    const tiltX = clamp(dragX.value + gyroX.value, MAX_TILT);
-    const tiltY = clamp(dragY.value + gyroY.value, MAX_TILT);
-    const scale = lift.value + Math.sin((Math.abs(turn.value) * Math.PI) / HALF_TURN) * FLIP_LIFT;
+    if (reduceMotion) return { opacity: fade.value, transform: flat.transform };
+    if (Math.abs(turn.value) <= PARKED) return parked;
+    const scale = cardScale(lift.value, turn.value);
     return {
       opacity: 1,
       transform: [
         { perspective },
         { scale },
-        { rotateX: `${tiltX}deg` },
-        { rotateY: `${turn.value + HALF_TURN + tiltY}deg` },
+        { rotateX: `${tilt.x.value}deg` },
+        { rotateY: `${turn.value + HALF_TURN + tilt.y.value}deg` },
       ],
     };
   });
 
-  // One animated style per face: a style shared by two views only drives one of them in Jest.
-  // No dependency arrays: the plugin tracks them on native, and Reanimated warns when one is given.
-  const sheenInputs = { dragX, dragY, gyroX, gyroY, reduceMotion, palette, width, height };
-  const frontSheenStyle = useSheenStyle(sheenInputs);
-  const backSheenStyle = useSheenStyle(sheenInputs);
+  /**
+   * The plastic's edge: the card's slab, one thickness behind whichever face looks out, so on
+   * screen it peeks out the same way from both. It turns with the card, then slides in the card's
+   * own plane, whose x runs the other way seen from the back.
+   */
+  const edgeStyle = useAnimatedStyle(() => {
+    const thickness = ID_CARD_BASE.thickness * unit;
+    const rest = thickness * EDGE_REST_DROP;
+    if (reduceMotion) return { transform: [{ perspective }, { translateY: rest }] };
+    const scale = cardScale(lift.value, turn.value);
+    const offset = parallaxOffset(tilt.x.value, tilt.y.value, -thickness);
+    const facing = Math.cos(((turn.value + tilt.y.value) * Math.PI) / HALF_TURN) > 0 ? 1 : -1;
+    return {
+      transform: [
+        { perspective },
+        { scale },
+        { rotateX: `${tilt.x.value}deg` },
+        { rotateY: `${turn.value + tilt.y.value}deg` },
+        { translateX: offset.x * facing },
+        { translateY: offset.y + rest },
+      ],
+    };
+  });
+
+  const shadowStyle = useAnimatedStyle(() => {
+    if (reduceMotion) return groundShadowStyle(groundShadow(0, 0, 1, 0, unit));
+    return groundShadowStyle(
+      groundShadow(tilt.x.value, tilt.y.value, cardScale(lift.value, turn.value), turn.value, unit),
+    );
+  });
+
+  const frontMotion = useFrontMotion({ tilt, turn, still }, geometry);
+  const backMotion = useBackMotion({ tilt, turn, still }, geometry);
 
   const frontLabel = [
     t("idCard.a11y.card"),
     variant === "pro" ? t("idCard.pro") : null,
     name.trim() || t("idCard.a11y.unnamed"),
+    verified ? t("idCard.a11y.verified") : null,
     place || null,
     // Read out as it is drawn: never on the share render, which draws none.
     (!shareable && phone) || null,
+    memberSince ? t("idCard.a11y.memberSince", { date: memberSince }) : null,
   ]
     .filter(Boolean)
     .join(", ");
@@ -770,38 +601,38 @@ export function IdCard({
   const actions = live ? [{ name: "activate", label: t("idCard.a11y.flip") }] : undefined;
   const showingFront = face === "front";
 
-  const front = (
+  const front = (motion: FaceMotion) => (
     <Front
       variant={variant}
       palette={palette}
       unit={unit}
+      width={width}
+      gradientId={gradientId}
       name={name}
       place={place}
       phone={shareable ? undefined : phone}
       photoUri={photoUri}
-      scaleFonts={!shareable}
+      verified={verified}
+      memberSince={memberSince}
+      motion={motion}
       onPhotoLoadEnd={onPhotoLoadEnd}
       testID={testID}
     />
   );
 
   if (shareable) {
+    // Flat-lit and square to the camera: no shadow, no edge, the light at rest.
     return (
       <View
         accessible
         accessibilityRole="image"
         accessibilityLabel={frontLabel}
         testID={testID}
-        style={[{ width, height }, ...surfaceStyle(palette, unit)]}
+        style={[{ width, height }, ...faceStyle(palette, width, height, unit)]}
       >
-        <View style={[{ flex: 1 }, ...clipStyle(unit)]}>
-          <Shade palette={palette} gradientId={gradientId} />
-          <Sheen
-            palette={palette}
-            gradientId={gradientId}
-            style={{ opacity: palette.sheenOpacity }}
-          />
-          {front}
+        <View style={clipStyle(unit)}>
+          <CardBase palette={palette} gradientId={gradientId} />
+          {front({ sheen: { opacity: SHEEN_REST } })}
         </View>
       </View>
     );
@@ -809,7 +640,33 @@ export function IdCard({
 
   return (
     <GestureDetector gesture={gesture}>
-      <View style={{ width, minHeight: height }} testID={testID}>
+      <View style={{ width, height }} testID={testID}>
+        <GroundShadow
+          palette={palette}
+          unit={unit}
+          style={shadowStyle}
+          testID={testID ? `${testID}-shadow` : undefined}
+        />
+        <Animated.View
+          pointerEvents="none"
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          style={[
+            StyleSheet.absoluteFill,
+            { borderRadius: ID_CARD_BASE.radius * unit, backgroundColor: palette.surface },
+            continuousCorners,
+            edgeStyle,
+          ]}
+          testID={testID ? `${testID}-edge` : undefined}
+        >
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              { borderRadius: ID_CARD_BASE.radius * unit, backgroundColor: palette.edge },
+              continuousCorners,
+            ]}
+          />
+        </Animated.View>
         <Animated.View
           accessible
           accessibilityRole={role}
@@ -820,26 +677,11 @@ export function IdCard({
           accessibilityElementsHidden={!showingFront}
           importantForAccessibility={showingFront ? "yes" : "no-hide-descendants"}
           testID={testID ? `${testID}-front` : undefined}
-          style={[
-            { minHeight: height, backfaceVisibility: "hidden" },
-            ...surfaceStyle(palette, unit),
-            frontStyle,
-          ]}
+          style={[...faceStyle(palette, width, height, unit), frontStyle]}
         >
-          {/* Grows with its content (not `flex: 1`, which holds it at the card's height). */}
-          <View
-            style={[{ flexGrow: 1 }, ...clipStyle(unit)]}
-            onLayout={({ nativeEvent }) => setFaceHeight(Math.round(nativeEvent.layout.height))}
-          >
-            <Shade key={`shade-${faceHeight}`} palette={palette} gradientId={gradientId} />
-            <Sheen
-              key={`sheen-${faceHeight}`}
-              palette={palette}
-              gradientId={`${gradientId}-f`}
-              style={frontSheenStyle}
-              testID={testID ? `${testID}-front-sheen` : undefined}
-            />
-            {front}
+          <View style={clipStyle(unit)}>
+            <CardBase palette={palette} gradientId={`${gradientId}-f`} />
+            {front(frontMotion)}
           </View>
         </Animated.View>
         <Animated.View
@@ -852,25 +694,43 @@ export function IdCard({
           accessibilityElementsHidden={showingFront}
           importantForAccessibility={showingFront ? "no-hide-descendants" : "yes"}
           testID={testID ? `${testID}-back` : undefined}
-          style={[
-            StyleSheet.absoluteFill,
-            { backfaceVisibility: "hidden" },
-            ...surfaceStyle(palette, unit),
-            backStyle,
-          ]}
+          style={[StyleSheet.absoluteFill, ...faceStyle(palette, width, height, unit), backStyle]}
         >
-          <View style={[{ flex: 1 }, ...clipStyle(unit)]}>
-            <Shade key={`shade-${faceHeight}`} palette={palette} gradientId={`${gradientId}-b`} />
-            <Sheen
-              key={`sheen-${faceHeight}`}
+          <View style={clipStyle(unit)}>
+            <CardBase palette={palette} gradientId={`${gradientId}-b`} />
+            <Back
               palette={palette}
+              unit={unit}
               gradientId={`${gradientId}-b`}
-              style={backSheenStyle}
+              publicCode={publicCode}
+              motion={backMotion}
+              testID={testID}
             />
-            <Back palette={palette} unit={unit} publicCode={publicCode} scaleFonts />
           </View>
         </Animated.View>
       </View>
     </GestureDetector>
   );
+}
+
+function groundShadowStyle(shadow: ReturnType<typeof groundShadow>) {
+  "worklet";
+  return {
+    opacity: shadow.opacity,
+    transform: [
+      { translateX: shadow.translateX },
+      { translateY: shadow.translateY },
+      { scaleX: shadow.scaleX },
+      { scaleY: shadow.scaleY },
+    ],
+  };
+}
+
+/** A face turned away and still: half a turn round, square, at rest. */
+function parkedPose(perspective: number) {
+  "worklet";
+  return {
+    opacity: 1,
+    transform: [{ perspective }, { scale: 1 }, { rotateX: "0deg" }, { rotateY: `${HALF_TURN}deg` }],
+  };
 }

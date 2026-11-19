@@ -1110,7 +1110,13 @@
   "idCard": {
     "hello": "Hello, I'm:",
     "pro": "PRO",
+    "brand": "Jack Fix It",
+    "memberSince": "Member since",
+    "code": "Member code",
+    "support": "Support when you need it",
     "a11y": {
+      "verified": "verified",
+      "memberSince": "member since {{date}}",
       "card": "ID card",
       "unnamed": "name not set yet",
       "back": "Back of the ID card, code {{code}}",
