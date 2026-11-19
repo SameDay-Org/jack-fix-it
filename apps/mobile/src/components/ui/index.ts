@@ -1,3 +1,5 @@
+export { AccessoryBanner } from "./AccessoryBanner";
+export type { AccessoryBannerProps } from "./AccessoryBanner";
 export { AccordionRow, useAccordion } from "./Accordion";
 export type { AccordionAnchor, AccordionRowProps } from "./Accordion";
 export { Avatar, initialsOf } from "./Avatar";
