@@ -70,4 +70,6 @@ def downgrade() -> None:
         op.f(STRIPE_STATUS_CHECK), TABLE, "(status = 'created') = (stripe_status IS NOT NULL)"
     )
     op.drop_constraint(op.f(STATUS_CHECK), TABLE, type_="check")
-    op.create_check_constraint(op.f(STATUS_CHECK), TABLE, "status IN ('pending', 'created', 'failed')")
+    op.create_check_constraint(
+        op.f(STATUS_CHECK), TABLE, "status IN ('pending', 'created', 'failed')"
+    )
