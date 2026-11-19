@@ -611,6 +611,41 @@ def media_keys_among(keys: Collection[str]) -> Select[str]:
     return ServiceRequestRepository.media_keys_among(keys)
 
 
+@dataclass(frozen=True)
+class UndispatchedRequest:
+    id: uuid.UUID
+    address_id: uuid.UUID
+    created_at: datetime
+
+
+async def undispatched_requests(
+    session: AsyncSession,
+    dispatched: Select[uuid.UUID],
+    statuses: Collection[RequestStatus],
+    *,
+    created_after: datetime,
+    limit: int,
+    category_ids: Collection[uuid.UUID] | None = None,
+    address_ids: Select[uuid.UUID] | None = None,
+    after: tuple[datetime, uuid.UUID] | None = None,
+) -> list[UndispatchedRequest]:
+    """For the dispatch module's re-dispatch (#478): up to `limit` requests in `statuses`
+    with a category (among `category_ids` when given), at an address among `address_ids` (the
+    addresses module's subquery) when given, created after `created_after`, that no dispatch
+    reached (their id not in `dispatched`, the dispatch module's own subquery), oldest first by
+    (created_at, id), after the keyset `after` when given. Ids and times only."""
+    rows = await ServiceRequestRepository(session).undispatched(
+        dispatched,
+        statuses,
+        created_after=created_after,
+        limit=limit,
+        category_ids=category_ids,
+        address_ids=address_ids,
+        after=after,
+    )
+    return [UndispatchedRequest(*row) for row in rows]
+
+
 class ProRequestReader:
     """Read-only access for the pro opportunities (#49) and the pro's jobs (#63), through this
     module (ADR 0003)."""

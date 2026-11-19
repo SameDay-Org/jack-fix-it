@@ -43,7 +43,7 @@ from app.queue import JobQueue, enqueue
 logger = logging.getLogger(__name__)
 
 DISPATCH_TASK: Final = "dispatch_request"
-_DISPATCHABLE: Final = frozenset({RequestStatus.RECEIVED, RequestStatus.REVIEWING})
+DISPATCHABLE: Final = frozenset({RequestStatus.RECEIVED, RequestStatus.REVIEWING})
 
 
 class DispatchOutcome(StrEnum):
@@ -146,7 +146,7 @@ class DispatchService:
         if request.status is RequestStatus.RECEIVED and request.category_id is None:
             await self._requests.transition(request.id, RequestStatus.REVIEWING, SYSTEM)
             return self._done(DispatchOutcome.TO_REVIEW, extra)
-        if request.status not in _DISPATCHABLE or request.category_id is None:
+        if request.status not in DISPATCHABLE or request.category_id is None:
             return self._done(
                 DispatchOutcome.NOT_DISPATCHABLE, {**extra, "status": str(request.status)}
             )

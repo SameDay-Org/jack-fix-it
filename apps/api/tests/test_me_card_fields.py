@@ -27,6 +27,7 @@ from tests.conftest import make_settings
 from tests.test_auth_api import PASSWORD, VALIDATION_ERROR, register
 from tests.test_phone_verify_api import CODE as SMS_CODE
 from tests.test_phone_verify_api import PHONE, FakeVerifier
+from tests.test_pros_profile_api import queue as queue
 
 PHOTO_TTL = 123
 CODE = re.compile(public_codes.PATTERN)

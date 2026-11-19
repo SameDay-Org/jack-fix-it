@@ -22,6 +22,7 @@ from app.observability import JsonFormatter
 from tests.conftest import Committed, make_settings
 from tests.test_auth_api import register
 from tests.test_pros_profile_api import Caller, FakeStorage, make_caller, make_categories, patch_me
+from tests.test_pros_profile_api import queue as queue
 
 URL_TTL = 90  # not the default (300), so the tests prove it comes from the setting
 INVALID_MEDIA = {"error": {"code": "invalid_media", "message": "The attached media is invalid."}}
