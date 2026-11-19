@@ -17,9 +17,11 @@ from tests.test_schema_reviews import schema
 API_DIR = Path(__file__).parents[1]
 MIGRATION = API_DIR / "alembic" / "versions" / "20261115_52bb3f92f12b_transfers.py"
 TABLE = "transfers"
-# Columns a later revision adds to the table (#450 round 4, 49fad9f10ec9): this revision's own
+# Columns a later revision adds to the table (#450 rounds 4, 5; 49fad9f10ec9): this revision's own
 # round trip does not make them.
-LATER_COLUMNS = frozenset({"create_started_at", "needs_reversal_at"})
+LATER_COLUMNS = frozenset(
+    {"create_started_at", "needs_reversal_at", "create_may_have_been_issued_at"}
+)
 
 
 def without_later(shapes: dict[str, Any]) -> dict[str, Any]:
