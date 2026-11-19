@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 async function show(element: ReactElement, copy: ErrorCopy | Record<"en" | "es", ErrorCopy>) {
-  await act(async () => root.render(createElement(ErrorCopyProvider, { copy, children: element })));
+  await act(async () => root.render(createElement(ErrorCopyProvider, { copy }, element)));
 }
 
 const buttons = () => [...container.querySelectorAll("button, a")].map((e) => e.textContent);

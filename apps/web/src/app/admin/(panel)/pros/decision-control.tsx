@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useId, useRef, useState } from "react";
+import { useActionState, useEffect, useId, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
@@ -60,10 +60,10 @@ export function DecisionControl({
 }) {
   const [state, submit, pending] = useActionState(action, initialState);
   // The decision being sent: the announcement names it once it is saved.
-  const sent = useRef<Decision | null>(null);
+  const [sent, setSent] = useState<Decision | null>(null);
   const send = (form: FormData) => {
     const decision = form.get("decision");
-    sent.current = decision === "approved" || decision === "rejected" ? decision : null;
+    setSent(decision === "approved" || decision === "rejected" ? decision : null);
     submit(form);
   };
   useEffect(() => {
@@ -161,7 +161,7 @@ export function DecisionControl({
         {pending
           ? text.saving
           : state.saved
-            ? `${sent.current ? `${text.decided[sent.current]} ` : ""}${text.saved}`
+            ? `${sent ? `${text.decided[sent]} ` : ""}${text.saved}`
             : ""}
       </p>
       {error ? (

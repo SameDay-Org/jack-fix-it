@@ -26,7 +26,7 @@ const ErrorCopyContext = createContext<Copy | null>(null);
  * component and cannot read the catalogs itself (that would send them to every browser), so
  * the server layout above passes the few strings it needs, from the catalogs.
  */
-export function ErrorCopyProvider({ copy, children }: { copy: Copy; children: ReactNode }) {
+export function ErrorCopyProvider({ copy, children }: { copy: Copy; children?: ReactNode }) {
   return <ErrorCopyContext value={copy}>{children}</ErrorCopyContext>;
 }
 
