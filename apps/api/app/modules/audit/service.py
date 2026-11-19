@@ -93,6 +93,13 @@ class AuditService:
             reason=operator.reason,
         )
 
+    async def active_staff(self, user_id: uuid.UUID) -> bool:
+        """Whether the user is an active agent or admin as last committed, read now and
+        share-locked until the caller's transaction ends, as active_admin: a staff member
+        demoted or suspended since they were authenticated is seen, and cannot be demoted
+        before the commit of what this guards (#82)."""
+        return _active_staff(await self._users.get_current_shared(user_id))
+
     async def active_admin(self, user_id: uuid.UUID) -> bool:
         """Whether the user is an active admin as last committed, read now and share-locked
         until the caller's transaction ends: an admin demoted or suspended since an earlier

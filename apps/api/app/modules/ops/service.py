@@ -43,6 +43,7 @@ from app.modules.categories.service import CategoryService
 from app.modules.dispatch.opportunities import sign_safe_media
 from app.modules.jobs.service import JobStaffReader, JobStatus, StaffJob
 from app.modules.jobs.transitions import CUSTOMER_STATUS
+from app.modules.ops.actions import OpsRecords
 from app.modules.ops.errors import (
     InvalidQueueQueryError,
     QueueRequestNotFoundError,
@@ -124,6 +125,7 @@ class OpsQueueService:
         self._users = UserService(session)
         self._pros = ProService(session)
         self._audit = AuditService(session)
+        self._records = OpsRecords(session)
         self._sla = timedelta(minutes=config.first_contact_sla_minutes)
         self._rules = QueueRules(
             first_contact_sla=self._sla,
@@ -202,7 +204,12 @@ class OpsQueueService:
                 staff.id,
                 AuditAction.REQUEST_CARD_READ,
                 AuditEntity(AuditEntityType.SERVICE_REQUEST, request_id),
-                {"status": row.status.value, "media": len(card.media)},
+                {
+                    "status": row.status.value,
+                    "media": len(card.media),
+                    "notes": len(card.notes),
+                    "followups": len(card.followups),
+                },
             )
         except ReaderNotStaffError:
             await self._session.rollback()
@@ -396,6 +403,8 @@ class OpsQueueService:
             next_action=request.next_action,
             last_contact_at=request.last_contact_at,
             updated_at=request.updated_at,
+            notes=await self._records.notes_of(request.id),
+            followups=await self._records.followups_of(request.id),
         )
 
 
