@@ -37,7 +37,8 @@ TRANSITIONS: Final[Mapping[tuple[JobStatus, JobStatus], frozenset[ActorKind]]] =
         # An admin decides a dispute: release (fully or partially) or refund fully.
         (_S.DISPUTED, _S.PAID_OUT): frozenset({_A.ADMIN}),
         (_S.DISPUTED, _S.REFUNDED): frozenset({_A.ADMIN}),
-        # Only the move itself; when cancelling is allowed, and what is refunded, is #69 (#3).
+        # Only the move itself; when cancelling is allowed, and what is refunded, is
+        # app.modules.cancellations (#69).
         (_S.SCHEDULED, _S.CANCELLED): frozenset({_A.CUSTOMER, _A.PRO, _A.ADMIN}),
         (_S.ON_THE_WAY, _S.CANCELLED): frozenset({_A.CUSTOMER, _A.PRO, _A.ADMIN}),
     }

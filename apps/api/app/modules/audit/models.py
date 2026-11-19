@@ -11,7 +11,9 @@ from app.modules.audit.types import AuditValue
 class AuditLog(IdTimestampsMixin, Base):
     """One staff action on money (#58, Vault round 1 B2; AuditService.record), one staff read
     of what only staff may see (#72, AuditService.record_read), or one staff action the BDC
-    takes too (#274: a support ticket's status; AuditService.record_staff_action).
+    takes too (#274: a support ticket's status; AuditService.record_staff_action), or one
+    money action a job's own customer or pro took (#69: a cancel;
+    AuditService.record_party_action).
     Append-only: a trigger refuses UPDATE, DELETE and TRUNCATE. before/after hold ids,
     statuses, Stripe object ids and timestamps: never PII or secrets."""
 

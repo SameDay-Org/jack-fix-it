@@ -229,6 +229,43 @@ async def push_job_disputed(
     )
 
 
+async def push_job_cancelled_by_customer(
+    queue: JobQueue,
+    *,
+    pro_user_id: uuid.UUID,
+    job_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the pro, once the customer cancelled the job (#69): one cancel per job, so one
+    message id. Opens the job."""
+    await _push(
+        queue,
+        pro_user_id,
+        message_id=f"job_cancelled_by_customer:{job_id}",
+        kind="job_cancelled_by_customer",
+        params={"public_code": public_code},
+        deep_link=f"/jobs/{job_id}",
+        timeout_seconds=timeout_seconds,
+    )
+
+
+async def push_job_cancelled(
+    queue: JobQueue,
+    *,
+    customer_id: uuid.UUID,
+    job_id: uuid.UUID,
+    request_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the customer, once they cancelled their job (#69): the refund in neutral words, no
+    timing promised. Opens the job of their request."""
+    await _job_push(
+        queue, customer_id, "job_cancelled", job_id, request_id, public_code, timeout_seconds
+    )
+
+
 async def push_dispute_refunded(
     queue: JobQueue,
     *,
