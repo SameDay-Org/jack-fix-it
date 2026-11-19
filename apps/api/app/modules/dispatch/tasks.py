@@ -18,8 +18,14 @@ from typing import Any
 from redis.exceptions import RedisError
 
 from app.config import Settings
+from app.modules.dispatch.history import RedispatchHistory, RedisRedispatchHistory
 from app.modules.dispatch.service import DispatchService, enqueue_dispatch
-from app.modules.dispatch.stalled import StalledScan, stalled_requests, stalled_requests_for_pro
+from app.modules.dispatch.stalled import (
+    StalledScan,
+    SweepConfig,
+    stalled_requests_for_pro,
+    sweep_batch,
+)
 from app.modules.notifications.events import push_new_request
 from app.queue import JobQueue
 
@@ -56,20 +62,49 @@ async def dispatch_request(ctx: dict[str, Any], request_id: str) -> str:
 async def redispatch_stalled_requests(
     ctx: dict[str, Any], clock: Callable[[], datetime] = utc_now
 ) -> None:
-    """ARQ cron (#478): queues the dispatch of up to REDISPATCH_BATCH_SIZE stalled requests,
-    oldest first. A read that fails ends the run (logged by class); nothing raises out of it.
-    One `redispatch_swept` summary per run."""
+    """ARQ cron (#478): the sweep of stalled requests (dispatch.stalled), its history in the
+    queue's Redis (dispatch.history)."""
+    await sweep_stalled(ctx, RedisRedispatchHistory(ctx["redis"]), clock)
+
+
+async def sweep_stalled(
+    ctx: dict[str, Any], history: RedispatchHistory, clock: Callable[[], datetime] = utc_now
+) -> None:
+    """One sweep run: reads the next batch of stalled requests from where the last run stopped
+    (passing over those queued within REDISPATCH_RETRY_MINUTES), records the attempt, then
+    queues each one's dispatch. Nothing raises out of it. One `redispatch_swept` summary per
+    run that queued, else one class-only error:
+
+    - the database or the history cannot be read (`redispatch_sweep_unavailable`): the run
+      ends, and the next one reads the same batch again. There is no fallback scan.
+    - the history cannot be written (`redispatch_history_unavailable`): the run ends before
+      queueing anything. Queueing without the record would leave the cursor in place, and the
+      next run would take the same batch again, every run: the very starvation the history
+      prevents.
+    """
     settings: Settings = ctx["settings"]
-    scan = StalledScan.at(clock(), settings)
+    now = clock()
+    scan = StalledScan.at(now, settings)
+    config = SweepConfig.from_settings(settings)
     try:
         async with ctx["session_factory"]() as session:
-            request_ids = await stalled_requests(session, scan)
-    # By class only: a database error's text can hold SQL literals. The next run reads again.
+            batch = await sweep_batch(session, history, scan, config, now)
+    # By class only: a database error's text can hold SQL literals.
     except Exception as error:  # noqa: BLE001
         logger.error("redispatch_sweep_unavailable", extra={"error": type(error).__name__})
         return
-    counts = await _queue_dispatches(ctx["redis"], request_ids, settings)
-    logger.info("redispatch_swept", extra=counts)
+    try:
+        await history.record(
+            [str(request_id) for request_id in batch.due],
+            clock().timestamp(),
+            batch.next_cursor,
+            int(config.keep.total_seconds()),
+        )
+    except Exception as error:  # noqa: BLE001
+        logger.error("redispatch_history_unavailable", extra={"error": type(error).__name__})
+        return
+    counts = await _queue_dispatches(ctx["redis"], batch.due, settings)
+    logger.info("redispatch_swept", extra={**counts, "passed_over": batch.passed_over})
 
 
 async def redispatch_for_pro(

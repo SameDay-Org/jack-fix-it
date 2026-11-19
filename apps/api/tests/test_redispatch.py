@@ -22,7 +22,7 @@ from app.modules.dispatch.models import DispatchStatus, RequestDispatch
 from app.modules.dispatch.tasks import (
     dispatch_request,
     redispatch_for_pro,
-    redispatch_stalled_requests,
+    sweep_stalled,
 )
 from app.modules.pros.models import ProVerificationStatus
 from app.modules.requests.models import RequestStatus, ServiceRequest
@@ -43,6 +43,7 @@ from tests.test_dispatch import (
 )
 from tests.test_dispatch import committed as committed
 from tests.test_dispatch import world as world
+from tests.test_redispatch_backlog import Clock, MemoryHistory
 from tests.test_requests_api import ENQUEUE_TIMEOUT, RecordingQueue
 
 
@@ -67,9 +68,13 @@ async def created(session: AsyncSession, request_id: uuid.UUID, at: datetime) ->
     )
 
 
+def memory_history() -> MemoryHistory:
+    return MemoryHistory(Clock(datetime.now(UTC)))
+
+
 async def sweep(session: AsyncSession, **settings: object) -> RecordingQueue:
     queue = RecordingQueue()
-    await redispatch_stalled_requests(sweep_ctx(sessions_of(session), queue, **settings))
+    await sweep_stalled(sweep_ctx(sessions_of(session), queue, **settings), memory_history())
     return queue
 
 
@@ -149,8 +154,10 @@ async def test_the_sweep_reads_a_bounded_batch_oldest_first(
         await created(db_session, request_id, now - timedelta(days=days))
     queue = RecordingQueue()
 
-    await redispatch_stalled_requests(
-        sweep_ctx(sessions_of(db_session), queue, redispatch_batch_size=2), clock=lambda: now
+    await sweep_stalled(
+        sweep_ctx(sessions_of(db_session), queue, redispatch_batch_size=2),
+        MemoryHistory(Clock(now)),
+        clock=lambda: now,
     )
 
     assert queued(queue) == [str(ids[1]), str(ids[2])]
@@ -165,7 +172,9 @@ async def test_requests_older_than_the_max_age_are_not_swept(
     await created(db_session, young, now - timedelta(days=6, hours=23))
     queue = RecordingQueue()
 
-    await redispatch_stalled_requests(sweep_ctx(sessions_of(db_session), queue), clock=lambda: now)
+    await sweep_stalled(
+        sweep_ctx(sessions_of(db_session), queue), MemoryHistory(Clock(now)), clock=lambda: now
+    )
 
     assert str(young) in queued(queue)
     assert str(old) not in queued(queue)
@@ -177,9 +186,10 @@ async def test_overlapping_runs_make_one_set_of_rows(committed: Committed) -> No
     the second waits on the request's lock and finds the first's rows. Then nothing is queued."""
     queue = RecordingQueue()
     ctx = sweep_ctx(committed.sessions, queue)
+    history = memory_history()
     await asyncio.gather(
-        redispatch_stalled_requests(ctx),
-        redispatch_stalled_requests(ctx),
+        sweep_stalled(ctx, history),
+        sweep_stalled(ctx, history),
         redispatch_for_pro(ctx, str(committed.pro_ids[0])),
     )
     job_id = f"dispatch:{committed.request_id}"
@@ -200,7 +210,8 @@ async def test_overlapping_runs_make_one_set_of_rows(committed: Committed) -> No
         )
         assert count == len(committed.pro_ids)
     after = RecordingQueue()
-    await redispatch_stalled_requests(sweep_ctx(committed.sessions, after))
+    # A fresh history: the request is left out for its rows, not for its retry window.
+    await sweep_stalled(sweep_ctx(committed.sessions, after), memory_history())
     assert job_id not in after.jobs
 
 
@@ -222,7 +233,7 @@ async def test_the_sweep_logs_counts_and_ids_only(
             return await queue.enqueue_job(function, *args, _job_id=_job_id)
 
     with caplog.at_level(logging.INFO):
-        await redispatch_stalled_requests(sweep_ctx(sessions_of(db_session), FailsFirst()))
+        await sweep_stalled(sweep_ctx(sessions_of(db_session), FailsFirst()), memory_history())
 
     [failed] = [r for r in caplog.records if r.getMessage() == "redispatch_enqueue_failed"]
     payload = json.loads(JsonFormatter().format(failed))
@@ -244,7 +255,7 @@ async def test_a_sweep_that_cannot_read_ends_the_run(caplog: pytest.LogCaptureFi
 
     queue = RecordingQueue()
     with caplog.at_level(logging.INFO):
-        await redispatch_stalled_requests(sweep_ctx(broken, queue))
+        await sweep_stalled(sweep_ctx(broken, queue), memory_history())
 
     assert queue.jobs == {}
     [error] = [r for r in caplog.records if r.getMessage() == "redispatch_sweep_unavailable"]

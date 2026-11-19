@@ -27,6 +27,7 @@ _FALLBACK_INT_SETTINGS: dict[str, int | None] = {
     "redispatch_sweep_timeout_seconds": None,
     "redispatch_max_age_days": None,
     "redispatch_batch_size": None,
+    "redispatch_retry_minutes": None,
 }
 
 _ASYNC_SCHEME = "postgresql+asyncpg://"
@@ -305,6 +306,10 @@ class Settings(BaseSettings):
     redispatch_sweep_timeout_seconds: int = Field(default=240, gt=0)
     redispatch_max_age_days: int = Field(default=7, gt=0)
     redispatch_batch_size: int = Field(default=100, gt=0)
+    # The sweep reads forward from where its last run stopped (#500 round 1); a request it
+    # queued within this many minutes is passed over, so one no pro can take is retried about
+    # once per window rather than every run.
+    redispatch_retry_minutes: int = Field(default=60, gt=0)
     # Stripe webhooks (D7.3, #40): the endpoint's signing secret (whsec_...). Optional: without
     # it POST /v1/webhooks/stripe answers 503 and Stripe retries. How old a signature may be
     # (Stripe's default tolerance), the largest body read, and the worker's handling: the runs
