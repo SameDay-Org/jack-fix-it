@@ -542,6 +542,8 @@ async def test_a_refund_stripe_refuses_for_good_is_flagged_for_staff_and_never_r
     with caplog.at_level(logging.INFO):
         await refund_cancellation(worker(db_session, refunds), str(job_id))
     await age_attempts(db_session, job_id)
+    # The sweep never even lists it, however old.
+    assert await CancelRefunds(db_session, refunds, STUCK).due(10) == []
     await retry_cancel_refunds(worker(db_session, refunds))
 
     [row] = await refund_rows(db_session, job_id)
@@ -640,3 +642,37 @@ async def test_a_pending_refund_settles_only_when_stripe_s_event_says_so(
     if ends == "failed":
         [error] = [r for r in caplog.records if r.getMessage() == "cancel_refund_failed"]
         assert error.levelno == logging.ERROR
+
+
+@pytest.mark.parametrize("code", ["api_key_expired", "parameter_invalid"])
+async def test_a_lookup_stripe_refuses_is_no_answer_to_the_create(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    refunds: FakeStripeRefunds,
+    code: str,
+) -> None:
+    """The first create's answer is lost; the retry's listing gets a 4xx. That says nothing
+    about the create, which did make a refund: the row stays failed but not definitive, and a
+    later sweep lists again and adopts it (#450 round 2's rule, for cancellations too)."""
+    job_id = await booked(db_session, world)
+    assert (await cancel(db_client, world, job_id)).status_code == 200
+    refunds.lost_answers = 1
+    await refund_cancellation(worker(db_session, refunds), str(job_id))
+    await age_attempts(db_session, job_id)
+    refunds.errors["list"] = [StripeRejectedError(code=code)]
+
+    await retry_cancel_refunds(worker(db_session, refunds))
+
+    [row] = await refund_rows(db_session, job_id)
+    assert (row.status, row.last_error_code, row.last_error_definitive) == (
+        RefundStatus.FAILED,
+        code,
+        False,
+    )
+    assert (await cancel(db_client, world, job_id)).json()["refund_status"] == "pending"
+    await age_attempts(db_session, job_id)
+    await retry_cancel_refunds(worker(db_session, refunds))
+    [row] = await refund_rows(db_session, job_id)
+    assert (row.status, row.stripe_status) == (RefundStatus.CREATED, "succeeded")
+    assert len(refunds.creates) == 1
