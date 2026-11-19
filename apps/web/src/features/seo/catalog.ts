@@ -24,10 +24,11 @@ export const CATALOG_TAG = "catalog";
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
- * Paths the site already answers at its root and under `/es` (src/app, route groups left out),
- * and the names Next gives its metadata routes. A static route wins over `/[service]`, so a
- * category with one of these slugs would never be reached: it gets no page and no link.
- * catalog.test.ts keeps this list in step with src/app.
+ * Paths the site already answers or owns at its root and under `/es`: the routes (src/app,
+ * route groups left out), the folders and files it serves from `public` (`/showcase/…`), and
+ * the names Next gives its metadata routes. A category with one of these slugs gets no page and
+ * no link: it would be hidden by a static route, or it would claim a namespace the site keeps
+ * for its own files. catalog.test.ts keeps this list in step with src/app and public.
  */
 export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "admin",
@@ -37,6 +38,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "for-pros",
   "mascot",
   "privacy",
+  "showcase",
   "terms",
   "icon",
   "apple-icon",
