@@ -18,14 +18,20 @@ from app.config import get_app_settings
 from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.modules.audit.models import AuditLog
 from app.modules.audit.service import AuditService
-from app.modules.cancellations.models import JobCancellation
-from app.modules.jobs.models import JobStatus
+from app.modules.cancellations.models import (
+    CancelledFrom,
+    CancelParty,
+    CancelReason,
+    JobCancellation,
+)
+from app.modules.jobs.models import Job, JobStatus
 from app.modules.payments.cancel_refund_tasks import refund_cancellation, retry_cancel_refunds
 from app.modules.payments.cancel_refunds import CancelRefundOutcome, CancelRefunds
 from app.modules.payments.models import Refund, RefundStatus
 from app.modules.payments.transfers import ReleaseOutcome, TransferConfig, TransferService
 from app.modules.requests.models import RequestStatus, ServiceRequest
 from tests.conftest import make_settings
+from tests.helpers import as_status_writer
 from tests.job_world import PRICE, TAX, JobWorld, events, job_row
 from tests.job_world import make_job as make_world_job
 from tests.test_dispute_resolution_api import (
@@ -709,6 +715,7 @@ async def test_both_sides_read_the_cancellation_with_the_job(
     assert {k: seen[k] for k in seen if k != "cancelled_at"} == {
         "cancelled_by": "customer",
         "reason_code": "changed_my_mind",
+        "customer_total_cents": TOTAL,
         "fee_cents": FEE,
         "refund_cents": TOTAL - FEE,
         "refund_status": "pending",
@@ -721,3 +728,58 @@ async def test_both_sides_read_the_cancellation_with_the_job(
     assert item["cancellation"]["cancelled_at"] == seen["cancelled_at"]
     assert NOTE not in one.text
     assert request.json()["address_id"] == str(world.address_id)
+
+
+@pytest.mark.parametrize("cancelled", ["customer_before_on_my_way", "customer_on_the_way", "pro"])
+async def test_the_customer_s_view_of_a_cancellation_carries_the_total_it_split(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    cancelled: str,
+) -> None:
+    """#489 round 1: CustomerJob.cancellation names what the customer paid, the fee plus the
+    refund, whoever cancelled. A pro's cancel comes with PR 2; its row is written here as that
+    PR will write it (party pro, no fee), so the view is proven for it now."""
+    status = (
+        JobStatus.SCHEDULED if cancelled == "customer_before_on_my_way" else JobStatus.ON_THE_WAY
+    )
+    job_id = await booked(db_session, world, status)
+    request_id = (await job_row(db_session, job_id)).request_id
+    if cancelled == "pro":
+        db_session.add(
+            JobCancellation(
+                job_id=job_id,
+                cancelled_by=world.pro.id,
+                party=CancelParty.PRO,
+                reason_code=CancelReason.CANNOT_MAKE_IT,
+                from_status=CancelledFrom.ON_THE_WAY,
+                fee_bps=0,
+                fee_cents=0,
+                refund_cents=TOTAL,
+            )
+        )
+        async with as_status_writer(db_session):
+            await db_session.execute(
+                update(Job).where(Job.id == job_id).values(status=JobStatus.CANCELLED)
+            )
+        await db_session.commit()
+    else:
+        assert (await cancel(db_client, world, job_id)).status_code == 200
+
+    view = await db_client.get(f"/v1/requests/{request_id}/job", headers=world.customer.headers)
+
+    seen = view.json()["cancellation"]
+    fee = FEE if cancelled == "customer_on_the_way" else 0
+    assert (seen["cancelled_by"], seen["customer_total_cents"], seen["fee_cents"]) == (
+        "pro" if cancelled == "pro" else "customer",
+        TOTAL,
+        fee,
+    )
+    assert seen["fee_cents"] + seen["refund_cents"] == seen["customer_total_cents"]
+
+
+def test_the_customer_s_cancellation_always_names_its_total(app: FastAPI) -> None:
+    """#489 round 1: the agreed contract. The nested object itself stays optional on the job
+    (older clients), but once present it always carries the total."""
+    schema = app.openapi()["components"]["schemas"]["CustomerJobCancellation"]
+    assert "customer_total_cents" in schema["required"]

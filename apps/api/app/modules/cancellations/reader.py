@@ -29,6 +29,8 @@ class CancellationReader:
             cancelled_by=row.party,
             reason_code=row.reason_code,
             cancelled_at=row.created_at,
+            # The cancellation splits the customer's total exactly (app.money.cancellation_split).
+            customer_total_cents=row.fee_cents + row.refund_cents,
             fee_cents=row.fee_cents,
             refund_cents=row.refund_cents,
             refund_status=CancelRefundState.NONE if refund is None else refund.state,

@@ -19,6 +19,10 @@ class CustomerJobCancellation(_Out):
     cancelled_by: CancelParty
     reason_code: CancelReason
     cancelled_at: datetime
+    customer_total_cents: int = Field(
+        description="What the customer paid, tax included: the fee plus the refund, as the "
+        "cancellation split it (frozen with it)."
+    )
     fee_cents: int = Field(description="Kept by the platform: 0 when cancelled before On my way.")
     refund_cents: int = Field(description="Given back to the original payment method.")
     refund_status: CancelRefundState = Field(

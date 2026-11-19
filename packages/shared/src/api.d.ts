@@ -2697,6 +2697,11 @@ export interface components {
              */
             cancelled_at: string;
             /**
+             * Customer Total Cents
+             * @description What the customer paid, tax included: the fee plus the refund, as the cancellation split it (frozen with it).
+             */
+            customer_total_cents: number;
+            /**
              * Fee Cents
              * @description Kept by the platform: 0 when cancelled before On my way.
              */

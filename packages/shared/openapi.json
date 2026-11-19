@@ -9851,6 +9851,11 @@
             "format": "date-time",
             "title": "Cancelled At"
           },
+          "customer_total_cents": {
+            "type": "integer",
+            "title": "Customer Total Cents",
+            "description": "What the customer paid, tax included: the fee plus the refund, as the cancellation split it (frozen with it)."
+          },
           "fee_cents": {
             "type": "integer",
             "title": "Fee Cents",
@@ -9872,6 +9877,7 @@
           "cancelled_by",
           "reason_code",
           "cancelled_at",
+          "customer_total_cents",
           "fee_cents",
           "refund_cents",
           "refund_status"
