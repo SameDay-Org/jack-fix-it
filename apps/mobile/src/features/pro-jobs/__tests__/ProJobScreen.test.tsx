@@ -734,7 +734,13 @@ describe("the customer's report on the job (#75)", () => {
 
   it("shows the report and its reply box on a disputed job", async () => {
     await openWithReport(proJob({ status: "disputed" }));
-    expect(await screen.findByText("The customer reported a problem")).toBeTruthy();
+    // The section's header shows at once, over a skeleton; the report and its reply box only once
+    // the report's own read answers, which under load lands after the header (#448): wait for it.
+    expect(await screen.findByTestId("pro-job-report-description")).toHaveTextContent(
+      "Nobody came.",
+    );
+    expect(screen.queryByTestId("pro-job-report-loading")).toBeNull();
+    expect(screen.getByText("The customer reported a problem")).toBeTruthy();
     expect(screen.getByTestId("pro-job-report-reply-input")).toBeTruthy();
     expect(jest.mocked(apiGet).mock.calls.map(([path]) => path)).toContain(DISPUTE);
   });
