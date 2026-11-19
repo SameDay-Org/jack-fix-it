@@ -70,7 +70,10 @@ describe("a panel record that does not exist (#494)", () => {
 
 describe("the sign-in page (#493)", () => {
   it("has one h1: the page's title", async () => {
-    const html = decoded(renderToStaticMarkup(await LoginPage()));
+    // No return address: the sign-in page reads it from its search params (#464).
+    const html = decoded(
+      renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve({}) })),
+    );
     expect(html.match(/<h1\b/g)).toHaveLength(1);
     expect(html).toMatch(/<h1[^>]*>Sign in to the panel<\/h1>/);
   });
