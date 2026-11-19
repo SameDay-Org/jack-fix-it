@@ -20,9 +20,10 @@ export type JobBannerProps = {
 
 /**
  * The tabs' one line about the job under way ("Dan is on the way · 12 min"; when it does not fit,
- * the sentence is cut short, never the time it ends with), the kit's `AccessoryBanner` over the
- * tab bar, with the pro's unread messages as a small count (#74). A tap opens the ongoing job
- * screen. It never carries the arrival code.
+ * the sentence is cut short, never the time it ends with; at large text the sentence and the time
+ * take a line each, #486), the kit's `AccessoryBanner` over the tab bar, with the pro's unread
+ * messages as a small count (#74). A tap opens the ongoing job screen. It never carries the
+ * arrival code.
  */
 export function JobBanner({ active, updatedAt }: JobBannerProps) {
   const { t } = useTranslation();

@@ -16,8 +16,11 @@ const NAV_LINK = cn(
   FOCUS_ON_NAVY,
 );
 
-/** The pages that share this header: the landing (#85) and the page for professionals (#88). */
-export type SitePage = "landing" | "forPros";
+/**
+ * The pages that share this header: the landing (#85), the page for professionals (#88) and a
+ * service's page (#87).
+ */
+export type SitePage = "landing" | "forPros" | "service";
 
 /** The page's own sections, in its header. */
 const SECTIONS = {
@@ -29,28 +32,36 @@ const SECTIONS = {
     ["how", "forPros.nav.how"],
     ["faq", "forPros.nav.faq"],
   ],
+  service: [
+    ["ask", "seo.service.nav.ask"],
+    ["areas", "seo.service.nav.areas"],
+  ],
 } as const satisfies Record<SitePage, readonly (readonly [string, string])[]>;
 
 /**
  * The public pages' header, kept in view while scrolling: the brand (the landing's top), the
- * page's own sections, the page for professionals (from the landing), the language switch and
- * the way to the app. No "Sign in": there is no web sign-in for customers or pros. Below `lg`
- * the links fold into a menu.
+ * page's own sections, the page for professionals (from the customer pages), the language
+ * switch and the way to the app. No "Sign in": there is no web sign-in for customers or pros.
+ * Below `lg` the links fold into a menu.
  */
 export function LandingHeader({
   t,
   locale,
   page = "landing",
+  paths = page === "landing" ? LANDING_PATHS : FOR_PROS_PATHS,
 }: {
   t: TFunction;
   locale: Locale;
   page?: SitePage;
+  /** This page in each language, for the language switch (a service's page passes its own). */
+  paths?: Record<Locale, string>;
 }) {
   const sections: MenuLink[] = SECTIONS[page].map(([anchor, key]) => ({
     href: `#${anchor}`,
     label: t(key),
   }));
-  if (page === "landing") {
+  // The customer pages lead to the page for professionals; that page does not link to itself.
+  if (page !== "forPros") {
     sections.push({ href: FOR_PROS_PATHS[locale], label: t("landing.nav.forPros") });
   }
   const app: MenuLink = { href: SHOWCASE_PATHS[locale], label: t("landing.nav.getApp") };
@@ -76,11 +87,7 @@ export function LandingHeader({
             </a>
           ))}
         </nav>
-        <LanguageToggle
-          t={t}
-          locale={locale}
-          paths={page === "landing" ? LANDING_PATHS : FOR_PROS_PATHS}
-        />
+        <LanguageToggle t={t} locale={locale} paths={paths} />
         <Link
           href={app.href}
           prefetch={false}

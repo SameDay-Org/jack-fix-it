@@ -263,6 +263,10 @@ function guideText(t: TFunction, job: ProJob, step: Exclude<JobStep, "locked">):
   if (step === "done" && job.status === "completed") {
     return t("proJobs.screen.guide.waiting", { name });
   }
+  // Staff resolved a report and closed the job: the pro did not call it off (#472).
+  if (step === "closed" && job.status === "refunded") {
+    return t("proJobs.screen.guide.closedAfterReport");
+  }
   return t(`proJobs.screen.guide.${step}`, { name });
 }
 
