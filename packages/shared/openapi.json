@@ -6971,6 +6971,770 @@
         }
       }
     },
+    "/v1/admin/requests/{request_id}/notes": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Add an internal note to a request (staff)",
+        "description": "Plain text for the team, kept as written: never shown to the customer or the pro.\nNotes are only added. Recorded in the audit log (without the text).",
+        "operationId": "staff_add_note_v1_admin_requests__request_id__notes_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a note empty or over 2000 characters, or a bad request_id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only active agents and admins (checked again as the action is written).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request_held: another agent holds the request (they, or an admin, act on it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/requests/{request_id}/contacted": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Mark the customer contacted (staff)",
+        "description": "Sets the first contact time once: the queue's timer stops. Again keeps the first time\n(no error). Recorded in the audit log.",
+        "operationId": "staff_mark_contacted_v1_admin_requests__request_id__contacted_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactedOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a request_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only active agents and admins (checked again as the action is written).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request_held: another agent holds the request (they, or an admin, act on it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/requests/{request_id}/classify": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Set a request's category (staff)",
+        "description": "Only while the request is received or reviewing, to an active category. Runs nothing\nelse. Recorded in the audit log.",
+        "operationId": "staff_classify_request_v1_admin_requests__request_id__classify_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassifyIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassifyOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "category_inactive: the category is not active; validation_error: a bad id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only active agents and admins (checked again as the action is written).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request_held: another agent holds the request. request_not_classifiable: the request is past reviewing (dispatch took it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/requests/{request_id}/followups": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Schedule a follow-up on a request (staff)",
+        "description": "The caller's by default. Recorded in the audit log (without the note).",
+        "operationId": "staff_schedule_followup_v1_admin_requests__request_id__followups_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FollowupIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowupOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "followup_due_out_of_range: due in the past or more than OPS_FOLLOWUP_MAX_DAYS ahead; assignee_not_staff: the assignee is not an active agent or admin; validation_error: a note empty or over 500 characters, a bad id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only active agents and admins; only an admin gives a follow-up to someone else.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request_held: another agent holds the request (they, or an admin, act on it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/requests/{request_id}/followups/{followup_id}/done": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Mark a follow-up done (staff)",
+        "description": "Done once: again changes nothing. Recorded in the audit log.",
+        "operationId": "staff_followup_done_v1_admin_requests__request_id__followups__followup_id__done_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          },
+          {
+            "name": "followup_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Followup Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowupOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a request_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only its assignee or an admin, an active one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "followup_not_found: none with this id here.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/followups": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "My follow-ups (staff)",
+        "description": "The follow-ups not done, the most overdue first. Each names its request by code and\nstatus: never a contact.",
+        "operationId": "staff_list_followups_v1_admin_followups_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "due",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/FollowupDue",
+              "description": "today: due by the end of today in BUSINESS_TIME_ZONE, overdue too.",
+              "default": "today"
+            },
+            "description": "today: due by the end of today in BUSINESS_TIME_ZONE, overdue too."
+          },
+          {
+            "name": "assignee",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Another staff member's (admins only).",
+              "title": "Assignee"
+            },
+            "description": "Another staff member's (admins only)."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size; capped.",
+              "title": "Limit"
+            },
+            "description": "Page size; capped."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowupsPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a bad cursor or limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins; only an admin reads someone else's.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/followups/summary": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "How many of my follow-ups are due today (staff)",
+        "description": "The caller's open follow-ups due by the end of today in the business time zone, overdue\nones included: the nav badge, equal to the default follow-ups list's length.",
+        "operationId": "staff_followups_summary_v1_admin_followups_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowupsSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/staff": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "The active agents and admins (staff)",
+        "description": "Id, first name and role of every active agent and admin, for assigning a follow-up and\nfiltering the follow-ups list. No contact.",
+        "operationId": "staff_members_v1_admin_staff_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/v1/jobs/{job_id}/reviews": {
       "post": {
         "tags": [
@@ -9539,6 +10303,61 @@
         "title": "ClaimOut",
         "description": "Who holds the request after a claim or a release."
       },
+      "ClassifyIn": {
+        "properties": {
+          "category_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Category Id",
+            "description": "An active category."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "category_id"
+        ],
+        "title": "ClassifyIn"
+      },
+      "ClassifyOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "category": {
+            "$ref": "#/components/schemas/CategorySummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "category"
+        ],
+        "title": "ClassifyOut"
+      },
+      "ContactedOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "first_contact_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Contact At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "first_contact_at"
+        ],
+        "title": "ContactedOut",
+        "description": "When the BDC first contacted the customer: set once."
+      },
       "CustomerCancelIn": {
         "properties": {
           "reason_code": {
@@ -10694,6 +11513,201 @@
         ],
         "title": "ErrorResponse"
       },
+      "FollowupDue": {
+        "type": "string",
+        "enum": [
+          "today",
+          "all"
+        ],
+        "title": "FollowupDue"
+      },
+      "FollowupIn": {
+        "properties": {
+          "due_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Due At",
+            "description": "When it is due: in the future, at most OPS_FOLLOWUP_MAX_DAYS ahead."
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Note",
+            "description": "What to do, 1 to 500 characters (staff only)."
+          },
+          "assigned_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To",
+            "description": "An active agent or admin; the caller by default. Only an admin gives a follow-up to someone else."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "due_at",
+          "note"
+        ],
+        "title": "FollowupIn"
+      },
+      "FollowupItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Request Id"
+          },
+          "assigned_to": {
+            "$ref": "#/components/schemas/QueueAgent"
+          },
+          "due_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Due At"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "done_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done At"
+          },
+          "public_code": {
+            "type": "string",
+            "title": "Public Code"
+          },
+          "request_status": {
+            "$ref": "#/components/schemas/RequestStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "request_id",
+          "assigned_to",
+          "due_at",
+          "note",
+          "done_at",
+          "public_code",
+          "request_status"
+        ],
+        "title": "FollowupItem",
+        "description": "A follow-up in the list: its request's code and status, never a contact."
+      },
+      "FollowupOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Request Id"
+          },
+          "assigned_to": {
+            "$ref": "#/components/schemas/QueueAgent"
+          },
+          "due_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Due At"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "done_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "request_id",
+          "assigned_to",
+          "due_at",
+          "note",
+          "done_at"
+        ],
+        "title": "FollowupOut"
+      },
+      "FollowupsPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FollowupItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "By due time, the most overdue first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "FollowupsPage"
+      },
+      "FollowupsSummary": {
+        "properties": {
+          "due_today": {
+            "type": "integer",
+            "title": "Due Today",
+            "description": "The caller's open follow-ups due by the end of today in the business time zone, overdue ones included: the length of GET /v1/admin/followups (due today)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "due_today"
+        ],
+        "title": "FollowupsSummary"
+      },
       "GroupPreferences": {
         "properties": {
           "group": {
@@ -11587,6 +12601,53 @@
           "next_cursor"
         ],
         "title": "MySupportTicketPage"
+      },
+      "NoteIn": {
+        "properties": {
+          "body": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Body",
+            "description": "Plain text, 1 to 2000 characters, kept as written (staff only, never shown to the customer or the pro, never logged)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "body"
+        ],
+        "title": "NoteIn"
+      },
+      "NoteOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "author": {
+            "$ref": "#/components/schemas/QueueAgent"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "author",
+          "body",
+          "created_at"
+        ],
+        "title": "NoteOut"
       },
       "NotificationPreferences": {
         "properties": {
@@ -14270,6 +15331,28 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/components/schemas/NoteOut"
+            },
+            "type": "array",
+            "title": "Notes",
+            "description": "The staff's internal notes, oldest first (#82). Never shown to the customer or the pro."
+          },
+          "followups": {
+            "items": {
+              "$ref": "#/components/schemas/FollowupOut"
+            },
+            "type": "array",
+            "title": "Followups",
+            "description": "By due time (#82)."
+          },
+          "actions_allowed": {
+            "type": "boolean",
+            "title": "Actions Allowed",
+            "description": "Whether the caller may act on this request now (#82): it is unassigned, held by them, or they are an admin. The API stays the guard (409 request_held).",
+            "default": true
           }
         },
         "type": "object",
@@ -14302,7 +15385,9 @@
           "job",
           "next_action",
           "last_contact_at",
-          "updated_at"
+          "updated_at",
+          "notes",
+          "followups"
         ],
         "title": "RequestCard",
         "description": "One request for the BDC: everything in the list, plus who to call and where, what was\nasked, the media, the quotes and the job. Reading it is recorded in the audit log."
@@ -16300,6 +17385,55 @@
           "created_at"
         ],
         "title": "StaffJobEventOut"
+      },
+      "StaffList": {
+        "properties": {
+          "staff": {
+            "items": {
+              "$ref": "#/components/schemas/StaffMemberOut"
+            },
+            "type": "array",
+            "title": "Staff",
+            "description": "By first name."
+          }
+        },
+        "type": "object",
+        "required": [
+          "staff"
+        ],
+        "title": "StaffList"
+      },
+      "StaffMemberOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name",
+            "description": "Null when missing or showing a contact."
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "first_name",
+          "role"
+        ],
+        "title": "StaffMemberOut",
+        "description": "An active agent or admin, as the panel's assignee pickers list them (#82): no contact."
       },
       "StaffProDecisionOut": {
         "properties": {
