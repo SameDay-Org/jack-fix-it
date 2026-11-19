@@ -30,10 +30,11 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Final
+from typing import Final, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.integrations.stripe_errors import StripeRejectedError
 from app.integrations.stripe_refunds import RefundFacts, StripeRefunds
 from app.modules.payments.models import (
     REFUND_ERROR_CODE_LENGTH,
@@ -66,15 +67,59 @@ def dispute_refund_key(dispute_id: uuid.UUID, generation: int = 1) -> str:
     return base if generation == 1 else f"{base}:{generation}"
 
 
-def made_for(fact: RefundFacts, dispute_id: uuid.UUID, key: str) -> bool:
+def made_for(fact: RefundFacts, dispute_id: uuid.UUID | None, key: str) -> bool:
     """Whether Stripe's refund was made for the refund row of this dispute and key: its
     metadata names both (a refund without refund_key counts for the dispute's first row only,
-    made before rows carried it)."""
+    made before rows carried it). A row of no dispute (a cancelled job's, #69) matches only a
+    refund that names no dispute and carries its key."""
+    if dispute_id is None:
+        return fact.dispute_id is None and fact.refund_key == key
     if fact.dispute_id != str(dispute_id):
         return False
     if fact.refund_key is None:
         return key == dispute_refund_key(dispute_id)
     return fact.refund_key == key
+
+
+class RefundRow(Protocol):
+    """What the Stripe step reads of a refund row, a dispute's (DisputeRefund) or a cancelled
+    job's (payments.cancel_refunds.CancelRefund): plain values copied from the row."""
+
+    @property
+    def refund_id(self) -> uuid.UUID: ...
+    @property
+    def dispute_id(self) -> uuid.UUID | None: ...
+    @property
+    def amount_cents(self) -> int: ...
+    @property
+    def currency(self) -> str: ...
+    @property
+    def idempotency_key(self) -> str: ...
+    @property
+    def stripe_refund_id(self) -> str | None: ...
+    @property
+    def stripe_status(self) -> str | None: ...
+
+
+class StripeAttempt(Protocol):
+    """One Stripe attempt of a refund row, a dispute's (RefundAttempt) or a cancelled job's
+    (payments.cancel_refunds.CancelAttempt), copied before the transaction that stamped it
+    ended."""
+
+    @property
+    def dispute_id(self) -> uuid.UUID | None: ...
+    @property
+    def job_id(self) -> uuid.UUID: ...
+    @property
+    def payment_intent_id(self) -> str: ...
+    @property
+    def amount_cents(self) -> int: ...
+    @property
+    def currency(self) -> str: ...
+    @property
+    def idempotency_key(self) -> str: ...
+    @property
+    def number(self) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -98,7 +143,25 @@ class DisputeRefund:
     attempts: int
     idempotency_key: str
     last_error_code: str | None
+    last_error_definitive: bool
     requested_at: datetime | None
+
+    @property
+    def refused_for_good(self) -> bool:
+        """Its last attempt failed with Stripe's definitive answer to the create: the same
+        key gets the same refusal, so it can never make a refund (#434)."""
+        return self.status is RefundStatus.FAILED and self.last_error_definitive
+
+    @property
+    def last_attempt_failed(self) -> bool:
+        """Its last attempt ended failed, with no Stripe refund stored."""
+        return self.status is RefundStatus.FAILED
+
+    @property
+    def created_then_dead(self) -> bool:
+        """Stripe accepted it and its stored status is failed or canceled (terminal); a caller
+        that acts on it reads Stripe again first."""
+        return self.status is RefundStatus.CREATED and self.dead
 
     @property
     def abandoned(self) -> bool:
@@ -170,6 +233,8 @@ class PaymentFacts:
     currency: str
     customer_total_cents: int
     pro_payout_cents: int
+    # The job price: the quote's amount before tax, the take rate's base (#69's fee base).
+    amount_cents: int
 
 
 @dataclass(frozen=True)
@@ -251,6 +316,16 @@ class RefundLedger:
         refund = await self._refunds.current_of_dispute_for_update(dispute_id)
         return None if refund is None else _dispute_refund(refund)
 
+    async def all_of_dispute(self, dispute_id: uuid.UUID) -> list[DisputeRefund]:
+        """Every refund row of the dispute, abandoned ones included, unlocked."""
+        return [_dispute_refund(row) for row in await self._refunds.all_of_dispute(dispute_id)]
+
+    async def locked_all_of_dispute(self, dispute_id: uuid.UUID) -> list[DisputeRefund]:
+        """Every refund row of the dispute, abandoned ones included, locked until the
+        transaction ends. Take the job's and the dispute's locks first."""
+        rows = await self._refunds.all_of_dispute_for_update(dispute_id)
+        return [_dispute_refund(row) for row in rows]
+
     async def abandon(self, refund: DisputeRefund) -> bool:
         """Staff give the refund up (#434); False when it was abandoned already. The caller
         holds its lock (locked_of_dispute), checked it cannot move money, and commits it with
@@ -266,6 +341,18 @@ class RefundLedger:
     async def failed_of_disputes(self, dispute_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
         """The disputes among these whose refund Stripe failed or canceled, in one statement."""
         return await self._refunds.dead_of_disputes(dispute_ids)
+
+    async def hold_for_reconciliation(self, dispute_id: uuid.UUID, now: datetime) -> int:
+        """Stripe made, or still holds, a refund for the dispute that its abandoned or failed
+        rows do not show (#450 round 2): those rows hold the job's payout from now on, until
+        staff reconcile it. Returns how many rows hold it. The caller holds the job's and the
+        dispute's locks, and commits it before the event is acknowledged."""
+        return await self._refunds.hold_for_reconciliation(dispute_id, now)
+
+    async def held_for_reconciliation(self, dispute_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """The disputes among these whose payout is held for staff to reconcile, in one
+        statement."""
+        return await self._refunds.held_for_reconciliation(dispute_ids)
 
     async def start_attempt(
         self,
@@ -328,14 +415,18 @@ class RefundLedger:
             initiated_by=initiated_by,
         )
 
-    async def failed(self, attempt: RefundAttempt, code: str) -> None:
+    async def failed(self, attempt: RefundAttempt, code: str, *, definitive: bool = False) -> None:
         """Ends the attempt as failed with `code` (cut to the column), unless a later one
-        started or Stripe's refund was stored."""
+        started or Stripe's refund was stored; `definitive` when it was Stripe's definitive
+        answer to the create (#434: only such a refund may be abandoned)."""
         await self._refunds.mark_failed(
-            attempt.refund_id, attempt.number, code[:REFUND_ERROR_CODE_LENGTH]
+            attempt.refund_id,
+            attempt.number,
+            code[:REFUND_ERROR_CODE_LENGTH],
+            definitive=definitive,
         )
 
-    async def observe(self, refund: DisputeRefund, made: RefundFacts) -> Observed:
+    async def observe(self, refund: RefundRow, made: RefundFacts) -> Observed:
         """Stores the refund Stripe holds for the row (its id, the first time) and Stripe's
         status of it now, which only moves forward (stripe_status_rank): a read less final than
         the row's was taken before another reader stored a newer one, and the row's stands. The
@@ -363,6 +454,7 @@ def _payment_facts(payment: Payment) -> PaymentFacts:
         currency=payment.currency,
         customer_total_cents=payment.customer_total_cents,
         pro_payout_cents=payment.pro_payout_cents,
+        amount_cents=payment.amount_cents,
     )
 
 
@@ -390,8 +482,16 @@ def _dispute_refund(refund: Refund) -> DisputeRefund:
         attempts=refund.attempts,
         idempotency_key=refund.idempotency_key,
         last_error_code=refund.last_error_code,
+        last_error_definitive=refund.last_error_definitive,
         requested_at=refund.requested_at,
     )
+
+
+class RefundCreateRejectedError(StripeRejectedError):
+    """Stripe's 4xx answer to the refund CREATE itself (make_refund), not to the retry's lookup
+    or to a read (#450 round 2): with Stripe's code, only this answer says that the create under
+    the row's key can never make a refund (last_error_definitive). A lookup that fails says
+    nothing about an earlier create, whose outcome stays uncertain."""
 
 
 class RefundNeedsReviewError(Exception):
@@ -403,10 +503,10 @@ class RefundNeedsReviewError(Exception):
         self.reason = reason
 
 
-async def make_refund(stripe: StripeRefunds, attempt: RefundAttempt) -> RefundFacts:
+async def make_refund(stripe: StripeRefunds, attempt: StripeAttempt) -> RefundFacts:
     """The refund in Stripe, found (a retry) or created (see the module doc), whatever its
-    status. StripeCallError for Stripe's own failures; RefundNeedsReviewError when nothing may
-    be created."""
+    status. StripeCallError for Stripe's own failures (RefundCreateRejectedError when it is the
+    create that Stripe refused); RefundNeedsReviewError when nothing may be created."""
     if attempt.number > 1:
         found = await stripe.list_refunds(attempt.payment_intent_id)
         if not found.complete:
@@ -426,23 +526,29 @@ async def make_refund(stripe: StripeRefunds, attempt: RefundAttempt) -> RefundFa
                 attempt.amount_cents,
                 attempt.currency,
             )
-    made = await stripe.create_refund(
-        payment_intent_id=attempt.payment_intent_id,
-        # From the row committed before the call, never from a request.
-        amount_cents=attempt.amount_cents,
-        metadata={
-            "dispute_id": str(attempt.dispute_id),
-            "job_id": str(attempt.job_id),
-            "refund_key": attempt.idempotency_key,
-        },
-        idempotency_key=attempt.idempotency_key,
-    )
+    # A cancelled job's refund (#69) names no dispute.
+    named = {} if attempt.dispute_id is None else {"dispute_id": str(attempt.dispute_id)}
+    try:
+        made = await stripe.create_refund(
+            payment_intent_id=attempt.payment_intent_id,
+            # From the row committed before the call, never from a request.
+            amount_cents=attempt.amount_cents,
+            metadata={
+                **named,
+                "job_id": str(attempt.job_id),
+                "refund_key": attempt.idempotency_key,
+            },
+            idempotency_key=attempt.idempotency_key,
+        )
+    except StripeRejectedError as error:
+        # The create's own refusal, told apart from the lookup's above (round 2).
+        raise RefundCreateRejectedError(request_id=error.request_id, code=error.code) from None
     return _fitting(
         made, attempt.dispute_id, attempt.idempotency_key, attempt.amount_cents, attempt.currency
     )
 
 
-async def recheck_refund(stripe: StripeRefunds, refund: DisputeRefund) -> RefundFacts:
+async def recheck_refund(stripe: StripeRefunds, refund: RefundRow) -> RefundFacts:
     """The row's Stripe refund as Stripe holds it now, read by its stored id (never from an
     event's payload). StripeCallError for Stripe's own failures; RefundNeedsReviewError when it
     no longer fits the row."""
@@ -452,7 +558,7 @@ async def recheck_refund(stripe: StripeRefunds, refund: DisputeRefund) -> Refund
     return refund_fits(read, refund)
 
 
-def refund_fits(read: RefundFacts, refund: DisputeRefund) -> RefundFacts:
+def refund_fits(read: RefundFacts, refund: RefundRow) -> RefundFacts:
     """`read` if it is the Stripe refund the row holds (or may hold: none stored yet)."""
     if refund.stripe_refund_id is not None and read.refund_id != refund.stripe_refund_id:
         raise RefundNeedsReviewError("refund_mismatch")
@@ -462,7 +568,7 @@ def refund_fits(read: RefundFacts, refund: DisputeRefund) -> RefundFacts:
 
 
 def _fitting(
-    made: RefundFacts, dispute_id: uuid.UUID, key: str, amount_cents: int, currency: str
+    made: RefundFacts, dispute_id: uuid.UUID | None, key: str, amount_cents: int, currency: str
 ) -> RefundFacts:
     """The refund if it is the one the row describes; else nothing is stored for it."""
     if (

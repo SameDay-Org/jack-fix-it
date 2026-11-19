@@ -7372,6 +7372,213 @@
         }
       }
     },
+    "/v1/jobs/{job_id}/cancel-preview": {
+      "get": {
+        "tags": [
+          "cancellations"
+        ],
+        "summary": "What cancelling my job now would cost",
+        "description": "The fee kept and the refund given back if the customer cancels now, computed on the\nserver: free before the pro taps On my way; after it (on the way or arrived) a share of the\njob price is kept and the rest of the payment, tax included, is refunded. Show it before\nthe customer confirms, and send its fee_cents back as expected_fee_cents.",
+        "operationId": "cancel_preview_v1_jobs__job_id__cancel_preview_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelPreviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a job_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers cancel here (a pro's own cancel is separate).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id of which the caller is the customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "cancel_not_allowed: the work started, or the job is done, confirmed, paid out, disputed or refunded (the message names its status): report a problem instead; cancel_needs_review: the job's payment needs a look by staff first. Nothing is written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}/cancel": {
+      "post": {
+        "tags": [
+          "cancellations"
+        ],
+        "summary": "Cancel my job",
+        "description": "The customer cancels their scheduled or on-the-way job. The job and its request are\ncancelled; the refund (the payment minus the fee, if any) goes back to the original payment\nmethod through Stripe, made by the server: refund_status says where it stands. The pro is\nnotified. A job is cancelled once: sending again returns that cancellation (200).",
+        "operationId": "cancel_job_v1_jobs__job_id__cancel_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A UUID the app makes once per cancel and sends again with every retry of it. A retry answers 200 with the cancellation as it is now and writes nothing; the same key with another body, or on another job, answers 409 idempotency_key_reused. With or without it, a job is cancelled once.",
+              "title": "Idempotency-Key"
+            },
+            "description": "A UUID the app makes once per cancel and sends again with every retry of it. A retry answers 200 with the cancellation as it is now and writes nothing; the same key with another body, or on another job, answers 409 idempotency_key_reused. With or without it, a job is cancelled once."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerCancelIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancellationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: an unknown or a pro's reason_code; a note longer than 500 characters, holding a NUL, or empty once invisible characters are dropped; a negative expected_fee_cents; an unknown field (an amount above all); a job_id or an Idempotency-Key that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers cancel here (a pro's own cancel is separate).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id of which the caller is the customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "cancel_not_allowed: the work started, or the job is done, confirmed, paid out, disputed or refunded (the message names its status): report a problem instead; cancel_needs_review: the job's payment needs a look by staff first; cancel_fee_changed: expected_fee_cents differs from the fee cancelling now costs (the pro set off since the preview); idempotency_key_reused: the caller already used this Idempotency-Key with a different body or on another job. Nothing was changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/pros/me/jobs/{job_id}/dispute": {
       "get": {
         "tags": [
@@ -7539,6 +7746,111 @@
           },
           "409": {
             "description": "no_open_dispute: no problem was reported on the job, or it is resolved; already_replied: the pro already sent a different reply.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pros/me/earnings": {
+      "get": {
+        "tags": [
+          "pros"
+        ],
+        "summary": "My earnings",
+        "description": "What the caller receives for each of their jobs whose work is done, newest completion\nfirst, and a summary over all of them: awaiting the customer's confirmation (with when it\nconfirms itself at the latest), on its way (confirmed, the transfer to be made), on hold\n(a reported problem, or under review) and paid. The amounts are the payout frozen at\npayment, the \"you'll receive\" of the quote. The pro is the caller: no id is taken. Never\nthe customer's name, contacts or address, the platform's fee, or a Stripe id.",
+        "operationId": "read_my_earnings_v1_pros_me_earnings_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Capped at the list maximum.",
+              "title": "Limit"
+            },
+            "description": "Capped at the list maximum."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EarningsPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a bad cursor or limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than EARNINGS_READ_LIMIT reads in the window; Retry-After says when to try again.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8286,6 +8598,157 @@
         ],
         "title": "BucketFilter",
         "description": "The list's `bucket`: one of the queue's buckets, or every request."
+      },
+      "CancelParty": {
+        "type": "string",
+        "enum": [
+          "customer",
+          "pro"
+        ],
+        "title": "CancelParty",
+        "description": "Who cancelled the job: its customer or its pro."
+      },
+      "CancelPreviewOut": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "job_status": {
+            "$ref": "#/components/schemas/JobStatus",
+            "description": "scheduled or on_the_way: still cancellable."
+          },
+          "fee_applies": {
+            "type": "boolean",
+            "title": "Fee Applies",
+            "description": "The pro tapped On my way (or arrived): cancelling now costs a fee."
+          },
+          "fee_bps": {
+            "type": "integer",
+            "title": "Fee Bps",
+            "description": "The fee's rate once the pro is on the way, in basis points of the job price (1500 = 15%), from the server's setting: for the rule line, whether or not it applies now (fee_applies)."
+          },
+          "customer_total_cents": {
+            "type": "integer",
+            "title": "Customer Total Cents",
+            "description": "What the customer paid, tax included."
+          },
+          "fee_cents": {
+            "type": "integer",
+            "title": "Fee Cents",
+            "description": "What cancelling now keeps: 0 before On my way."
+          },
+          "refund_cents": {
+            "type": "integer",
+            "title": "Refund Cents",
+            "description": "What cancelling now gives back: total minus fee."
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "examples": [
+              "usd"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "job_status",
+          "fee_applies",
+          "fee_bps",
+          "customer_total_cents",
+          "fee_cents",
+          "refund_cents",
+          "currency"
+        ],
+        "title": "CancelPreviewOut"
+      },
+      "CancelReason": {
+        "type": "string",
+        "enum": [
+          "changed_my_mind",
+          "found_another_pro",
+          "pro_late",
+          "other",
+          "cannot_make_it",
+          "customer_unreachable",
+          "scope_changed"
+        ],
+        "title": "CancelReason",
+        "description": "Why, as the cancelling side picks it (#69): the customer's first four, the pro's last\nthree, and `other` for both."
+      },
+      "CancelRefundState": {
+        "type": "string",
+        "enum": [
+          "none",
+          "pending",
+          "succeeded",
+          "failed"
+        ],
+        "title": "CancelRefundState",
+        "description": "A cancelled job's refund in plain terms, as its customer is told."
+      },
+      "CancellationOut": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "job_status": {
+            "$ref": "#/components/schemas/JobStatus",
+            "description": "cancelled."
+          },
+          "cancelled_by": {
+            "$ref": "#/components/schemas/CancelParty"
+          },
+          "reason_code": {
+            "$ref": "#/components/schemas/CancelReason"
+          },
+          "fee_cents": {
+            "type": "integer",
+            "title": "Fee Cents",
+            "description": "Kept by the platform: 0 when cancelled before On my way."
+          },
+          "refund_cents": {
+            "type": "integer",
+            "title": "Refund Cents",
+            "description": "Given back to the original payment method."
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "examples": [
+              "usd"
+            ]
+          },
+          "refund_status": {
+            "$ref": "#/components/schemas/CancelRefundState",
+            "description": "none: nothing to give back. pending: on its way (Stripe has not said the money is back yet). succeeded: Stripe says it is back on the payment method. failed: it did not go through; our team looks into it."
+          },
+          "cancelled_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Cancelled At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "job_status",
+          "cancelled_by",
+          "reason_code",
+          "fee_cents",
+          "refund_cents",
+          "currency",
+          "refund_status",
+          "cancelled_at"
+        ],
+        "title": "CancellationOut"
       },
       "CardCustomer": {
         "properties": {
@@ -9076,6 +9539,58 @@
         "title": "ClaimOut",
         "description": "Who holds the request after a claim or a release."
       },
+      "CustomerCancelIn": {
+        "properties": {
+          "reason_code": {
+            "$ref": "#/components/schemas/CustomerCancelReason"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1,
+                "pattern": "^[^\\x00]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "Optional, plain text. Contact details are masked before it is stored; only the masked text is kept, for staff."
+          },
+          "expected_fee_cents": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Fee Cents",
+            "description": "The fee_cents the preview showed. When given and cancelling now costs another fee (the pro set off since), nothing changes: 409 cancel_fee_changed. Never used as an amount."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason_code"
+        ],
+        "title": "CustomerCancelIn"
+      },
+      "CustomerCancelReason": {
+        "type": "string",
+        "enum": [
+          "changed_my_mind",
+          "found_another_pro",
+          "pro_late",
+          "other"
+        ],
+        "title": "CustomerCancelReason",
+        "description": "Why the customer cancels: the reasons their app offers."
+      },
       "CustomerDisputeOut": {
         "properties": {
           "id": {
@@ -9285,6 +9800,17 @@
             "title": "Customer Total Cents",
             "description": "What the customer paid: amount plus tax."
           },
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CustomerJobCancellation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set once the job was cancelled (#69): who, why, when, the fee, the refund and where the refund stands. Always sent (null before a cancel); optional in the schema so clients built before #69 keep compiling."
+          },
           "unread_messages": {
             "type": "integer",
             "title": "Unread Messages",
@@ -9311,6 +9837,53 @@
         ],
         "title": "CustomerJob",
         "description": "The customer's job on their request, once paid."
+      },
+      "CustomerJobCancellation": {
+        "properties": {
+          "cancelled_by": {
+            "$ref": "#/components/schemas/CancelParty"
+          },
+          "reason_code": {
+            "$ref": "#/components/schemas/CancelReason"
+          },
+          "cancelled_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Cancelled At"
+          },
+          "customer_total_cents": {
+            "type": "integer",
+            "title": "Customer Total Cents",
+            "description": "What the customer paid, tax included: the fee plus the refund, as the cancellation split it (frozen with it)."
+          },
+          "fee_cents": {
+            "type": "integer",
+            "title": "Fee Cents",
+            "description": "Kept by the platform: 0 when cancelled before On my way."
+          },
+          "refund_cents": {
+            "type": "integer",
+            "title": "Refund Cents",
+            "description": "Given back to the original payment method."
+          },
+          "refund_status": {
+            "$ref": "#/components/schemas/CancelRefundState",
+            "description": "none, pending, succeeded or failed, as on the cancel's answer."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cancelled_by",
+          "reason_code",
+          "cancelled_at",
+          "customer_total_cents",
+          "fee_cents",
+          "refund_cents",
+          "refund_status"
+        ],
+        "title": "CustomerJobCancellation",
+        "description": "The cancellation of the customer's job, as their job view shows it."
       },
       "CustomerJobPhotos": {
         "properties": {
@@ -9911,6 +10484,185 @@
           "expires_at"
         ],
         "title": "DownloadUrlResponse"
+      },
+      "EarningCategory": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Names",
+            "description": "Display name per locale, e.g. en and es."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "slug",
+          "names"
+        ],
+        "title": "EarningCategory"
+      },
+      "EarningItem": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EarningCategory"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the job was: the safe title."
+          },
+          "amount_cents": {
+            "type": "integer",
+            "title": "Amount Cents",
+            "description": "What the pro receives, in integer cents."
+          },
+          "status": {
+            "$ref": "#/components/schemas/EarningStatus"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Completed At"
+          },
+          "paid_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid At",
+            "description": "When it was paid; null until then."
+          },
+          "expected_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected By",
+            "description": "awaiting_confirmation only: when the job confirms itself at the latest; null otherwise (the payout's own timing is Stripe's)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "category",
+          "amount_cents",
+          "status",
+          "completed_at",
+          "paid_at",
+          "expected_by"
+        ],
+        "title": "EarningItem"
+      },
+      "EarningStatus": {
+        "type": "string",
+        "enum": [
+          "awaiting_confirmation",
+          "on_the_way",
+          "on_hold",
+          "paid"
+        ],
+        "title": "EarningStatus",
+        "description": "Where a job's money stands, in the pro's words."
+      },
+      "EarningsPage": {
+        "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/EarningsSummary"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EarningItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Newest completion first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Pass it as `cursor` for the next page."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "summary",
+          "items",
+          "next_cursor"
+        ],
+        "title": "EarningsPage"
+      },
+      "EarningsSummary": {
+        "properties": {
+          "awaiting_confirmation_cents": {
+            "type": "integer",
+            "title": "Awaiting Confirmation Cents"
+          },
+          "pending_cents": {
+            "type": "integer",
+            "title": "Pending Cents",
+            "description": "Confirmed, the transfer still to be made."
+          },
+          "on_hold_cents": {
+            "type": "integer",
+            "title": "On Hold Cents"
+          },
+          "paid_cents": {
+            "type": "integer",
+            "title": "Paid Cents"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "examples": [
+              "usd"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "awaiting_confirmation_cents",
+          "pending_cents",
+          "on_hold_cents",
+          "paid_cents",
+          "currency"
+        ],
+        "title": "EarningsSummary",
+        "description": "All the pro's jobs, not just this page."
       },
       "ErrorDetail": {
         "properties": {
@@ -10536,7 +11288,7 @@
           "dispute_rate",
           "repeat_rate",
           "gmv",
-          "revenue_gross_of_refunds"
+          "revenue_net_of_refunds"
         ],
         "title": "MetricFormula"
       },
@@ -10615,7 +11367,7 @@
           "refunds_netted": {
             "type": "boolean",
             "title": "Refunds Netted",
-            "description": "Whether revenue_cents is net of refunds. False until #76's refunds land: revenue is then the platform's fee as charged."
+            "description": "Whether revenue_cents is net of refunds: true (#76). Revenue is the fee the platform keeps: on the jobs confirmed in the range, and on the disputes resolved in the range (a release keeps the fee, a partial what its split left the platform, a full refund nothing). GMV covers the confirmed jobs only: the two cohorts differ on purpose."
           },
           "metrics": {
             "$ref": "#/components/schemas/Metrics"
@@ -11944,6 +12696,17 @@
             "title": "Pro Payout Cents",
             "description": "What the pro receives for the job."
           },
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProJobCancellation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set once the job was cancelled (#69): who, why and when. Always sent (null before a cancel); optional in the schema so clients built before #69 keep compiling."
+          },
           "payout": {
             "anyOf": [
               {
@@ -11984,6 +12747,30 @@
         ],
         "title": "ProJob",
         "description": "The pro's own job. Never the arrival code, the customer's last name or contacts."
+      },
+      "ProJobCancellation": {
+        "properties": {
+          "cancelled_by": {
+            "$ref": "#/components/schemas/CancelParty"
+          },
+          "reason_code": {
+            "$ref": "#/components/schemas/CancelReason"
+          },
+          "cancelled_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Cancelled At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cancelled_by",
+          "reason_code",
+          "cancelled_at"
+        ],
+        "title": "ProJobCancellation",
+        "description": "The cancellation of the pro's job, as their job view shows it: who, why and when; never\nthe money or the note."
       },
       "ProJobPage": {
         "properties": {
@@ -13659,6 +14446,19 @@
           "address": {
             "$ref": "#/components/schemas/AddressOut"
           },
+          "address_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Id",
+            "description": "The customer's own address the request uses (#69: Request again offers it when it is still in their address book). Always set; optional in the schema so clients built before #69 keep compiling."
+          },
           "preferred_date": {
             "anyOf": [
               {
@@ -14974,6 +15774,11 @@
             "title": "Refund Failed",
             "description": "Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it."
           },
+          "refund_needs_reconciliation": {
+            "type": "boolean",
+            "title": "Refund Needs Reconciliation",
+            "description": "Stripe shows a refund made (or still under way) for this dispute that its abandoned or failed refund records do not hold (#450 round 2): money may have gone back outside the records, so any payout of the job stays held until staff reconcile it in Stripe and clear the hold (docs/stripe-money.md). Never cleared on its own."
+          },
           "description": {
             "type": "string",
             "title": "Description",
@@ -15098,6 +15903,7 @@
           "opened_at",
           "resolved_at",
           "refund_failed",
+          "refund_needs_reconciliation",
           "description",
           "pro_reply",
           "pro_replied_at",
@@ -15246,6 +16052,11 @@
             "type": "boolean",
             "title": "Refund Failed",
             "description": "Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it."
+          },
+          "refund_needs_reconciliation": {
+            "type": "boolean",
+            "title": "Refund Needs Reconciliation",
+            "description": "Stripe shows a refund made (or still under way) for this dispute that its abandoned or failed refund records do not hold (#450 round 2): money may have gone back outside the records, so any payout of the job stays held until staff reconcile it in Stripe and clear the hold (docs/stripe-money.md). Never cleared on its own."
           }
         },
         "additionalProperties": false,
@@ -15267,7 +16078,8 @@
           "currency",
           "opened_at",
           "resolved_at",
-          "refund_failed"
+          "refund_failed",
+          "refund_needs_reconciliation"
         ],
         "title": "StaffDisputeSummary",
         "description": "One line of the staff list."

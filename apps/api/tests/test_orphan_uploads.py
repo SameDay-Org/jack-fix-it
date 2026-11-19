@@ -82,6 +82,8 @@ NOT_UPLOAD_KEYS = {
     # Stripe's idempotency keys: a dispute's refund (#76), a job's transfer to its pro (#68).
     "refunds.idempotency_key",
     "transfers.idempotency_key",
+    # A job's cancellation (#69): the customer's Idempotency-Key.
+    "job_cancellations.idempotency_key",
 }
 
 

@@ -4,6 +4,7 @@ import { Text, View } from "react-native";
 
 import { useSession } from "@/api";
 import { Screen, useTabBarInset } from "@/components/ui";
+import { EarningsCard, useRefreshEarningsTotals } from "@/features/earnings";
 import { NotificationsPrompt } from "@/features/notifications/NotificationsPrompt";
 import { ProfileChecklistCard, useMyProProfile } from "@/features/pro-profile";
 import { useProJobs, YourJobs } from "@/features/pro-jobs";
@@ -19,7 +20,7 @@ import { OpportunityList } from "./OpportunityList";
  * stands and what is left instead (`ProOnboarding`), with the pro's jobs under it: no request is
  * listed, and none is asked for. Under the greeting, the notifications pre-prompt while it
  * applies (#334), and "Finish your profile" while the profile misses something (#36). The wallet
- * (#70) comes later.
+ * (#70) sits above the jobs in both, so a pro whose payouts went off still reaches their earnings.
  */
 export function ProHomeScreen() {
   const { t } = useTranslation();
@@ -33,6 +34,7 @@ export function ProHomeScreen() {
   const { refetch: refetchProfile } = profile;
   // The review's answer lands while the pro is away: asked again on every return to the home.
   useRefetchOnReturn(refetchProfile);
+  const refreshEarnings = useRefreshEarningsTotals();
 
   if (!user) return null;
 
@@ -51,7 +53,7 @@ export function ProHomeScreen() {
       <NotificationsPrompt audience="pro" testID="pro-home-notifications" />
     </>
   );
-  const refresh = () => Promise.all([refetchJobs(), refetchProfile()]);
+  const refresh = () => Promise.all([refetchJobs(), refetchProfile(), refreshEarnings()]);
   const listsRequests = profile.data !== undefined && homeMode(profile.data) === "requests";
 
   return (
@@ -65,6 +67,7 @@ export function ProHomeScreen() {
               <View className="gap-6 pb-4 pt-2">
                 {greeting}
                 <ProfileChecklistCard />
+                <EarningsCard />
                 <YourJobs />
                 <Text accessibilityRole="header" className="text-headline text-navy-900">
                   {t("opportunities.title")}
@@ -81,6 +84,7 @@ export function ProHomeScreen() {
             onRefresh={refresh}
             header={greeting}
           >
+            <EarningsCard />
             <YourJobs />
           </ProOnboarding>
         )}

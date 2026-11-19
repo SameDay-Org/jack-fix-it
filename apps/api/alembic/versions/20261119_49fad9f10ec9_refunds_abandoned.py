@@ -42,6 +42,20 @@ def upgrade() -> None:
         TABLE,
         "status = 'abandoned' OR (status = 'created') = (stripe_status IS NOT NULL)",
     )
+    # Whether the last attempt's failure was Stripe's definitive answer to the create (a 4xx
+    # error with a Stripe code: the same key gets the same refusal back, so that create can
+    # never make a refund): only such a refund may be abandoned (#450 round 1). The previous
+    # code never writes it; false by default.
+    op.add_column(
+        TABLE,
+        sa.Column("last_error_definitive", sa.Boolean(), server_default=sa.false(), nullable=False),
+    )
+    # When a signed refund event showed a refund Stripe made, or still holds, for the dispute
+    # while this row was abandoned or failed (#450 round 2): the job's payout stays held until
+    # staff reconcile it. NULL for every existing row; the previous code never reads or writes it.
+    op.add_column(
+        TABLE, sa.Column("late_refund_seen_at", sa.DateTime(timezone=True), nullable=True)
+    )
     # One refund per dispute that is not abandoned: the one the dispute's decision carries out.
     op.create_index(
         op.f(CURRENT_INDEX),
@@ -64,7 +78,18 @@ def downgrade() -> None:
             f"{abandoned} abandoned refund rows exist: the previous schema cannot hold them. "
             "Take a backup and settle them by hand before downgrading."
         )
+    # Dropping a reconciliation hold would release the payout it holds.
+    held = bind.execute(
+        sa.text("SELECT count(*) FROM refunds WHERE late_refund_seen_at IS NOT NULL")
+    ).scalar_one()
+    if held:
+        raise RuntimeError(
+            f"{held} refund rows hold a payout for reconciliation: reconcile and clear them "
+            "(docs/stripe-money.md) before downgrading."
+        )
     op.drop_index(op.f(CURRENT_INDEX), table_name=TABLE)
+    op.drop_column(TABLE, "late_refund_seen_at")
+    op.drop_column(TABLE, "last_error_definitive")
     op.drop_constraint(op.f(STRIPE_STATUS_CHECK), TABLE, type_="check")
     op.create_check_constraint(
         op.f(STRIPE_STATUS_CHECK), TABLE, "(status = 'created') = (stripe_status IS NOT NULL)"

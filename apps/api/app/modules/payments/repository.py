@@ -3,7 +3,7 @@ from collections.abc import Collection
 from datetime import datetime
 from typing import Final
 
-from sqlalchemy import ColumnElement, Select, Subquery, case, func, or_, select, update
+from sqlalchemy import ColumnElement, Select, Subquery, and_, case, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.payments.models import (
@@ -80,6 +80,11 @@ class PaymentRepository:
         statement = select(Payment.id, Payment.request_id, Payment.quote_id).where(where)
         row = (await self._session.execute(statement)).one_or_none()
         return None if row is None else (row.id, row.request_id, row.quote_id)
+
+    async def intent_of(self, payment_id: uuid.UUID) -> str | None:
+        """The payment's PaymentIntent id, as last committed; None without one."""
+        statement = select(Payment.stripe_payment_intent_id).where(Payment.id == payment_id)
+        return await self._session.scalar(statement)
 
     async def succeeded_of_quote(self, quote_id: uuid.UUID) -> Payment | None:
         """The quote's payment that succeeded: the one its job was created from (#61), so
@@ -184,6 +189,18 @@ class TransferRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    @staticmethod
+    def payout_facts() -> Subquery:
+        """Every transfer row's job (`job_id`), amount (`amount_cents`), whether Stripe made it
+        (`made`: created) and whether it was reversed since (`reversed`), for the pro's
+        earnings (#70). Never a Stripe id."""
+        return select(
+            Transfer.job_id.label("job_id"),
+            Transfer.amount_cents.label("amount_cents"),
+            (Transfer.status == TransferStatus.CREATED).label("made"),
+            (Transfer.status == TransferStatus.REVERSED).label("reversed"),
+        ).subquery()
 
     async def get_of_job_for_update(self, job_id: uuid.UUID) -> Transfer | None:
         """The job's transfer row, locked until the transaction ends, read as last committed;
@@ -413,6 +430,28 @@ class RefundRepository:
         )
         return (await self._session.scalars(statement)).one_or_none()
 
+    async def all_of_dispute(self, dispute_id: uuid.UUID) -> list[Refund]:
+        """Every refund of the dispute, abandoned ones included, unlocked."""
+        statement = (
+            select(Refund)
+            .where(Refund.dispute_id == dispute_id)
+            .execution_options(populate_existing=True)
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def all_of_dispute_for_update(self, dispute_id: uuid.UUID) -> list[Refund]:
+        """Every refund of the dispute, abandoned ones included, locked until the transaction
+        ends (in id order, so two lockers never deadlock), read as last committed. Take the
+        job's and the dispute's locks first."""
+        statement = (
+            select(Refund)
+            .where(Refund.dispute_id == dispute_id)
+            .order_by(Refund.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return list((await self._session.scalars(statement)).all())
+
     async def abandoned_of_dispute(self, dispute_id: uuid.UUID) -> int:
         """How many of the dispute's refunds staff abandoned (#434)."""
         statement = select(func.count()).where(
@@ -441,6 +480,50 @@ class RefundRepository:
         )
         return (await self._session.scalar(statement)) is not None
 
+    async def by_key(self, key: str) -> Refund | None:
+        """The row with this idempotency key (unique), unlocked, read as last committed."""
+        statement = (
+            select(Refund)
+            .where(Refund.idempotency_key == key)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def by_key_for_update(self, key: str) -> Refund | None:
+        """The row with this idempotency key, locked until the transaction ends, read as last
+        committed."""
+        statement = (
+            select(Refund)
+            .where(Refund.idempotency_key == key)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def due_cancel_refunds(
+        self, key_prefix: str, needs_review_code: str, tried_before: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """The job of each cancellation refund (#69: no dispute, its key under `key_prefix`)
+        left without Stripe's answer: no Stripe refund stored, not refused for good, not for
+        staff (`needs_review_code`), and its latest try (or its creation, before the first)
+        before `tried_before`. Least recently tried first."""
+        since = func.coalesce(Refund.requested_at, Refund.created_at)
+        statement = (
+            select(Refund.job_id)
+            .where(
+                Refund.dispute_id.is_(None),
+                Refund.idempotency_key.startswith(key_prefix, autoescape=True),
+                Refund.stripe_refund_id.is_(None),
+                Refund.status.in_(REFUND_NOT_MADE),
+                Refund.last_error_definitive.is_(False),
+                Refund.last_error_code.is_distinct_from(needs_review_code),
+                since < tried_before,
+            )
+            .order_by(since, Refund.id)
+            .limit(limit)
+        )
+        return list(await self._session.scalars(statement))
+
     async def add(self, refund: Refund) -> Refund:
         """Inserts the row now (flush), so a second row under the key surfaces here."""
         self._session.add(refund)
@@ -457,6 +540,7 @@ class RefundRepository:
             .values(
                 status=RefundStatus.PENDING,
                 last_error_code=None,
+                last_error_definitive=False,
                 requested_at=now,
                 attempts=Refund.attempts + 1,
             )
@@ -464,9 +548,12 @@ class RefundRepository:
         )
         return await self._session.scalar(statement)
 
-    async def mark_failed(self, refund_id: uuid.UUID, attempt: int, code: str) -> bool:
-        """Ends attempt number `attempt` as failed with `code`. False (nothing written) when a
-        later attempt started meanwhile or the refund was stored."""
+    async def mark_failed(
+        self, refund_id: uuid.UUID, attempt: int, code: str, *, definitive: bool = False
+    ) -> bool:
+        """Ends attempt number `attempt` as failed with `code`, `definitive` when it was
+        Stripe's definitive answer to the create. False (nothing written) when a later attempt
+        started meanwhile or the refund was stored."""
         statement = (
             update(Refund)
             .where(
@@ -475,7 +562,9 @@ class RefundRepository:
                 Refund.status == RefundStatus.PENDING,
                 Refund.stripe_refund_id.is_(None),
             )
-            .values(status=RefundStatus.FAILED, last_error_code=code)
+            .values(
+                status=RefundStatus.FAILED, last_error_code=code, last_error_definitive=definitive
+            )
             .returning(Refund.id)
         )
         return (await self._session.scalar(statement)) is not None
@@ -530,6 +619,30 @@ class RefundRepository:
         )
         return {dispute_id for dispute_id in await self._session.scalars(statement) if dispute_id}
 
+    async def hold_for_reconciliation(self, dispute_id: uuid.UUID, now: datetime) -> int:
+        """Marks the dispute's abandoned and failed refunds as seen made late (#450 round 2):
+        the first time is kept, so a repeated event changes nothing. Returns how many rows hold
+        it now. The caller holds the job's and the dispute's locks; the rows' are taken here."""
+        statement = (
+            update(Refund)
+            .where(
+                Refund.dispute_id == dispute_id,
+                Refund.status.in_((RefundStatus.ABANDONED, RefundStatus.FAILED)),
+            )
+            .values(late_refund_seen_at=func.coalesce(Refund.late_refund_seen_at, now))
+            .returning(Refund.id)
+        )
+        return len((await self._session.scalars(statement)).all())
+
+    async def held_for_reconciliation(self, dispute_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """The disputes among these with a refund staff must reconcile (late_refund_seen_at)."""
+        if not dispute_ids:
+            return set()
+        statement = select(Refund.dispute_id).where(
+            Refund.dispute_id.in_(dispute_ids), Refund.late_refund_seen_at.is_not(None)
+        )
+        return {dispute_id for dispute_id in await self._session.scalars(statement) if dispute_id}
+
     async def unsettled_of_job(self, job_id: uuid.UUID) -> bool:
         """Whether the job has a dispute refund Stripe has not finished (not `succeeded`)."""
         statement = select(
@@ -541,9 +654,16 @@ class RefundRepository:
     def unsettled_dispute_jobs() -> Select[uuid.UUID]:
         """The job of every dispute refund whose money Stripe has not given back (anything but
         `succeeded`, none read yet included): its payout stays held (payments.transfers). An
-        abandoned refund holds nothing: Stripe showed none that could still move money (#434)."""
+        abandoned refund holds nothing: Stripe showed none that could still move money (#434),
+        unless a refund was seen made late for its dispute since (late_refund_seen_at, #450
+        round 2): then it holds the payout until staff reconcile it, whatever its status."""
         return select(Refund.job_id.label("job_id")).where(
             Refund.dispute_id.is_not(None),
-            Refund.stripe_status.is_distinct_from(STRIPE_REFUND_SUCCEEDED),
-            Refund.status != RefundStatus.ABANDONED,
+            or_(
+                and_(
+                    Refund.stripe_status.is_distinct_from(STRIPE_REFUND_SUCCEEDED),
+                    Refund.status != RefundStatus.ABANDONED,
+                ),
+                Refund.late_refund_seen_at.is_not(None),
+            ),
         )

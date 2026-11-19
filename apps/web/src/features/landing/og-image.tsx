@@ -9,9 +9,9 @@ export const OG_SIZE = { width: 1200, height: 630 };
 
 const CATALOGS = { en, es } as const;
 
-/** The card's description for screen readers, in each language. */
-export function ogAlt(locale: Locale): string {
-  return CATALOGS[locale].landing.meta.ogAlt;
+/** The card's description for screen readers, in each language: the landing's, or another page's. */
+export function ogAlt(locale: Locale, page: "landing" | "forPros" = "landing"): string {
+  return CATALOGS[locale][page].meta.ogAlt;
 }
 
 // The brand tokens (globals.css): the image is drawn without the site's CSS.
@@ -21,10 +21,10 @@ const WHITE = "#FFFFFF";
 
 /**
  * The landing's Open Graph card (#85), drawn when the site is built: the wordmark and the
- * tagline on navy, in the page's language. No photo, no external service, no font download (the
- * image renderer's own font).
+ * tagline on navy, in the page's language; another public page (#88) passes its own line. No
+ * photo, no external service, no font download (the image renderer's own font).
  */
-export function landingOgImage(locale: Locale): ImageResponse {
+export function landingOgImage(locale: Locale, line?: string): ImageResponse {
   const { brand } = CATALOGS[locale];
   const [first, ...rest] = brand.name.split(" ");
   return new ImageResponse(
@@ -46,7 +46,7 @@ export function landingOgImage(locale: Locale): ImageResponse {
         {first}
         <span style={{ color: LIME, marginLeft: 24 }}>{rest.join(" ")}</span>
       </div>
-      <div style={{ display: "flex", fontSize: 48, maxWidth: 900 }}>{brand.tagline}</div>
+      <div style={{ display: "flex", fontSize: 48, maxWidth: 900 }}>{line ?? brand.tagline}</div>
     </div>,
     OG_SIZE,
   );

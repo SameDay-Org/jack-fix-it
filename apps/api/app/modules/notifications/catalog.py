@@ -2,9 +2,10 @@
 they carry no personal data: placeholders are limited to PLACEHOLDERS (a test scans for it).
 #55 adds a new request (to a dispatched pro), a new quote (to the customer) and a quote
 accepted (to its pro); #65 the job's steps and a booking whose payment was canceled; #66/#67 the
-job confirmed (to its pro); #75 a problem reported (to the pro); #76 its resolution (to both
-sides, one message per decision, never the admin's note); #280 payouts set up (to an approved
-pro). The On my
+job confirmed (to its pro); #69 a job cancelled by its customer (to the pro, and to the
+customer with the refund in neutral words, no timing); #75 a problem reported (to the pro);
+#76 its resolution (to both sides, one message per decision, never the admin's note); #280
+payouts set up (to an approved pro). The On my
 way copy points to the app for the arrival code: the code itself never leaves the customer's job
 view. `push.test.*` is a neutral message.
 """
@@ -51,6 +52,15 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "push.job_done.body": "Please take a look at job {public_code} in the app.",
                 "push.job_confirmed.title": "Job confirmed",
                 "push.job_confirmed.body": "Job {public_code} is confirmed as complete.",
+                "push.job_cancelled_by_customer.title": "The customer cancelled",
+                "push.job_cancelled_by_customer.body": (
+                    "Job {public_code} was cancelled. It is no longer on your schedule."
+                ),
+                "push.job_cancelled.title": "Your job was cancelled",
+                "push.job_cancelled.body": (
+                    "Job {public_code} is cancelled. Any refund due goes back to your "
+                    "original payment method."
+                ),
                 "push.job_disputed.title": "The customer reported a problem",
                 "push.job_disputed.body": (
                     "Job {public_code} needs attention. Open it in the app to reply."
@@ -127,6 +137,15 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "push.job_confirmed.title": "Trabajo confirmado",
                 "push.job_confirmed.body": (
                     "El trabajo {public_code} quedó confirmado como terminado."
+                ),
+                "push.job_cancelled_by_customer.title": "El cliente canceló",
+                "push.job_cancelled_by_customer.body": (
+                    "El trabajo {public_code} fue cancelado. Ya no está en tu agenda."
+                ),
+                "push.job_cancelled.title": "Tu trabajo fue cancelado",
+                "push.job_cancelled.body": (
+                    "El trabajo {public_code} está cancelado. Cualquier reembolso que corresponda "
+                    "vuelve a tu método de pago original."
                 ),
                 "push.job_disputed.title": "El cliente reportó un problema",
                 "push.job_disputed.body": (

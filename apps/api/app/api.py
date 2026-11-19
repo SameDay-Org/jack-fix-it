@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.errors import ErrorResponse
 from app.modules.addresses.router import router as addresses_router
 from app.modules.auth.router import router as auth_router
+from app.modules.cancellations.router import customer_router as cancel_customer_router
 from app.modules.categories.router import router as categories_router
 from app.modules.chat.router import flags_router as chat_flags_router
 from app.modules.chat.router import router as chat_router
@@ -14,6 +15,7 @@ from app.modules.dispatch.router import router as opportunities_router
 from app.modules.disputes.router import customer_router as dispute_customer_router
 from app.modules.disputes.router import pro_router as dispute_pro_router
 from app.modules.disputes.router import staff_router as staff_disputes_router
+from app.modules.earnings.router import router as earnings_router
 from app.modules.geo.router import router as geo_router
 from app.modules.jobs.router import customer_router as customer_jobs_router
 from app.modules.jobs.router import location_router as job_location_router
@@ -81,7 +83,9 @@ v1_router.include_router(staff_ops_router)
 v1_router.include_router(staff_followups_router)
 v1_router.include_router(reviews_router)
 v1_router.include_router(dispute_customer_router)
+v1_router.include_router(cancel_customer_router)
 v1_router.include_router(dispute_pro_router)
+v1_router.include_router(earnings_router)
 v1_router.include_router(staff_disputes_router)
 v1_router.include_router(staff_metrics_router)
 v1_router.include_router(my_rating_router)

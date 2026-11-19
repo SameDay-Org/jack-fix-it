@@ -112,5 +112,9 @@ class InvalidSplitError(AppError):
 
 class RefundRepairRefusedError(Exception):
     """A staff repair of a dispute's refund (#434, scripts/resolve_dispute_refund.py) was
-    refused: nothing changed. The message is for the operator and never holds a Stripe id, a
-    name or a note."""
+    refused: nothing changed. `code` is a fixed word for the audit row; the message is for the
+    operator and never holds a Stripe id, a name or a note."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code

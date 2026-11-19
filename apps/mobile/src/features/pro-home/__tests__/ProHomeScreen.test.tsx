@@ -61,6 +61,12 @@ jest.mock("@/features/pro-profile", () => ({
     refetch: mockRefetchProfile,
   }),
 }));
+// The wallet (#70) has its own suite (features/earnings); here a pull refreshes its (stubbed) totals.
+const mockRefreshEarnings = jest.fn(() => Promise.resolve());
+jest.mock("@/features/earnings", () => ({
+  EarningsCard: () => null,
+  useRefreshEarningsTotals: () => mockRefreshEarnings,
+}));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock("expo-notifications");
 jest.mock(
@@ -174,11 +180,14 @@ describe("ProHomeScreen", () => {
       .mockResolvedValueOnce(page([sentLater, { ...FRESH, viewed: true }, OPENED]));
     mockRefetchJobs.mockClear();
     mockRefetchProfile.mockClear();
+    mockRefreshEarnings.mockClear();
     await act(async () => pullToRefresh());
     await findCard(sentLater.dispatch_id);
-    // The pull refreshes the pro's jobs with the opportunities (#63), and the profile (#36).
+    // The pull refreshes the pro's jobs with the opportunities (#63), the profile (#36) and the
+    // wallet's totals (#70).
     expect(mockRefetchJobs).toHaveBeenCalledTimes(1);
     expect(mockRefetchProfile).toHaveBeenCalledTimes(1);
+    expect(mockRefreshEarnings).toHaveBeenCalledTimes(1);
     expect(card(sentLater.dispatch_id).getByText("New", HIDDEN)).toBeTruthy();
     expect(card(FRESH.dispatch_id).queryByText("New", HIDDEN)).toBeNull();
 

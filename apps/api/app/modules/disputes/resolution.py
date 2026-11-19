@@ -84,7 +84,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.errors import ForbiddenError, NotFoundError
-from app.integrations.stripe_errors import StripeCallError, StripeUnavailableError
+from app.integrations.stripe_errors import (
+    StripeCallError,
+    StripeUnavailableError,
+)
 from app.integrations.stripe_refunds import RefundFacts, StripeRefunds
 from app.modules.audit.service import AuditService
 from app.modules.audit.types import (
@@ -129,6 +132,7 @@ from app.modules.payments.refunds import (
     PaymentFacts,
     RefundAttempt,
     RefundBlocked,
+    RefundCreateRejectedError,
     RefundDecision,
     RefundLedger,
     RefundNeedsReviewError,
@@ -644,6 +648,10 @@ class DisputeResolver:
                 started,
                 error.code or type(error).__name__,
                 "unavailable" if unavailable else "rejected",
+                # Stripe's definitive answer: a 4xx with its code (stripe_errors.raise_typed)
+                # to the create itself. A failed lookup or read leaves the create uncertain
+                # (#450 round 2): it never makes the refund abandonable.
+                definitive=isinstance(error, RefundCreateRejectedError) and error.code is not None,
             )
             logger.error(
                 "dispute_refund_stripe_unavailable"
@@ -737,11 +745,13 @@ class DisputeResolver:
         started: RefundAttempt | DisputeRefund,
         code: str,
         outcome: str,
+        *,
+        definitive: bool = False,
     ) -> None:
         """No refund came back from Stripe: the attempt ended failed (a read of a held refund
         leaves the row as it is) and the outcome audited, committed before the answer."""
         if isinstance(started, RefundAttempt):
-            await self._ledger.failed(started, code)
+            await self._ledger.failed(started, code, definitive=definitive)
         await self._settlement.record_outcome(
             actor,
             started.dispute_id,

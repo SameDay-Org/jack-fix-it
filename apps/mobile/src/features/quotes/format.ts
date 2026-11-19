@@ -33,11 +33,18 @@ export function formatMoney(cents: number, locale: string = formatLocale()): str
   }).format(cents / CENTS_PER_DOLLAR);
 }
 
-/** Cents as US dollars with the cents always shown, "$85.00": what the pro sends and receives. */
-export function formatMoneyExact(cents: number, locale: string = formatLocale()): string {
+/**
+ * Cents with the cents always shown, "$85.00": what the pro sends and receives. US dollars unless
+ * the API names its currency (an ISO code in any case, "usd"; always one counted in cents).
+ */
+export function formatMoneyExact(
+  cents: number,
+  locale: string = formatLocale(),
+  currency = "USD",
+): string {
   return new Intl.NumberFormat(locale, {
     style: "currency",
-    currency: "USD",
+    currency: currency.toUpperCase(),
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(cents / CENTS_PER_DOLLAR);

@@ -147,13 +147,16 @@ async def released_dispute(session: AsyncSession, job_id: uuid.UUID) -> Released
 
 
 def released_dispute_jobs() -> Subquery:
-    """The job (`job_id`) of every dispute resolved with a release, as a subquery: the
-    transfer sweep reads those jobs as well as the confirmed ones (#76)."""
+    """The job (`job_id`) of every dispute resolved with a release and the part released
+    (`pro_release_cents`), as a subquery: the transfer sweep reads those jobs as well as the
+    confirmed ones (#76), and a pro's earnings show them on their way (#70)."""
     return DisputeRepository.released_jobs()
 
 
 def dispute_metric_facts() -> Subquery:
-    """Each dispute's `created_at`, as a subquery for the staff metrics' own query (#84)."""
+    """Each dispute's opening, and its resolution and split once resolved, as
+    DisputeRepository.metric_facts names them: a subquery for the staff metrics' own query
+    (#84)."""
     return DisputeRepository.metric_facts()
 
 

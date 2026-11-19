@@ -103,6 +103,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.errors import NotFoundError
 from app.integrations.storage import StorageProvider
+from app.modules.cancellations.reader import CancellationReader
 from app.modules.categories.service import CategoryService
 from app.modules.chat.service import ChatUnreadReader
 from app.modules.jobs.confirmation import confirm_by
@@ -230,6 +231,7 @@ class JobExecutionService:
         self._categories = CategoryService(session)
         self._chat = ChatUnreadReader(session)
         self._transfers = TransferReader(session)
+        self._cancellations = CancellationReader(session)
 
     # Reads
 
@@ -270,6 +272,9 @@ class JobExecutionService:
             amount_cents=job.customer_price_cents,
             tax_cents=job.tax_cents,
             customer_total_cents=job.customer_price_cents + job.tax_cents,
+            cancellation=await self._cancellations.for_customer(job.id)
+            if job.status is JobStatus.CANCELLED
+            else None,
             unread_messages=unread[job.id],
         )
 
@@ -571,6 +576,9 @@ class JobExecutionService:
         names = await self._users.first_names([job.customer_id for job in jobs])
         unread = await self._chat.unread_counts([job.id for job in jobs], user.id)
         payouts = await self._transfers.payouts([job.id for job in jobs])
+        cancellations = await self._cancellations.for_pro(
+            [job.id for job in jobs if job.status is JobStatus.CANCELLED]
+        )
         photos: dict[uuid.UUID, list[JobPhoto]] = {job.id: [] for job in jobs}
         for photo in await self._photos.of_jobs(list(photos)):
             photos[photo.job_id].append(photo)
@@ -614,6 +622,7 @@ class JobExecutionService:
                     photos=self._signer.for_pro(photos[job.id]),
                     pro_payout_cents=job.pro_payout_cents,
                     payout=_payout(job, payouts),
+                    cancellation=cancellations.get(job.id),
                     unread_messages=unread[job.id],
                 )
             )

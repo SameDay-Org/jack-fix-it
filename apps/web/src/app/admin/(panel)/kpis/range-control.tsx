@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useId, useState, useTransition, type FormEvent, type MouseEvent } from "react";
+import { useEffect, useId, useState, useTransition, type FormEvent, type MouseEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -32,6 +32,26 @@ const PILL =
   "inline-flex h-9 items-center rounded-pill px-4 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2";
 
 /**
+ * How long a range change runs before the control says it is updating. A quicker answer would
+ * only flash the word for a frame or two (#453); the section is `aria-busy` from the start.
+ */
+export const UPDATING_DELAY_MS = 300;
+
+/** True once `active` has stayed true for `delayMs`; false again as soon as it ends. */
+function useShownAfter(active: boolean, delayMs: number): boolean {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!active) return;
+    const timer = setTimeout(() => setShown(true), delayMs);
+    return () => {
+      clearTimeout(timer);
+      setShown(false);
+    };
+  }, [active, delayMs]);
+  return active && shown;
+}
+
+/**
  * The page's date range: presets as links (the range lives in the URL, so it can be shared),
  * then two days and a button. The days are checked here as the API checks them; the page is
  * rendered again on the server, and keeps showing the last figures until the new ones arrive.
@@ -54,6 +74,7 @@ export function RangeControl({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const updating = useShownAfter(pending, UPDATING_DELAY_MS);
   const [error, setError] = useState<RangeError | null>(null);
   const errorId = useId();
   const customId = useId();
@@ -101,7 +122,7 @@ export function RangeControl({
           </Link>
         ))}
         <span aria-live="polite" className="text-sm text-gray-500">
-          {pending ? text.updating : ""}
+          {updating ? text.updating : ""}
         </span>
       </div>
       <form
