@@ -48,10 +48,13 @@ export function LandingHeader({
   t,
   locale,
   page = "landing",
+  paths = page === "landing" ? LANDING_PATHS : FOR_PROS_PATHS,
 }: {
   t: TFunction;
   locale: Locale;
   page?: SitePage;
+  /** This page in each language, for the language switch (a service's page passes its own). */
+  paths?: Record<Locale, string>;
 }) {
   const sections: MenuLink[] = SECTIONS[page].map(([anchor, key]) => ({
     href: `#${anchor}`,
@@ -84,11 +87,7 @@ export function LandingHeader({
             </a>
           ))}
         </nav>
-        <LanguageToggle
-          t={t}
-          locale={locale}
-          paths={page === "landing" ? LANDING_PATHS : FOR_PROS_PATHS}
-        />
+        <LanguageToggle t={t} locale={locale} paths={paths} />
         <Link
           href={app.href}
           prefetch={false}

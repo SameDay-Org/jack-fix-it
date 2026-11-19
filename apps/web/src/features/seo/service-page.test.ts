@@ -91,8 +91,15 @@ describe("a service's page", () => {
     expect(html).toMatch(/Pintura interior.*Paredes de una o más habitaciones/s);
     expect(html).toMatch(/<a[^>]*href="\/es\/house-cleaning"[^>]*>Limpieza del hogar<\/a>/);
     expect(html).toContain('href="/es/app"');
-    // The language switch leads to this page's twin.
-    expect(html).toMatch(/href="\/painting"[^>]*hrefLang="en"|hrefLang="en"[^>]*href="\/painting"/);
+    // Every language switch (header and footer) leads to this page's twin.
+    const switches = [...html.matchAll(/<a[^>]*hrefLang="(en|es)"[^>]*>/g)].map((m) => [
+      m[1],
+      /href="([^"]+)"/.exec(m[0])?.[1],
+    ]);
+    expect(switches.length).toBeGreaterThanOrEqual(4);
+    for (const [language, href] of switches) {
+      expect(href, language).toBe(language === "en" ? "/painting" : "/es/painting");
+    }
     for (const english of ["How it works", "Where Jack works", "Get the app", "Skip to"]) {
       expect(html, english).not.toContain(english);
     }
@@ -129,6 +136,7 @@ describe("a service's page", () => {
 
   it.each([
     ["an unknown slug", "handyman", [CLEANING]],
+    ["a slug in capitals", "House-Cleaning", [CLEANING]],
     ["a reserved slug the API lists", "app", [{ ...POOLS, slug: "app" }]],
     ["an inactive category (the API lists only active ones)", "painting", [CLEANING]],
   ])("is a 404 for %s", async (_case, slug, categories) => {

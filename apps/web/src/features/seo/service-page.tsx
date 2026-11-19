@@ -302,7 +302,7 @@ export async function ServicePage({ locale, slug }: { locale: Locale; slug: stri
       >
         {t("landing.skipToContent")}
       </a>
-      <LandingHeader t={t} locale={locale} page="service" />
+      <LandingHeader t={t} locale={locale} page="service" paths={servicePaths(category.slug)} />
       <main id={MAIN_ID}>
         <Hero
           t={t}
