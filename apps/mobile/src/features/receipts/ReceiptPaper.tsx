@@ -125,16 +125,20 @@ export function ReceiptPaper({ receipt, withAddress, testID }: ReceiptPaperProps
         </View>
       ) : null}
       <View className="gap-5 bg-white px-5 py-6">
-        <View accessible className="items-center gap-1" testID="receipt-header">
-          <View className="mb-1 h-1 w-12 rounded-pill bg-green-500" />
-          <Text accessibilityRole="header" className="text-title-2 text-navy-900">
+        {/* Each line spans the paper and centers its words: a line sized to its own measure can be
+            cut short at a large font (Android). */}
+        <View accessible className="gap-1" testID="receipt-header">
+          <View className="mb-1 h-1 w-12 self-center rounded-pill bg-green-500" />
+          <Text accessibilityRole="header" className="text-center text-title-2 text-navy-900">
             {t("brand.name")}
           </Text>
-          <Text className="text-caption text-gray-500">{receipt.issuer.legal_name}</Text>
-          <Text className="mt-2 text-footnote text-navy-900" style={FIGURES}>
+          <Text className="text-center text-caption text-gray-500">
+            {receipt.issuer.legal_name}
+          </Text>
+          <Text className="mt-2 text-center text-footnote text-navy-900" style={FIGURES}>
             {t("receipt.number", { code: receipt.receipt_number })}
           </Text>
-          <Text className="text-footnote text-gray-500">
+          <Text className="text-center text-footnote text-gray-500">
             {t("receipt.paidOn", { date: receiptDay(receipt.paid_at) })}
           </Text>
         </View>
@@ -195,7 +199,7 @@ export function ReceiptPaper({ receipt, withAddress, testID }: ReceiptPaperProps
 
         <Rule width={inner} />
 
-        <View accessible className="items-center gap-1" testID="receipt-footer">
+        <View accessible className="gap-1" testID="receipt-footer">
           <Text className="text-center text-callout text-navy-900">{t("receipt.thanks")}</Text>
           <Text className="text-center text-footnote text-gray-500">
             {t("receipt.questions", { email: receipt.issuer.support_email })}

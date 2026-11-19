@@ -130,7 +130,7 @@ export function PaidRow({ job, requestId }: { job: CustomerJob; requestId: strin
         label={t("receipt.see")}
         variant="ghost"
         onPress={() => push(receiptHref(requestId))}
-        className="self-start"
+        className="-ml-5 self-start"
         testID="job-receipt"
       />
     </View>
