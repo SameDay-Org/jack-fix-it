@@ -380,6 +380,20 @@ class Settings(BaseSettings):
     # reads abandoned refunds has finished on the api AND the worker, so no previous release,
     # which cannot read them, is still serving (#450 round 1).
     refund_abandon_enabled: bool = False
+    # Cancellation (#69; Cesar, 2026-10-29): a customer who cancels once the pro is on the way
+    # pays this share of the job price, in basis points (1500 = 15%), which the platform keeps;
+    # the rest of their payment is refunded. Before "On my way" a cancel is free. Frozen on each
+    # cancellation (job_cancellations.fee_bps).
+    cancellation_fee_bps: int = Field(default=1500, ge=0, le=10_000)
+    # A cancelled job's refund is made by the worker: a task queued at the cancel, and a sweep
+    # for whatever is left (a lost answer, Stripe unavailable, a task never queued). How often
+    # the sweep runs (a cron, in minutes of the hour), the longest one run may take and the most
+    # refunds one run tries. Overlapping runs are safe: each refund row is locked and checked
+    # again, and Stripe gets one key per job. A failed attempt waits
+    # REFUND_STUCK_PENDING_MINUTES before the sweep tries it again.
+    cancel_refund_sweep_minutes: int = Field(default=5, ge=1, le=60)
+    cancel_refund_sweep_timeout_seconds: int = Field(default=270, gt=0)
+    cancel_refund_batch_size: int = Field(default=50, gt=0)
     # Job execution (D12.2, #63): wrong arrival codes a pro may enter at check-in before the
     # code locks and the BDC is alerted (Cesar, 2026-10-29: 5).
     arrival_code_max_attempts: int = Field(default=5, gt=0)
