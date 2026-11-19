@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -32,7 +33,7 @@ from app.modules.requests.media_copies import (
     MediaCopyConfig,
     sanitize_job_id,
 )
-from app.modules.requests.models import MediaSafeStatus
+from app.modules.requests.models import MediaSafeStatus, RequestMedia
 from app.modules.requests.tasks import sanitize_request_media
 from tests.conftest import make_settings
 from tests.job_world import build_world, make_job
@@ -112,6 +113,17 @@ def sweep_ctx(
 def later() -> datetime:
     """A clock past the sweep's wait for anything attached now."""
     return datetime.now(UTC) + AFTER + timedelta(minutes=5)
+
+
+async def attached_earlier(session: AsyncSession, media: Any) -> None:
+    """The media row an hour older than the others: rows made in one test transaction share
+    their created_at, and the sweep reads the oldest first."""
+    await session.execute(
+        update(RequestMedia)
+        .where(RequestMedia.id == media.media_id)
+        .values(created_at=datetime.now(UTC) - timedelta(hours=1))
+    )
+    await session.commit()
 
 
 def claiming(session: AsyncSession, storage: MemoryStorage, store: MemoryStore) -> MediaCopier:
@@ -360,6 +372,7 @@ async def test_a_row_behind_a_postponed_one_is_reached_with_a_batch_of_one(
     skips it for its window and queues the newer one."""
     oldest = await make_media(db_session, storage, gps_jpeg())
     newer = await make_media(db_session, storage, gps_jpeg())
+    await attached_earlier(db_session, oldest)
     first, second = RecordingQueue(), RecordingQueue()
 
     await requeue_stale_media_copies(
@@ -397,6 +410,7 @@ async def test_one_queue_failure_never_stops_the_others_and_leaves_it_unmarked(
 ) -> None:
     first = await make_media(db_session, storage, gps_jpeg())
     second = await make_media(db_session, storage, gps_jpeg())
+    await attached_earlier(db_session, first)
     queue = FlakyQueue()
 
     with caplog.at_level(logging.INFO):
