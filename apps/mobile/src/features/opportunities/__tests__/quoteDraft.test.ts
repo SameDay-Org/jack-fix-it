@@ -41,7 +41,16 @@ describe("defaultStartAt", () => {
 
   it("is the next whole hour without a preferred day, also on the hour", () => {
     expect(defaultStartAt(null, NOW)).toBe(local(10, 28, 11));
-    expect(defaultStartAt(null, local(10, 28, 23))).toBe(local(10, 29, 0));
+    expect(defaultStartAt(null, local(10, 28, 21))).toBe(local(10, 28, 22));
+    expect(defaultStartAt(null, local(10, 28, 8, 5))).toBe(local(10, 28, 9));
+  });
+
+  it("never opens in the small hours: those move to 9:00 AM that morning (#475)", () => {
+    expect(defaultStartAt(null, local(10, 28, 1, 6))).toBe(local(10, 28, 9));
+    expect(defaultStartAt(null, local(10, 28, 23, 40))).toBe(local(10, 29, 9));
+    expect(defaultStartAt(null, local(10, 28, 0))).toBe(local(10, 28, 9));
+    // A preferred day already past at night: the same morning rule.
+    expect(defaultStartAt("2026-10-27", local(10, 28, 2, 30))).toBe(local(10, 28, 9));
   });
 });
 

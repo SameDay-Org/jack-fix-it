@@ -5,6 +5,7 @@ import { Text, View } from "react-native";
 import { useSession } from "@/api";
 import { Screen, useTabBarInset } from "@/components/ui";
 import { EarningsCard, useRefreshEarningsTotals } from "@/features/earnings";
+import { useInForeground } from "@/features/jobs/api";
 import { NotificationsPrompt } from "@/features/notifications/NotificationsPrompt";
 import { ProfileChecklistCard, useMyProProfile } from "@/features/pro-profile";
 import { useProJobs, YourJobs } from "@/features/pro-jobs";
@@ -30,7 +31,9 @@ export function ProHomeScreen() {
   const inset = useTabBarInset();
   // The pull's refresh only: "Your jobs" refreshes the list on focus and foreground itself.
   const { refetch: refetchJobs } = useProJobs({ refetchOnReturn: false });
-  const profile = useMyProProfile();
+  // While the review is pending the home asks again on its own: approval lands without a pull.
+  const foreground = useInForeground();
+  const profile = useMyProProfile({ pollWhilePending: focused && foreground });
   const { refetch: refetchProfile } = profile;
   // The review's answer lands while the pro is away: asked again on every return to the home.
   useRefetchOnReturn(refetchProfile);

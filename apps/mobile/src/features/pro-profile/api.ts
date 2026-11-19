@@ -11,6 +11,8 @@ import {
   type PatchBody,
 } from "@/api";
 
+import { proProfileConfig } from "./config";
+
 /** The pro's own profile (GET /v1/pros/me). */
 export type ProProfile = GetResponse<"/v1/pros/me">;
 /** PATCH /v1/pros/me: the fields to change; the two id lists replace their whole set. */
@@ -36,12 +38,21 @@ export const myProProfileQueryOptions = (generation: number) =>
 /**
  * The signed-in pro's profile; the first read creates an empty one, pending verification. Asked
  * for only while a pro is signed in. A failure is shown with a retry, not retried in silence.
+ * `pollWhilePending`: asked again every `proProfileConfig.reviewPollMs` while the review is
+ * pending (the pro's home, focused and in the foreground: #476), since no push says it is done.
  */
-export function useMyProProfile() {
+export function useMyProProfile({ pollWhilePending = false } = {}) {
   const generation = useSessionGeneration();
   const { status, user } = useSession();
   const enabled = status === "signedIn" && user?.role === "pro";
-  return useQuery({ ...myProProfileQueryOptions(generation), enabled });
+  return useQuery({
+    ...myProProfileQueryOptions(generation),
+    enabled,
+    refetchInterval: (current) =>
+      enabled && pollWhilePending && current.state.data?.verification_status === "pending"
+        ? proProfileConfig.reviewPollMs
+        : false,
+  });
 }
 
 /** The fields to change, for the session the form was sent in. */

@@ -54,12 +54,13 @@ jest.mock("@/features/pro-jobs", () => ({
 // the card is left out, the pro is approved and paid out (the home lists requests: the gate
 // of #38 has its own suite, ProHomeGate), and a pull refreshes the (stubbed) profile too.
 const mockRefetchProfile = jest.fn(() => Promise.resolve());
+const mockUseMyProProfile = jest.fn((_options?: { pollWhilePending?: boolean }) => ({
+  data: { verification_status: "approved", payouts_enabled: true },
+  refetch: mockRefetchProfile,
+}));
 jest.mock("@/features/pro-profile", () => ({
   ProfileChecklistCard: () => null,
-  useMyProProfile: () => ({
-    data: { verification_status: "approved", payouts_enabled: true },
-    refetch: mockRefetchProfile,
-  }),
+  useMyProProfile: (options?: { pollWhilePending?: boolean }) => mockUseMyProProfile(options),
 }));
 // The wallet (#70) has its own suite (features/earnings); here a pull refreshes its (stubbed) totals.
 const mockRefreshEarnings = jest.fn(() => Promise.resolve());
@@ -122,6 +123,15 @@ afterEach(() => {
 });
 
 describe("ProHomeScreen", () => {
+  it("asks the profile to poll a pending review while the home is focused, not while blurred (#476)", async () => {
+    jest.mocked(apiGet).mockResolvedValue(page([]));
+    await renderWithQuery(<ProHomeScreen />);
+    expect(mockUseMyProProfile).toHaveBeenLastCalledWith({ pollWhilePending: true });
+
+    await act(async () => navigation.setFocused(false));
+    expect(mockUseMyProProfile).toHaveBeenLastCalledWith({ pollWhilePending: false });
+  });
+
   it("under the greeting, the notifications pre-prompt in the pro's words (#334)", async () => {
     resetPermissionForTests();
     resetPromptDismissalForTests();

@@ -209,7 +209,18 @@
     "pro": {
       "title": "Your jobs",
       "empty": "Jobs you're hired for will show up here.",
-      "cta": "Go to Home"
+      "cta": "Go to Home",
+      "loading": "Loading your jobs",
+      "error": {
+        "title": "We couldn't load your jobs",
+        "body": "Check your connection and try again.",
+        "retry": "Try again"
+      },
+      "more": {
+        "failed": "We couldn't load more jobs.",
+        "retry": "Try again"
+      },
+      "refreshFailed": "Couldn't refresh. Check your connection and try again."
     }
   },
   "customerStatus": {
@@ -832,7 +843,8 @@
       "arrived": "Arrived",
       "working": "Working",
       "done": "Done",
-      "closed": "Cancelled"
+      "closed": "Cancelled",
+      "underReview": "Under review"
     },
     "customerFallback": "the customer",
     "screen": {
