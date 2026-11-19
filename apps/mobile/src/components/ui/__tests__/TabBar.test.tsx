@@ -8,6 +8,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { glassFallback, tokens } from "@/theme";
 
 import {
+  accessoryLines,
   tabBarGeometry,
   TabBar,
   TabBarAccessoryContext,
@@ -120,8 +121,19 @@ describe("tabBarGeometry", () => {
       accessoryBottom: 42 + 56 + 8,
       inset: 42 + 56 + 8 + 48 + 8,
     });
-    // The line grows with the font scale: 20 dp x 2 + 12 dp above and below.
-    expect(tabBarGeometry(2, 0, false, true).accessoryHeight).toBe(64);
+    // The line grows with the font scale: 20 dp x 1.3 + 12 dp above and below.
+    expect(tabBarGeometry(1.3, 0, false, true).accessoryHeight).toBe(50);
+  });
+
+  // #486: one line at 2.0 cut the job banner's sentence to a few letters on a 320 dp screen.
+  it("holds two callout lines from font scale 1.5", () => {
+    expect([1, 1.3, 1.49, 1.5, 2].map(accessoryLines)).toEqual([1, 1, 1, 2, 2]);
+    // 20 dp x 1.5 x 2 lines + 12 dp above and below; at 2.0, 20 x 2 x 2 + 24.
+    expect(tabBarGeometry(1.5, 0, false, true).accessoryHeight).toBe(84);
+    const large = tabBarGeometry(2, 0, false, true);
+    expect(large.accessoryHeight).toBe(104);
+    // The screens under the bar keep the taller pill clear too.
+    expect(large.inset).toBe(large.accessoryBottom + 104 + 8);
   });
 });
 

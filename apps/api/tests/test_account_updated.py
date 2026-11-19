@@ -206,6 +206,11 @@ def pushes(queue: PushQueue) -> list[str]:
     return [job_id for job_id in queue.jobs if job_id.startswith("push:payouts_enabled:")]
 
 
+def kicks(queue: PushQueue) -> dict[str, tuple[str, tuple[object, ...]]]:
+    """The re-dispatch kicks queued (#478)."""
+    return {job_id: job for job_id, job in queue.jobs.items() if job_id.startswith("redispatch-")}
+
+
 def rendered(caplog: pytest.LogCaptureFixture) -> str:
     return caplog.text + "".join(str(r.__dict__) for r in caplog.records)
 
@@ -225,8 +230,12 @@ async def test_payouts_turned_on_for_an_approved_pro_are_announced_once_after_th
     assert await world.payouts_enabled() is True
     assert stripe.retrieved == [world.account_id]
     assert pushes(queue) == [f"push:payouts_enabled:{event_id}"]
-    # Queued once the change was committed, never before.
-    assert queue.committed_at_enqueue == [True]
+    # And the requests no pro could take are looked at again for this pro (#478).
+    assert kicks(queue) == {
+        f"redispatch-pro:{world.pro_id}": ("redispatch_for_pro", (str(world.pro_id),))
+    }
+    # Each queued once the change was committed, never before.
+    assert queue.committed_at_enqueue == [True, True]
     [changed] = [r for r in caplog.records if r.getMessage() == "payouts_enabled_changed"]
     assert (changed.__dict__["pro_id"], changed.__dict__["payouts_enabled"]) == (
         str(world.pro_id),
@@ -241,6 +250,7 @@ async def test_payouts_turned_on_for_an_approved_pro_are_announced_once_after_th
     assert await process_stripe_event(ctx(world, queue), str(again)) == "processed"
     assert len(stripe.retrieved) == 2
     assert len(pushes(queue)) == 1
+    assert len(queue.committed_at_enqueue) == 2  # no kick either
 
 
 async def test_payouts_turned_on_for_a_pro_not_approved_are_stored_but_not_announced(
@@ -254,6 +264,7 @@ async def test_payouts_turned_on_for_a_pro_not_approved_are_stored_but_not_annou
 
     assert await world.payouts_enabled() is True
     assert pushes(queue) == []
+    assert kicks(queue) == {}  # not eligible yet: the approval kicks (#478)
 
 
 async def test_payouts_turned_off_again_are_stored_and_not_announced(
@@ -269,6 +280,7 @@ async def test_payouts_turned_off_again_are_stored_and_not_announced(
 
     assert await world.payouts_enabled() is False
     assert pushes(queue) == []
+    assert kicks(queue) == {}
     [changed] = [r for r in caplog.records if r.getMessage() == "payouts_enabled_changed"]
     assert changed.__dict__["payouts_enabled"] is False
 

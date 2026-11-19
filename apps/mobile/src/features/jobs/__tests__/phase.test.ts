@@ -268,6 +268,21 @@ describe("jobText", () => {
     expect(plain(text.support)).toBe(support);
   });
 
+  // #472: a report resolved with the payment back made the job read "This job was cancelled".
+  it("a refunded job reads as a resolved report, not a cancelled job, in both languages", async () => {
+    const refunded = job({ status: "refunded" });
+    expect(jobPhase(refunded)).toBe("cancelled");
+    expect(jobText(t, refunded, NOW, CLOSE, EN)).toEqual({
+      headline: "Your report was resolved",
+      support: "Your payment for this job went back to your payment method.",
+    });
+    await i18n.changeLanguage("es");
+    expect(jobText(t, refunded, NOW, CLOSE, "es")).toEqual({
+      headline: "Tu reporte se resolvió",
+      support: "Tu pago de este trabajo volvió a tu método de pago.",
+    });
+  });
+
   it("on the way without an ETA, or once it is due", () => {
     const noEta = job({ status: "on_the_way", timeline: [...BOOKED, moved("on_the_way", -1)] });
     expect(jobText(t, noEta, NOW, CLOSE, EN).support).toBe("On the way to you");
@@ -441,7 +456,7 @@ describe("timelineOf", () => {
     }));
     expect(items).toEqual([
       { key: "12-status_changed", label: "Cancelled", time: "Mon 2:00 PM" },
-      { key: "11-status_changed", label: "Cancelled", time: "1:55 PM" },
+      { key: "11-status_changed", label: "Report resolved", time: "1:55 PM" },
       { key: "10-status_changed", label: "Problem reported", time: "1:50 PM" },
       { key: "8-status_changed", label: "Confirmed", time: "1:45 PM" },
       { key: "7-status_changed", label: "Marked as done", time: "1:40 PM" },

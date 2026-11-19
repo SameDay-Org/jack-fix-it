@@ -12,6 +12,10 @@ vi.mock("next/navigation", async () => {
     redirect: (url: string) => {
       throw new Signal(url);
     },
+    // A missing record answers 404 (not-found.tsx, #494).
+    notFound: () => {
+      throw new Error("NEXT_NOT_FOUND");
+    },
   };
 });
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -233,21 +237,15 @@ describe("request card page", () => {
     async (requestId) => {
       api(() => Response.json(card()));
 
-      const page = await render(requestId);
-
-      expect(page).toContain("This request doesn't exist.");
+      await expect(render(requestId)).rejects.toThrow("NEXT_NOT_FOUND");
       expect(requestsTo(fetchMock.mock.calls, CARD)).toEqual([]);
     },
   );
 
-  it("says when the request does not exist", async () => {
+  it("answers 404 when the request does not exist (#494)", async () => {
     api(() => Response.json({ error: { code: "request_not_found" } }, { status: 404 }));
 
-    const page = await render();
-
-    expect(page).toContain("This request doesn't exist.");
-    expect(page).not.toContain('role="alert"');
-    expect(buttons(page)).toEqual([]);
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
   it.each([

@@ -9,6 +9,7 @@ from typing import Any, Final
 import httpx
 import pytest
 from fastapi import FastAPI
+from redis.exceptions import RedisError
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,7 +36,10 @@ from app.observability import JsonFormatter
 from tests.audit_helpers import AuditRow, audit_rows
 from tests.conftest import make_settings
 from tests.job_world import JobWorld, Party, Pro, build_world, headers_for
+from tests.test_dispatch import record_commits
 from tests.test_pros_profile_api import FakeStorage, make_areas, make_categories
+from tests.test_pros_profile_api import queue as queue
+from tests.test_requests_api import RecordingQueue
 
 STAFF = "/v1/admin/pros"
 URL_TTL = 90  # not the default (300), so the tests prove it comes from the setting
@@ -1110,3 +1114,55 @@ async def test_logs_carry_ids_only(
     logs = "\n".join(JsonFormatter().format(r) + r.getMessage() for r in caplog.records)
     for leak in (*CONTACT_LEAKS, FIRST, BIO, "zqxj-reason-41", document.file_key, "sig=fake"):
         assert leak not in logs
+
+
+# --- The re-dispatch kick (#478) ----------------------------------------------------------------
+
+
+async def test_an_approval_kicks_the_redispatch_once_after_its_commit(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    queue: RecordingQueue,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Requests no pro could take may be this pro's now: one redispatch_for_pro job, queued once
+    the approval is committed. Its replay, and a rejection, kick nothing."""
+    pro, _, _ = await ready_pro(db_session, payouts_enabled=True)
+    other, _, _ = await ready_pro(db_session)
+    record_commits(monkeypatch)
+
+    approved = await db_client.post(decision_url(pro), json=APPROVE, headers=world.agent.headers)
+    replay = await db_client.post(decision_url(pro), json=APPROVE, headers=world.agent.headers)
+    rejected = await db_client.post(decision_url(other), json=REJECT, headers=world.agent.headers)
+
+    assert (approved.status_code, replay.status_code, rejected.status_code) == (200, 200, 200)
+    assert queue.jobs == {
+        f"redispatch-pro:{pro.profile_id}": ("redispatch_for_pro", (str(pro.profile_id),))
+    }
+    # Queued after the approval's commit, and only once.
+    assert queue.before == ["commit"]
+
+
+async def test_a_kick_that_cannot_be_queued_does_not_fail_the_approval(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    queue: RecordingQueue,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    queue.failure = RedisError("down")
+    pro, _, _ = await ready_pro(db_session, payouts_enabled=True)
+
+    with caplog.at_level(logging.INFO):
+        approved = await db_client.post(
+            decision_url(pro), json=APPROVE, headers=world.agent.headers
+        )
+
+    assert approved.status_code == 200
+    assert (await profile_of(db_session, pro)).verification_status == ProVerificationStatus.APPROVED
+    [failed] = [r for r in caplog.records if r.getMessage() == "redispatch_kick_failed"]
+    assert (failed.__dict__["pro_id"], failed.__dict__["reason"]) == (
+        str(pro.profile_id),
+        "approved",
+    )
