@@ -205,6 +205,12 @@ class JobStateMachine:
         return kind
 
 
+def job_earning_facts() -> Subquery:
+    """Each job's ids, status, completion, the pro's frozen payout and paid-out time, as
+    JobRepository.earning_facts names them: a subquery for the pro's earnings (#70)."""
+    return JobRepository.earning_facts()
+
+
 def _actor_id(actor: UserAccount | SystemActor | AdminDecision) -> uuid.UUID | None:
     if isinstance(actor, SystemActor):
         return None

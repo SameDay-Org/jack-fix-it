@@ -38,6 +38,27 @@ class JobRepository:
         )
 
     @staticmethod
+    def earning_facts() -> Subquery:
+        """Every job's id (`job_id`), pro (`pro_id`), request (`request_id`), status
+        (`job_status`), completion time (`completed_at`), the pro's frozen payout
+        (`pro_payout_cents`, app.money.split_amount's at payment) and when it moved to paid_out
+        (`paid_out_at`, its job_events row; NULL before), for the pro's earnings (#70)."""
+        paid_out_at = (
+            select(func.min(JobEvent.created_at))
+            .where(JobEvent.job_id == Job.id, JobEvent.to_status == JobStatus.PAID_OUT)
+            .scalar_subquery()
+        )
+        return select(
+            Job.id.label("job_id"),
+            Job.pro_id.label("pro_id"),
+            Job.request_id.label("request_id"),
+            Job.status.label("job_status"),
+            Job.completed_at.label("completed_at"),
+            Job.pro_payout_cents.label("pro_payout_cents"),
+            paid_out_at.label("paid_out_at"),
+        ).subquery()
+
+    @staticmethod
     def awaiting_transfer(released_disputes: Subquery) -> Subquery:
         """The columns of `confirmed` for every job waiting for its transfer: confirmed, or
         disputed with its dispute resolved by a release (`released_disputes`: job_id, #76)."""

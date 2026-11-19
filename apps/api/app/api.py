@@ -14,6 +14,7 @@ from app.modules.dispatch.router import router as opportunities_router
 from app.modules.disputes.router import customer_router as dispute_customer_router
 from app.modules.disputes.router import pro_router as dispute_pro_router
 from app.modules.disputes.router import staff_router as staff_disputes_router
+from app.modules.earnings.router import router as earnings_router
 from app.modules.geo.router import router as geo_router
 from app.modules.jobs.router import customer_router as customer_jobs_router
 from app.modules.jobs.router import location_router as job_location_router
@@ -80,6 +81,7 @@ v1_router.include_router(staff_ops_router)
 v1_router.include_router(reviews_router)
 v1_router.include_router(dispute_customer_router)
 v1_router.include_router(dispute_pro_router)
+v1_router.include_router(earnings_router)
 v1_router.include_router(staff_disputes_router)
 v1_router.include_router(staff_metrics_router)
 v1_router.include_router(my_rating_router)
