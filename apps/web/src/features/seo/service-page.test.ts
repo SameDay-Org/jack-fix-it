@@ -147,6 +147,18 @@ describe("a service's page", () => {
     );
   });
 
+  // #456 round 1 (B1): /showcase/… is where the site serves its own files from public.
+  it("rejects a category that claims /showcase, in both languages, and never links to it", async () => {
+    serve([{ ...POOLS, slug: "showcase" }, CLEANING], [SOUTH_FLORIDA]);
+
+    for (const locale of ["en", "es"] as const) {
+      await expect(ServicePage({ locale, slug: "showcase" })).rejects.toThrow("NEXT_NOT_FOUND");
+      await expect(serviceMetadata(locale, "showcase")).rejects.toThrow("NEXT_NOT_FOUND");
+      const html = await page(locale, "house-cleaning");
+      expect(html, locale).not.toMatch(/href="(\/es)?\/showcase"/);
+    }
+  });
+
   it("is a 404 while no city has an active ZIP", async () => {
     serve([CLEANING], []);
 

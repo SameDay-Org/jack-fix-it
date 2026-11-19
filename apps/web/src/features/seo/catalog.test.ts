@@ -31,6 +31,7 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appDir = join(here, "../../app");
+const publicDir = join(here, "../../../public");
 const fetchMock = vi.fn<typeof fetch>();
 
 beforeEach(() => {
@@ -84,6 +85,17 @@ describe("the reserved paths", () => {
     for (const name of names) expect(isPageSlug(name), name).toBe(false);
   });
 
+  // #456 round 1 (B1): a folder in public is a namespace the site serves its own files from
+  // (/showcase/…): a category may not claim it, even though no route answers the bare path.
+  it("cover every folder and file the site serves from public", () => {
+    const names = readdirSync(publicDir, { withFileTypes: true }).map((entry) =>
+      entry.isDirectory() ? entry.name : entry.name.replace(/\.[^.]+$/, ""),
+    );
+
+    expect(names).toContain("showcase");
+    for (const name of names) expect(isPageSlug(name), name).toBe(false);
+  });
+
   it("refuse Next's generated image paths and malformed slugs, accept a plain one", () => {
     for (const slug of [
       "opengraph-image-1pnh59",
@@ -119,6 +131,14 @@ describe("the services that get a page", () => {
 
     expect(serviceCategories(catalog)).toEqual([CLEANING]);
     expect(findService(catalog, "app")).toBeNull();
+  });
+
+  it("leave out a category that claims the showcase files' namespace (#456 B1)", () => {
+    const showcase = { ...POOLS, slug: "showcase" };
+    const catalog = { categories: [showcase, CLEANING], regions: [SOUTH_FLORIDA] };
+
+    expect(serviceCategories(catalog)).toEqual([CLEANING]);
+    expect(findService(catalog, "showcase")).toBeNull();
   });
 
   it("are none while no city has an active ZIP", () => {
