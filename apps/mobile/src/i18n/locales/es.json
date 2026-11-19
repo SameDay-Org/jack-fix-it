@@ -202,7 +202,18 @@
     "pro": {
       "title": "Tus trabajos",
       "empty": "Los trabajos para los que te contraten aparecerán aquí.",
-      "cta": "Ir a Inicio"
+      "cta": "Ir a Inicio",
+      "loading": "Cargando tus trabajos",
+      "error": {
+        "title": "No pudimos cargar tus trabajos",
+        "body": "Revisa tu conexión e inténtalo de nuevo.",
+        "retry": "Intentar de nuevo"
+      },
+      "more": {
+        "failed": "No pudimos cargar más trabajos.",
+        "retry": "Intentar de nuevo"
+      },
+      "refreshFailed": "No se pudo actualizar. Revisa tu conexión e inténtalo de nuevo."
     }
   },
   "customerStatus": {
@@ -825,7 +836,8 @@
       "arrived": "Llegaste",
       "working": "Trabajando",
       "done": "Terminado",
-      "closed": "Cancelado"
+      "closed": "Cancelado",
+      "underReview": "En revisión"
     },
     "customerFallback": "el cliente",
     "screen": {

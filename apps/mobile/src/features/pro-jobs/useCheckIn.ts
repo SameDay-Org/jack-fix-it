@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Keyboard } from "react-native";
 
 import { sessionGeneration } from "@/api";
 import { announce } from "@/components/ui/focus";
@@ -141,6 +142,12 @@ export function useCheckIn(jobId: string, customer: string, leave: () => void) {
   const changeCode = (digits: string) => {
     setCode(digits);
     if (message) setMessage(null);
+    // The last digit in: the keyboard goes down, so the sheet settles with Check in in view. On a
+    // short screen the keyboard covers the sheet's action while it is up (#477). A tap on the code
+    // brings it back for a fix.
+    if (digits.length === ARRIVAL_CODE_LENGTH && code.length < ARRIVAL_CODE_LENGTH) {
+      Keyboard.dismiss();
+    }
   };
 
   return {
