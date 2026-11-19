@@ -1,7 +1,8 @@
 """The kick after a pro may have become eligible (#478), for the modules where that happens.
 
 A request sent while no pro was eligible keeps no dispatch row; the sweep (dispatch.tasks
-redispatch_stalled_requests) queues its dispatch again within REDISPATCH_SWEEP_MINUTES. When a
+redispatch_stalled_requests) reaches it in turn, reading forward from where its last run stopped
+(dispatch.stalled). When a
 pro may have just become eligible (approved by staff, payouts enabled, categories or service
 areas changed), the module that made the change queues one `redispatch_for_pro` for that pro
 after its commit, so the requests waiting for them need not wait for the sweep.

@@ -200,11 +200,18 @@ class ServiceRequestRepository:
         created_after: datetime,
         limit: int,
         category_ids: Collection[uuid.UUID] | None,
-    ) -> list[tuple[uuid.UUID, uuid.UUID]]:
-        """(id, address_id) of up to `limit` requests in `statuses` with a category, created
-        after `created_after`, whose id is not in `dispatched`, oldest first. A request the BDC
-        holds while it waits for the customer (info_requested_at, #82) is left out."""
-        statement = select(ServiceRequest.id, ServiceRequest.address_id).where(
+        address_ids: Select[uuid.UUID] | None,
+        after: tuple[datetime, uuid.UUID] | None,
+    ) -> list[tuple[uuid.UUID, uuid.UUID, datetime]]:
+        """(id, address_id, created_at) of up to `limit` requests in `statuses` with a category
+        (among `category_ids` when given), at an address in `address_ids` when given, created
+        after `created_after`, whose id is not in `dispatched`, oldest first by (created_at,
+        id), after `after` when given. Every filter is in the statement, before the limit. A
+        request the BDC holds while it waits for the customer (info_requested_at, #82) is left
+        out."""
+        statement = select(
+            ServiceRequest.id, ServiceRequest.address_id, ServiceRequest.created_at
+        ).where(
             ServiceRequest.status.in_(statuses),
             ServiceRequest.category_id.is_not(None),
             ServiceRequest.info_requested_at.is_(None),
@@ -213,8 +220,15 @@ class ServiceRequestRepository:
         )
         if category_ids is not None:
             statement = statement.where(ServiceRequest.category_id.in_(category_ids))
+        if address_ids is not None:
+            statement = statement.where(ServiceRequest.address_id.in_(address_ids))
+        if after is not None:
+            statement = statement.where(
+                tuple_(ServiceRequest.created_at, ServiceRequest.id) > tuple_(*after)
+            )
         statement = statement.order_by(ServiceRequest.created_at, ServiceRequest.id).limit(limit)
-        return [(row.id, row.address_id) for row in (await self._session.execute(statement)).all()]
+        rows = (await self._session.execute(statement)).all()
+        return [(row.id, row.address_id, row.created_at) for row in rows]
 
     @staticmethod
     def ids_with_status(statuses: Collection[RequestStatus]) -> Select[uuid.UUID]:

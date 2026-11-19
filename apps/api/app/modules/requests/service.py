@@ -613,6 +613,7 @@ def media_keys_among(keys: Collection[str]) -> Select[str]:
 class UndispatchedRequest:
     id: uuid.UUID
     address_id: uuid.UUID
+    created_at: datetime
 
 
 async def undispatched_requests(
@@ -623,19 +624,24 @@ async def undispatched_requests(
     created_after: datetime,
     limit: int,
     category_ids: Collection[uuid.UUID] | None = None,
+    address_ids: Select[uuid.UUID] | None = None,
+    after: tuple[datetime, uuid.UUID] | None = None,
 ) -> list[UndispatchedRequest]:
     """For the dispatch module's re-dispatch (#478): up to `limit` requests in `statuses`
-    with a category (among `category_ids` when given), created after `created_after`, that no
-    dispatch reached (their id not in `dispatched`, the dispatch module's own subquery), oldest
-    first. Ids and the address id only."""
+    with a category (among `category_ids` when given), at an address among `address_ids` (the
+    addresses module's subquery) when given, created after `created_after`, that no dispatch
+    reached (their id not in `dispatched`, the dispatch module's own subquery), oldest first by
+    (created_at, id), after the keyset `after` when given. Ids and times only."""
     rows = await ServiceRequestRepository(session).undispatched(
         dispatched,
         statuses,
         created_after=created_after,
         limit=limit,
         category_ids=category_ids,
+        address_ids=address_ids,
+        after=after,
     )
-    return [UndispatchedRequest(request_id, address_id) for request_id, address_id in rows]
+    return [UndispatchedRequest(*row) for row in rows]
 
 
 class ProRequestReader:
