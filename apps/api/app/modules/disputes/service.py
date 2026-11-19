@@ -299,6 +299,7 @@ class DisputeService:
                 resolved_at=dispute.resolved_at,
                 photos=photos,
                 photos_pending=pending,
+                customer_refund_cents=dispute.customer_refund_cents,
             )
         return CustomerDisputeView(
             dispute=out,

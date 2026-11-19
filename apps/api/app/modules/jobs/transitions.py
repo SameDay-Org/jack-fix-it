@@ -77,3 +77,13 @@ CUSTOMER_STATUS: Final[Mapping[JobStatus, str]] = MappingProxyType(
         _S.CANCELLED: "customerStatus.cancelled",
     }
 )
+
+
+def customer_status_of(status: JobStatus, *, dispute_resolved: bool = False) -> str:
+    """What the customer sees of a job (CUSTOMER_STATUS), but for a disputed job whose dispute
+    an admin resolved (#472; Foreman 2026-11-19, option (a)): completed, whatever its transfer
+    (the customer is done; the transfer is the pro's business). Needs attention only while the
+    dispute is open. A job refunded in full is refunded already, and reads cancelled."""
+    if status is _S.DISPUTED and dispute_resolved:
+        return CUSTOMER_STATUS[_S.CONFIRMED]
+    return CUSTOMER_STATUS[status]
