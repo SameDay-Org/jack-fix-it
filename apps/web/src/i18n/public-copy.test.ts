@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import en from "./locales/en.json";
@@ -12,7 +16,7 @@ import es from "./locales/es.json";
  * Only the public namespaces are read: the staff panel (`admin`) names things like "Held by" or
  * "Insurance" (a document type) as what they are, not as promises.
  */
-const PUBLIC_NAMESPACES = ["brand", "showcase", "landing", "forPros", "request"] as const;
+const PUBLIC_NAMESPACES = ["brand", "showcase", "landing", "forPros", "seo", "request"] as const;
 
 const FORBIDDEN: Record<"en" | "es", RegExp[]> = {
   en: [
@@ -123,7 +127,39 @@ describe("public copy", () => {
     expect(publicStrings(en).length).toBeGreaterThan(80);
     expect(publicStrings(es).length).toBe(publicStrings(en).length);
   });
+
+  // A service's page (#87) shows the API's own text: the categories' names, questions, choices
+  // and their descriptions. The shipped catalog is held to the same rules.
+  it.each(["en", "es"] as const)(
+    "in %s holds the shipped categories' text shown on the service pages to the same rules",
+    (language) => {
+      const here = dirname(fileURLToPath(import.meta.url));
+      const seed: unknown = JSON.parse(
+        readFileSync(join(here, "../../../api/app/modules/categories/seed_data.json"), "utf8"),
+      );
+      const texts = shownCatalogText(seed, language);
+
+      expect(texts.length).toBeGreaterThan(30);
+      const offenders = texts.filter((text) =>
+        [...FORBIDDEN[language], VERIFIED[language]].some((word) => word.test(text)),
+      );
+      expect(offenders).toEqual([]);
+    },
+  );
 });
+
+/** The texts a service page shows from the catalog: names, question labels, choices. */
+function shownCatalogText(value: unknown, language: Language): string[] {
+  if (Array.isArray(value)) return value.flatMap((item) => shownCatalogText(item, language));
+  if (typeof value !== "object" || value === null) return [];
+  return Object.entries(value).flatMap(([child, inner]) => {
+    if (["names", "labels", "description"].includes(child) && inner && typeof inner === "object") {
+      const text = (inner as Record<string, unknown>)[language];
+      return typeof text === "string" ? [text] : [];
+    }
+    return shownCatalogText(inner, language);
+  });
+}
 
 describe("the public copy policy", () => {
   it.each([

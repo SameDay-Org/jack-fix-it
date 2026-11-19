@@ -247,71 +247,46 @@
       "getApp": "Obtén la app"
     }
   },
-  "request": {
-    "meta": {
-      "title": "Cuéntale a Jack qué pasó | Jack Fix It",
-      "description": "Cuéntale a Jack qué pasa en casa. Unas preguntas rápidas, sin crear una cuenta."
-    },
-    "title": "Cuéntale a Jack qué pasó",
-    "intro": "Unas preguntas rápidas. Sin crear una cuenta.",
-    "noscript": "Este formulario necesita JavaScript. Actívalo en tu navegador para continuar.",
-    "progress": "Paso {{current}} de {{total}}",
-    "back": "Atrás",
-    "next": "Continuar",
-    "optional": "{{label}} (opcional)",
-    "counter": "{{length}} / {{max}}",
-    "check": "Algunas respuestas necesitan revisión:",
-    "zip": {
-      "title": "¿Dónde es el trabajo?",
-      "support": "Primero, veamos si Jack trabaja en tu zona.",
-      "label": "Código postal (ZIP)",
-      "hint": "El código postal de 5 dígitos de la casa.",
-      "checking": "Revisando tu zona…",
-      "errors": {
-        "invalid": "Escribe un código postal de 5 dígitos.",
-        "rate_limited": "Demasiados intentos desde aquí. Espera un minuto y vuelve a intentarlo.",
-        "unavailable": "No pudimos revisar tu zona ahora. Inténtalo de nuevo."
+  "seo": {
+    "service": {
+      "meta": {
+        "title": "{{name}} en {{place}} | Jack Fix It",
+        "titleAnywhere": "{{name}} | Jack Fix It",
+        "description": "{{name}} en {{place}}: cuéntale a Jack sobre el trabajo, compara presupuestos de precio fijo de profesionales cercanos y síguelo en la app.",
+        "descriptionAnywhere": "{{name}}: cuéntale a Jack sobre el trabajo, compara presupuestos de precio fijo de profesionales cercanos y síguelo en la app.",
+        "ogAlt": "El nombre Jack Fix It y el nombre de un servicio para el hogar sobre azul marino."
+      },
+      "nav": {
+        "ask": "Qué pregunta Jack",
+        "areas": "Dónde trabajamos"
+      },
+      "hero": {
+        "eyebrow": "Servicios para el hogar",
+        "title": "{{name}} en {{place}}",
+        "titleAnywhere": "{{name}}",
+        "body": "Cuéntale a Jack sobre el trabajo en la app. Profesionales cercanos que hacen este trabajo te envían presupuestos de precio fijo, tú eliges uno y sigues el trabajo de principio a fin.",
+        "getApp": "Obtén la app",
+        "ask": "Qué pregunta Jack"
+      },
+      "ask": {
+        "eyebrow": "En la app",
+        "title": "Qué pregunta Jack sobre el trabajo",
+        "body": "Unas pocas preguntas para que los profesionales cercanos puedan enviarte un presupuesto. Las respondes en la app.",
+        "none": "Cuéntale a Jack qué necesitas, con tus propias palabras."
+      },
+      "areas": {
+        "eyebrow": "Dónde trabajamos",
+        "title": "Dónde trabaja Jack",
+        "body": "Jack atiende estas ciudades. La app revisa tu código postal cuando pides un trabajo."
+      },
+      "more": {
+        "title": "Más de Jack"
+      },
+      "final": {
+        "title": "Cuéntale a Jack qué pasa.",
+        "body": "Obtén la app y dile a Jack qué necesitas.",
+        "getApp": "Obtén la app"
       }
-    },
-    "waitlist": {
-      "title": "Todavía no llegamos a tu zona",
-      "body": "Por ahora Jack trabaja en pocas zonas. Déjanos un correo o un número de celular y te avisamos cuando lleguemos a {{zip}}.",
-      "emailLabel": "Correo electrónico",
-      "phoneLabel": "Número de celular",
-      "contactHint": "Con uno basta.",
-      "use": "Solo lo usaremos para avisarte cuando Jack llegue a tu zona.",
-      "submit": "Avísame",
-      "sending": "Enviando…",
-      "otherZip": "Probar otro código postal",
-      "joinedTitle": "Ya estás en la lista",
-      "joinedBody": "Te avisaremos cuando Jack llegue a {{zip}}.",
-      "home": "Volver a la página de inicio",
-      "servedNow": "Buenas noticias: Jack ya trabaja en {{zip}}.",
-      "errors": {
-        "missing_contact": "Agrega un correo o un número de celular.",
-        "invalid_email": "Escribe un correo como nombre@ejemplo.com.",
-        "invalid_phone": "Escribe un número de celular de 10 dígitos.",
-        "invalid": "Revisa el correo y el número de celular.",
-        "rate_limited": "Demasiados intentos desde aquí. Espera unos minutos y vuelve a intentarlo.",
-        "unavailable": "No se pudo enviar. Inténtalo de nuevo."
-      }
-    },
-    "describe": {
-      "title": "¿Qué está pasando?",
-      "support": "Cuéntanos con tus palabras: qué pasó, en qué parte de la casa y todo lo que ayude.",
-      "label": "Describe el trabajo",
-      "required": "Cuéntanos qué pasa para continuar.",
-      "categoryLegend": "¿Qué tipo de trabajo es?",
-      "categoryHint": "¿No estás seguro? Déjalo así: nuestro equipo elegirá el adecuado.",
-      "notSure": "No estoy seguro"
-    },
-    "questions": {
-      "support": "Unas preguntas rápidas para que los profesionales te envíen presupuestos precisos.",
-      "required": "Responde esto para continuar.",
-      "range": "Escribe un número del {{min}} al {{max}}.",
-      "tooFew": "Elige al menos {{count}}.",
-      "tooMany": "Elige hasta {{count}}.",
-      "pickUpTo": "Elige hasta {{count}}."
     }
   },
   "showcase": {
@@ -1192,6 +1167,73 @@
           "unavailable": "Algo salió mal. Revisa la disputa antes de volver a intentarlo."
         }
       }
+    }
+  },
+  "request": {
+    "meta": {
+      "title": "Cuéntale a Jack qué pasó | Jack Fix It",
+      "description": "Cuéntale a Jack qué pasa en casa. Unas preguntas rápidas, sin crear una cuenta."
+    },
+    "title": "Cuéntale a Jack qué pasó",
+    "intro": "Unas preguntas rápidas. Sin crear una cuenta.",
+    "noscript": "Este formulario necesita JavaScript. Actívalo en tu navegador para continuar.",
+    "progress": "Paso {{current}} de {{total}}",
+    "back": "Atrás",
+    "next": "Continuar",
+    "optional": "{{label}} (opcional)",
+    "counter": "{{length}} / {{max}}",
+    "check": "Algunas respuestas necesitan revisión:",
+    "zip": {
+      "title": "¿Dónde es el trabajo?",
+      "support": "Primero, veamos si Jack trabaja en tu zona.",
+      "label": "Código postal (ZIP)",
+      "hint": "El código postal de 5 dígitos de la casa.",
+      "checking": "Revisando tu zona…",
+      "errors": {
+        "invalid": "Escribe un código postal de 5 dígitos.",
+        "rate_limited": "Demasiados intentos desde aquí. Espera un minuto y vuelve a intentarlo.",
+        "unavailable": "No pudimos revisar tu zona ahora. Inténtalo de nuevo."
+      }
+    },
+    "waitlist": {
+      "title": "Todavía no llegamos a tu zona",
+      "body": "Por ahora Jack trabaja en pocas zonas. Déjanos un correo o un número de celular y te avisamos cuando lleguemos a {{zip}}.",
+      "emailLabel": "Correo electrónico",
+      "phoneLabel": "Número de celular",
+      "contactHint": "Con uno basta.",
+      "use": "Solo lo usaremos para avisarte cuando Jack llegue a tu zona.",
+      "submit": "Avísame",
+      "sending": "Enviando…",
+      "otherZip": "Probar otro código postal",
+      "joinedTitle": "Ya estás en la lista",
+      "joinedBody": "Te avisaremos cuando Jack llegue a {{zip}}.",
+      "home": "Volver a la página de inicio",
+      "servedNow": "Buenas noticias: Jack ya trabaja en {{zip}}.",
+      "errors": {
+        "missing_contact": "Agrega un correo o un número de celular.",
+        "invalid_email": "Escribe un correo como nombre@ejemplo.com.",
+        "invalid_phone": "Escribe un número de celular de 10 dígitos.",
+        "invalid": "Revisa el correo y el número de celular.",
+        "rate_limited": "Demasiados intentos desde aquí. Espera unos minutos y vuelve a intentarlo.",
+        "unavailable": "No se pudo enviar. Inténtalo de nuevo."
+      }
+    },
+    "describe": {
+      "title": "¿Qué está pasando?",
+      "support": "Cuéntanos con tus palabras: qué pasó, en qué parte de la casa y todo lo que ayude.",
+      "label": "Describe el trabajo",
+      "required": "Cuéntanos qué pasa para continuar.",
+      "categoryLegend": "¿Qué tipo de trabajo es?",
+      "categoryHint": "¿No estás seguro? Déjalo así: nuestro equipo elegirá el adecuado.",
+      "notSure": "No estoy seguro"
+    },
+    "questions": {
+      "support": "Unas preguntas rápidas para que los profesionales te envíen presupuestos precisos.",
+      "required": "Responde esto para continuar.",
+      "range": "Escribe un número del {{min}} al {{max}}.",
+      "tooFew": "Elige al menos {{count}}.",
+      "tooMany": "Elige hasta {{count}}.",
+      "pickUpTo": "Elige hasta {{count}}."
     }
   }
 }

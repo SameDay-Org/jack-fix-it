@@ -247,71 +247,46 @@
       "getApp": "Get the app"
     }
   },
-  "request": {
-    "meta": {
-      "title": "Tell Jack what happened | Jack Fix It",
-      "description": "Tell Jack what's going on at home. A few quick questions, no account needed."
-    },
-    "title": "Tell Jack what happened",
-    "intro": "A few quick questions. No account needed.",
-    "noscript": "This form needs JavaScript. Turn it on in your browser to continue.",
-    "progress": "Step {{current}} of {{total}}",
-    "back": "Back",
-    "next": "Continue",
-    "optional": "{{label}} (optional)",
-    "counter": "{{length}} / {{max}}",
-    "check": "Some answers need a look:",
-    "zip": {
-      "title": "Where's the job?",
-      "support": "First, let's check that Jack works in your area.",
-      "label": "ZIP code",
-      "hint": "The 5-digit ZIP code of the home.",
-      "checking": "Checking your area…",
-      "errors": {
-        "invalid": "Enter a 5-digit ZIP code.",
-        "rate_limited": "Too many tries from here. Wait a minute, then try again.",
-        "unavailable": "We couldn't check your area right now. Try again."
+  "seo": {
+    "service": {
+      "meta": {
+        "title": "{{name}} in {{place}} | Jack Fix It",
+        "titleAnywhere": "{{name}} | Jack Fix It",
+        "description": "{{name}} in {{place}}: tell Jack about the job, compare fixed-price quotes from pros near you and follow it in the app.",
+        "descriptionAnywhere": "{{name}}: tell Jack about the job, compare fixed-price quotes from pros near you and follow it in the app.",
+        "ogAlt": "The Jack Fix It name and the name of a home service on navy."
+      },
+      "nav": {
+        "ask": "What Jack asks",
+        "areas": "Where we work"
+      },
+      "hero": {
+        "eyebrow": "Home services",
+        "title": "{{name}} in {{place}}",
+        "titleAnywhere": "{{name}}",
+        "body": "Tell Jack about the job in the app. Pros near you who do this work send fixed-price quotes, you pick one, and you follow the job from start to finish.",
+        "getApp": "Get the app",
+        "ask": "What Jack asks"
+      },
+      "ask": {
+        "eyebrow": "In the app",
+        "title": "What Jack asks about the job",
+        "body": "A few questions, so pros near you can send a quote. You answer them in the app.",
+        "none": "Tell Jack what you need, in your own words."
+      },
+      "areas": {
+        "eyebrow": "Where we work",
+        "title": "Where Jack works",
+        "body": "Jack serves these cities. The app checks your ZIP code when you ask for a job."
+      },
+      "more": {
+        "title": "More from Jack"
+      },
+      "final": {
+        "title": "Tell Jack what's going on.",
+        "body": "Get the app and tell Jack what you need.",
+        "getApp": "Get the app"
       }
-    },
-    "waitlist": {
-      "title": "We're not in your area yet",
-      "body": "Jack works in a few areas for now. Leave an email or a mobile number and we'll tell you when we come to {{zip}}.",
-      "emailLabel": "Email",
-      "phoneLabel": "Mobile number",
-      "contactHint": "One is enough.",
-      "use": "We'll use it only to tell you when Jack comes to your area.",
-      "submit": "Let me know",
-      "sending": "Sending…",
-      "otherZip": "Try another ZIP code",
-      "joinedTitle": "You're on the list",
-      "joinedBody": "We'll let you know when Jack comes to {{zip}}.",
-      "home": "Back to the home page",
-      "servedNow": "Good news: Jack works in {{zip}} now.",
-      "errors": {
-        "missing_contact": "Add an email or a mobile number.",
-        "invalid_email": "Enter an email like name@example.com.",
-        "invalid_phone": "Enter a 10-digit mobile number.",
-        "invalid": "Check the email and the mobile number.",
-        "rate_limited": "Too many tries from here. Wait a few minutes, then try again.",
-        "unavailable": "That didn't go through. Try again."
-      }
-    },
-    "describe": {
-      "title": "What's going on?",
-      "support": "Tell us in your own words: what happened, where in the home, anything that helps.",
-      "label": "Describe the job",
-      "required": "Tell us what's going on to continue.",
-      "categoryLegend": "What kind of job is it?",
-      "categoryHint": "Not sure? Leave it: our team will pick the right one.",
-      "notSure": "Not sure"
-    },
-    "questions": {
-      "support": "A few quick questions so pros can send you accurate quotes.",
-      "required": "Answer this to continue.",
-      "range": "Enter a number from {{min}} to {{max}}.",
-      "tooFew": "Pick at least {{count}}.",
-      "tooMany": "Pick up to {{count}}.",
-      "pickUpTo": "Pick up to {{count}}."
     }
   },
   "showcase": {
@@ -1192,6 +1167,73 @@
           "unavailable": "Something went wrong. Check the dispute before trying again."
         }
       }
+    }
+  },
+  "request": {
+    "meta": {
+      "title": "Tell Jack what happened | Jack Fix It",
+      "description": "Tell Jack what's going on at home. A few quick questions, no account needed."
+    },
+    "title": "Tell Jack what happened",
+    "intro": "A few quick questions. No account needed.",
+    "noscript": "This form needs JavaScript. Turn it on in your browser to continue.",
+    "progress": "Step {{current}} of {{total}}",
+    "back": "Back",
+    "next": "Continue",
+    "optional": "{{label}} (optional)",
+    "counter": "{{length}} / {{max}}",
+    "check": "Some answers need a look:",
+    "zip": {
+      "title": "Where's the job?",
+      "support": "First, let's check that Jack works in your area.",
+      "label": "ZIP code",
+      "hint": "The 5-digit ZIP code of the home.",
+      "checking": "Checking your area…",
+      "errors": {
+        "invalid": "Enter a 5-digit ZIP code.",
+        "rate_limited": "Too many tries from here. Wait a minute, then try again.",
+        "unavailable": "We couldn't check your area right now. Try again."
+      }
+    },
+    "waitlist": {
+      "title": "We're not in your area yet",
+      "body": "Jack works in a few areas for now. Leave an email or a mobile number and we'll tell you when we come to {{zip}}.",
+      "emailLabel": "Email",
+      "phoneLabel": "Mobile number",
+      "contactHint": "One is enough.",
+      "use": "We'll use it only to tell you when Jack comes to your area.",
+      "submit": "Let me know",
+      "sending": "Sending…",
+      "otherZip": "Try another ZIP code",
+      "joinedTitle": "You're on the list",
+      "joinedBody": "We'll let you know when Jack comes to {{zip}}.",
+      "home": "Back to the home page",
+      "servedNow": "Good news: Jack works in {{zip}} now.",
+      "errors": {
+        "missing_contact": "Add an email or a mobile number.",
+        "invalid_email": "Enter an email like name@example.com.",
+        "invalid_phone": "Enter a 10-digit mobile number.",
+        "invalid": "Check the email and the mobile number.",
+        "rate_limited": "Too many tries from here. Wait a few minutes, then try again.",
+        "unavailable": "That didn't go through. Try again."
+      }
+    },
+    "describe": {
+      "title": "What's going on?",
+      "support": "Tell us in your own words: what happened, where in the home, anything that helps.",
+      "label": "Describe the job",
+      "required": "Tell us what's going on to continue.",
+      "categoryLegend": "What kind of job is it?",
+      "categoryHint": "Not sure? Leave it: our team will pick the right one.",
+      "notSure": "Not sure"
+    },
+    "questions": {
+      "support": "A few quick questions so pros can send you accurate quotes.",
+      "required": "Answer this to continue.",
+      "range": "Enter a number from {{min}} to {{max}}.",
+      "tooFew": "Pick at least {{count}}.",
+      "tooMany": "Pick up to {{count}}.",
+      "pickUpTo": "Pick up to {{count}}."
     }
   }
 }

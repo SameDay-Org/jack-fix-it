@@ -22,10 +22,11 @@ const NAV_LINK = cn(
 );
 
 /**
- * The pages that share this header: the landing (#85), the page for professionals (#88) and the
- * web request flow (#86).
+/**
+ * The pages that share this header: the landing (#85), the page for professionals (#88), a
+ * service's page (#87) and the web request flow (#86).
  */
-export type SitePage = "landing" | "forPros" | "request";
+export type SitePage = "landing" | "forPros" | "service" | "request";
 
 /** The page's own sections, in its header. */
 const SECTIONS = {
@@ -37,37 +38,38 @@ const SECTIONS = {
     ["how", "forPros.nav.how"],
     ["faq", "forPros.nav.faq"],
   ],
+  service: [
+    ["ask", "seo.service.nav.ask"],
+    ["areas", "seo.service.nav.areas"],
+  ],
   // A form: no sections to jump to.
   request: [],
 } as const satisfies Record<SitePage, readonly (readonly [string, string])[]>;
 
-/** Where the language switch leads: the same page in the other language. */
-const PAGE_PATHS: Record<SitePage, Record<Locale, string>> = {
-  landing: LANDING_PATHS,
-  forPros: FOR_PROS_PATHS,
-  request: REQUEST_PATHS,
-};
-
 /**
  * The public pages' header, kept in view while scrolling: the brand (the landing's top), the
- * page's own sections, the page for professionals (from the landing), the language switch and
- * the way to the app. No "Sign in": there is no web sign-in for customers or pros. Below `lg`
- * the links fold into a menu.
+ * page's own sections, the page for professionals (from the customer pages), the language
+ * switch and the way to the app. No "Sign in": there is no web sign-in for customers or pros.
+ * Below `lg` the links fold into a menu.
  */
 export function LandingHeader({
   t,
   locale,
   page = "landing",
+  paths = page === "landing" ? LANDING_PATHS : page === "request" ? REQUEST_PATHS : FOR_PROS_PATHS,
 }: {
   t: TFunction;
   locale: Locale;
   page?: SitePage;
+  /** This page in each language, for the language switch (a service's page passes its own). */
+  paths?: Record<Locale, string>;
 }) {
   const sections: MenuLink[] = SECTIONS[page].map(([anchor, key]) => ({
     href: `#${anchor}`,
     label: t(key),
   }));
-  if (page === "landing") {
+  // The customer pages lead to the page for professionals; that page does not link to itself.
+  if (page !== "forPros") {
     sections.push({ href: FOR_PROS_PATHS[locale], label: t("landing.nav.forPros") });
   }
   const app: MenuLink = { href: SHOWCASE_PATHS[locale], label: t("landing.nav.getApp") };
@@ -93,7 +95,7 @@ export function LandingHeader({
             </a>
           ))}
         </nav>
-        <LanguageToggle t={t} locale={locale} paths={PAGE_PATHS[page]} />
+        <LanguageToggle t={t} locale={locale} paths={paths} />
         <Link
           href={app.href}
           prefetch={false}
