@@ -243,8 +243,51 @@ class TransferRepository:
                 last_error_code=None,
                 requested_at=now,
                 attempts=Transfer.attempts + 1,
+                # A new attempt has not passed its initiation boundary yet (#450 round 4).
+                create_started_at=None,
             )
             .returning(Transfer.attempts)
+        )
+        return await self._session.scalar(statement)
+
+    async def mark_create_started(
+        self, transfer_id: uuid.UUID, attempt: int, now: datetime
+    ) -> bool:
+        """The initiation boundary (#450 round 4): attempt number `attempt` passed its last
+        hold check and may now create the transfer. False (nothing written) when it is no longer
+        the row's attempt in flight: a later one started, an outcome was recorded, or Stripe
+        made the transfer. The caller holds the job's lock and commits before the create."""
+        statement = (
+            update(Transfer)
+            .where(
+                Transfer.id == transfer_id,
+                Transfer.attempts == attempt,
+                Transfer.status == TransferStatus.PENDING,
+                Transfer.last_error_code.is_(None),
+            )
+            .values(create_started_at=now)
+            .returning(Transfer.id)
+        )
+        return (await self._session.scalar(statement)) is not None
+
+    async def flag_needs_reversal(self, job_id: uuid.UUID, now: datetime) -> uuid.UUID | None:
+        """Flags the job's transfer if it may already be issued (#450 round 4): made, or its
+        current attempt past the initiation boundary (an answer not stored yet, or lost). The
+        first time is kept. Returns the row's id, or None when no transfer of the job may be
+        issued (none, or one never past the boundary, or reversed already). The caller holds
+        the job's lock."""
+        statement = (
+            update(Transfer)
+            .where(
+                Transfer.job_id == job_id,
+                Transfer.status != TransferStatus.REVERSED,
+                or_(
+                    Transfer.status == TransferStatus.CREATED,
+                    Transfer.create_started_at.is_not(None),
+                ),
+            )
+            .values(needs_reversal_at=func.coalesce(Transfer.needs_reversal_at, now))
+            .returning(Transfer.id)
         )
         return await self._session.scalar(statement)
 

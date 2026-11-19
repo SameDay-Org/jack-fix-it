@@ -5857,7 +5857,7 @@ export interface components {
             attempts: number;
             /**
              * Last Error Code
-             * @description Why the last attempt did not make the transfer: a Stripe error code, an error class, `payouts_not_enabled` or `transfer_needs_review`. Never a message.
+             * @description Why the last attempt did not make the transfer: a Stripe error code, an error class, `payouts_not_enabled`, `pro_not_approved`, `held_before_create` (a hold seen at the last check before the create) or `transfer_needs_review`. Never a message.
              */
             last_error_code: string | null;
             /**
@@ -5865,6 +5865,11 @@ export interface components {
              * @description When the latest attempt started.
              */
             requested_at: string | null;
+            /**
+             * Needs Reversal At
+             * @description When a refund made late for the job's dispute found this transfer made, or possibly made (#450 round 4): the hold came too late to stop it. Staff reverse it in Stripe by hand and clear the flag (docs/stripe-money.md); nothing reverses or clears it automatically. null otherwise.
+             */
+            needs_reversal_at: string | null;
             /**
              * Created At
              * Format: date-time

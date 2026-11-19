@@ -55,6 +55,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.integrations.stripe_refunds import StripeRefunds, worker_stripe_refunds
 from app.modules.disputes.resolution import RefundActor, RefundSettlement, utc_now
 from app.modules.payments.refunds import RefundLedger, made_for, recheck_refund, refund_fits
+from app.modules.payments.transfers import flag_transfer_for_reversal
 from app.modules.webhooks.events import AfterCommit, StripeEvent, StripeEventHandler
 
 logger = logging.getLogger(__name__)
@@ -106,9 +107,37 @@ def _named_dispute(event: StripeEvent) -> uuid.UUID | None:
 async def _hold_payout(session: AsyncSession, ledger: RefundLedger, dispute_id: uuid.UUID) -> int:
     """Under the job's lock, then the dispute's, then the rows': the dispute's abandoned and
     failed refunds hold its job's payout until staff reconcile it (late_refund_seen_at). Written
-    in the worker's transaction, committed with the event. Returns how many rows hold it."""
-    await RefundSettlement(session).lock(dispute_id)
-    return await ledger.hold_for_reconciliation(dispute_id, utc_now())
+    in the worker's transaction, committed with the event. Returns how many rows hold it.
+
+    The job's lock is also the transfer's initiation boundary's (payments.transfers, #450
+    round 4), so this hold commits strictly before or after it: before, the boundary sees the
+    hold and creates nothing; after, the create may already be issued, so the job's transfer is
+    flagged for staff to reverse (needs_reversal_at, an ERROR with the ids), never reversed
+    here."""
+    locked = await RefundSettlement(session).lock(dispute_id)
+    return await _hold_locked(session, ledger, dispute_id, locked.job.job_id)
+
+
+async def _hold_locked(
+    session: AsyncSession, ledger: RefundLedger, dispute_id: uuid.UUID, job_id: uuid.UUID
+) -> int:
+    """The hold itself, for both late-refund paths; the caller holds the job's lock, then the
+    dispute's (RefundSettlement.lock). Holds the payout (late_refund_seen_at on the dispute's
+    abandoned and failed refunds) and flags the job's transfer if it may already be issued
+    (#450 round 4). Returns how many rows hold the payout."""
+    now = utc_now()
+    held = await ledger.hold_for_reconciliation(dispute_id, now)
+    flagged = await flag_transfer_for_reversal(session, job_id, now)
+    if flagged is not None:
+        logger.error(
+            "transfer_needs_reversal",
+            extra={
+                "dispute_id": str(dispute_id),
+                "job_id": str(job_id),
+                "transfer_id": str(flagged),
+            },
+        )
+    return held
 
 
 async def _unknown_refund(
@@ -152,7 +181,7 @@ async def _unknown_refund(
             extra={**log, "dispute_id": str(named), "stripe_status": read.status},
         )
         return
-    await RefundSettlement(session).lock(named)
+    locked = await RefundSettlement(session).lock(named)
     rows = await ledger.locked_all_of_dispute(named)
     owner = next((row for row in rows if made_for(read, named, row.idempotency_key)), None)
     ids = {
@@ -166,7 +195,7 @@ async def _unknown_refund(
         # 1: the current refund's own, before its create's answer (or after it was lost).
         logger.info("refund_event_current_refund_early", extra={**ids, **owner.ids})
         return
-    held = 0 if read.dead else await ledger.hold_for_reconciliation(named, utc_now())
+    held = 0 if read.dead else await _hold_locked(session, ledger, named, locked.job.job_id)
     ids["payout_held"] = str(held > 0).lower()
     if owner is None:
         logger.error("refund_event_unrecorded_refund", extra=ids)

@@ -81,9 +81,16 @@ class TransferOut(BaseModel):
     attempts: int = Field(description="Attempts made with Stripe so far.")
     last_error_code: str | None = Field(
         description="Why the last attempt did not make the transfer: a Stripe error code, an "
-        "error class, `payouts_not_enabled` or `transfer_needs_review`. Never a message."
+        "error class, `payouts_not_enabled`, `pro_not_approved`, `held_before_create` (a hold "
+        "seen at the last check before the create) or `transfer_needs_review`. Never a message."
     )
     requested_at: datetime | None = Field(description="When the latest attempt started.")
+    needs_reversal_at: datetime | None = Field(
+        description="When a refund made late for the job's dispute found this transfer made, or "
+        "possibly made (#450 round 4): the hold came too late to stop it. Staff reverse it in "
+        "Stripe by hand and clear the flag (docs/stripe-money.md); nothing reverses or clears "
+        "it automatically. null otherwise."
+    )
     created_at: datetime
     updated_at: datetime
 

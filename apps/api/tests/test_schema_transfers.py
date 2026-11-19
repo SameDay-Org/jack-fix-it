@@ -5,6 +5,7 @@ serve, so the upgrade may add this table and change nothing that version knows."
 import importlib.util
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
@@ -16,6 +17,18 @@ from tests.test_schema_reviews import schema
 API_DIR = Path(__file__).parents[1]
 MIGRATION = API_DIR / "alembic" / "versions" / "20261115_52bb3f92f12b_transfers.py"
 TABLE = "transfers"
+# Columns a later revision adds to the table (#450 round 4, 49fad9f10ec9): this revision's own
+# round trip does not make them.
+LATER_COLUMNS = frozenset({"create_started_at", "needs_reversal_at"})
+
+
+def without_later(shapes: dict[str, Any]) -> dict[str, Any]:
+    """The schema with the table's later columns left out."""
+    table = dict(shapes[TABLE])
+    table["columns"] = [column for column in table["columns"] if column[0] not in LATER_COLUMNS]
+    return {**shapes, TABLE: table}
+
+
 NAMES = {
     "pk_transfers",
     "fk_transfers_job_id_jobs",
@@ -89,6 +102,7 @@ async def test_the_round_trip_touches_only_the_new_table(db_session: AsyncSessio
         # Every table the previous version knows is the same on both sides.
         assert {table: shape for table, shape in now.items() if table != TABLE} == others
         assert (TABLE in now) == (name == "upgrade")
-    assert (await connection.run_sync(schema))[TABLE] == at_head[TABLE]
+    # This revision makes the table as it was; a later one adds columns to it (LATER_COLUMNS).
+    assert without_later(await connection.run_sync(schema))[TABLE] == without_later(at_head)[TABLE]
     total = await db_session.scalar(text("SELECT count(*) FROM transfers"))
     assert total == 0

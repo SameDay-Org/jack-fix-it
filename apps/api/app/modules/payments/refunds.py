@@ -440,11 +440,38 @@ def _dispute_refund(refund: Refund) -> DisputeRefund:
     )
 
 
+# Stripe's error codes that mean the refund create was EVALUATED and REFUSED (#450 round 4):
+# the charge itself cannot give money back, so no create under any key ever will. Only these make
+# a failed create definitive (last_error_definitive); any other answer, a code outside this list
+# or none at all, says nothing about an earlier create that may have committed: authentication
+# and permissions (401, 403, api_key_*), parameter validation (parameter_*), idempotency
+# conflicts (idempotency_*), rate limits (429), Stripe's own errors (5xx) and the network fail
+# closed (the row stays unresolved, the same decision is retried). The codes are those of
+# stripe-python 16.1.0 for API version 2026-10-28.endive (its error code literal), each in Stripe's
+# reference at https://docs.stripe.com/error-codes.
+REFUND_REFUSED_CODES: Final = frozenset(
+    {
+        # "The charge you're attempting to refund has already been refunded."
+        "charge_already_refunded",
+        # "The charge you're attempting to refund has been charged back."
+        "charge_disputed",
+        # "The charge you're attempting to refund cannot be refunded."
+        "charge_not_refundable",
+        # "You cannot refund a disputed payment."
+        "refund_disputed_payment",
+    }
+)
+
+
 class RefundCreateRejectedError(StripeRejectedError):
     """Stripe's 4xx answer to the refund CREATE itself (make_refund), not to the retry's lookup
-    or to a read (#450 round 2): with Stripe's code, only this answer says that the create under
-    the row's key can never make a refund (last_error_definitive). A lookup that fails says
-    nothing about an earlier create, whose outcome stays uncertain."""
+    or to a read (#450 round 2). Only a code in REFUND_REFUSED_CODES says that the create under
+    the row's key can never make a refund (`definitive`, round 4); any other rejection leaves an
+    earlier create's outcome uncertain."""
+
+    @property
+    def definitive(self) -> bool:
+        return self.code in REFUND_REFUSED_CODES
 
 
 class RefundNeedsReviewError(Exception):
