@@ -56,6 +56,7 @@ from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.media.safe_status import MediaSafeStatus
 from app.modules.payments.models import Payment, PaymentStatus, Refund, RefundStatus, Transfer
 from app.modules.payments.repository import RefundRepository
+from app.modules.payments.transfer_tasks import release_confirmed_jobs, release_transfer
 from app.modules.payments.transfers import ReleaseOutcome, TransferConfig, TransferService
 from app.modules.payouts.errors import PaymentsProviderError
 from app.modules.pros.models import ProProfile, ProVerificationStatus
@@ -1587,6 +1588,93 @@ async def test_a_create_still_in_flight_is_never_abandoned_after_a_failed_lookup
     assert (job_status, transfers) == (JobStatus.REFUNDED, 0)
     assert len(stripe.creates) == 1
     assert (world.other_admin.id, "dispute.refund_abandon_refused") in world.audited
+
+
+async def test_a_new_decision_s_early_refund_event_on_another_connection_holds_no_payout(
+    committed_case: CommittedCase,
+) -> None:
+    """#450 round 3, on real commits: the first refund is refused for good and abandoned; an
+    admin then decides a partial refund. While its create is still answering (its intent
+    committed, the refund's id not stored yet), Stripe's event for that very refund is handled
+    on another connection, as the worker would. It is the current refund's own: nothing is
+    marked, the decision settles, and the actual queued release task pays the released part;
+    the sweep finds nothing more to do."""
+    world = committed_case
+    stripe = FakeStripeRefunds()
+    stripe.errors["create"] = [StripeRejectedError(code="charge_disputed")]
+    async with world.sessions() as session:
+        with pytest.raises(PaymentsProviderError):
+            await resolver(session, stripe).resolve(
+                world.admin, world.case.dispute_id, REFUND, RecordingQueue()
+            )
+    async with world.sessions() as session:
+        repair = DisputeRefundRepair(session, stripe, enabled=True)
+        await repair.abandon(world.case.dispute_id, Operator(world.other_admin.id), apply=True)
+    handled: list[str] = []
+
+    async def early_event() -> None:
+        # Runs inside the create, once Stripe holds the refund; the answer is not stored yet.
+        [made] = [r for r in stripe.refunds.values() if (r.refund_key or "").endswith(":2")]
+        event = refund_event("refund.updated", made.refund_id, made.status)
+        refund = {
+            "id": made.refund_id,
+            "object": "refund",
+            "metadata": {"dispute_id": made.dispute_id, "refund_key": made.refund_key},
+        }
+        event = dataclasses.replace(event, payload={**event.payload, "data": {"object": refund}})
+        async with world.sessions() as worker_session:
+            await refund_event_handler(lambda: stripe)(worker_session, event, AfterCommit())
+            await worker_session.commit()
+        handled.append(made.refund_id)
+
+    class AnswerAfterTheEvent(FakeStripeRefunds):
+        async def create_refund(self, **kwargs: Any) -> RefundFacts:
+            made = await stripe.create_refund(**kwargs)
+            await early_event()
+            return made
+
+        async def list_refunds(self, payment_intent_id: str) -> FoundRefunds:
+            return await stripe.list_refunds(payment_intent_id)
+
+        async def retrieve_refund(self, refund_id: str) -> RefundFacts:
+            return await stripe.retrieve_refund(refund_id)
+
+    partial = DisputeResolveIn(
+        decision=ResolutionDecision.PARTIAL, note=NOTE, pro_release_cents=ODD_RELEASE
+    )
+    queue = RecordingQueue()
+    async with world.sessions() as session:
+        resolved = await resolver(session, AnswerAfterTheEvent()).resolve(
+            world.admin, world.case.dispute_id, partial, queue
+        )
+    assert resolved.status is DisputeStatus.RESOLVED
+    assert len(handled) == 1
+    transfers = FakeStripeTransfers()
+    ctx: dict[str, Any] = {
+        "settings": make_settings(),
+        "session_factory": world.sessions,
+        "stripe_transfers": transfers,
+    }
+    try:
+        assert queued_release(queue, world.case)
+        await release_transfer(ctx, str(world.case.job_id))
+        await release_confirmed_jobs(ctx)
+
+        async with world.sessions() as session:
+            seen = (
+                await session.scalars(
+                    select(Refund.late_refund_seen_at).where(Refund.job_id == world.case.job_id)
+                )
+            ).all()
+            job_status = await session.scalar(select(Job.status).where(Job.id == world.case.job_id))
+        assert list(seen) == [None, None]
+        [paid] = transfers.creates
+        assert paid["amount_cents"] == ODD_RELEASE
+        assert job_status is JobStatus.PAID_OUT
+    finally:
+        async with world.sessions() as session:
+            await session.execute(delete(Transfer).where(Transfer.job_id == world.case.job_id))
+            await session.commit()
 
 
 # --- Stripe's status of the refund: settled only at succeeded (#433 round 1 B1) ----------------

@@ -20,16 +20,22 @@ endpoint: a refund is the platform's own object. Each is handled the same way:
   flagged for staff (refund_failed) with any payout held (#434 repairs it); anything else is
   stored and waits. Twice the same state changes nothing.
 - A refund staff abandoned (#434) settles nothing: the event is logged and acknowledged.
-- Late money (#450 round 2): when Stripe, read again, shows a refund it made or still holds
-  (anything but failed or canceled) that the dispute's records do not show, either the refund
-  of a row staff abandoned or a refund no row holds that names a dispute whose refund was
-  abandoned or failed, the money may have gone back outside the records, and an admin may have
-  decided the dispute again since. Under the job's lock, then the dispute's, then the rows', the
-  dispute's abandoned and failed refunds are marked (late_refund_seen_at) before the event is
-  acknowledged: the job's payout stays held from then on (payments.transfers, at the release's
-  own check and in the sweep), whatever was decided or queued, until staff reconcile it
-  (docs/stripe-money.md). Nothing settles through that refund, and staff get an ERROR with the
-  ids. A repeated event changes nothing more.
+- Late money (#450 rounds 2 and 3): a refund no row holds yet that names a dispute is read
+  again from Stripe and, under the job's lock, then the dispute's, then the refund rows', placed
+  by its metadata refund_key among the dispute's refunds (_unknown_refund):
+  - the key of the dispute's current refund (not abandoned): that refund's own, arriving before
+    its create's answer was stored or after the answer was lost. Nothing is marked: the
+    create's answer, or the same decision's retry (whose lookup adopts it), stores and settles
+    it, and a payout decided with it is not held;
+  - the key of a refund staff abandoned, or no key the dispute's refunds hold: money may have
+    gone back outside the records, and an admin may have decided the dispute again since. Unless
+    Stripe failed or canceled it, the dispute's abandoned and failed refunds are marked
+    (late_refund_seen_at) before the event is acknowledged, and the job's payout stays held
+    from then on (payments.transfers, at the release's own check and in the sweep), whatever was
+    decided or queued, until staff reconcile it (docs/stripe-money.md). Nothing settles through
+    that refund, and staff get an ERROR with the ids.
+  The same holds for the refund of a row staff abandoned that Stripe shows not failed or
+  canceled. A repeated event changes nothing more (the first mark is kept).
 - A cancelled job's refund (#69, no dispute) goes to payments.cancel_refunds: the refund read
   again by its id and Stripe's status stored, forward only, under its row's lock; one that will
   not go through is an ERROR for staff. The job is cancelled already: nothing else moves.
@@ -52,7 +58,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.integrations.stripe_refunds import StripeRefunds, worker_stripe_refunds
 from app.modules.disputes.resolution import RefundActor, RefundSettlement, utc_now
 from app.modules.payments.cancel_refunds import cancel_refund_event, cancel_refund_of
-from app.modules.payments.refunds import RefundLedger, recheck_refund, refund_fits
+from app.modules.payments.refunds import RefundLedger, made_for, recheck_refund, refund_fits
 from app.modules.webhooks.events import AfterCommit, StripeEvent, StripeEventHandler
 
 logger = logging.getLogger(__name__)
@@ -117,11 +123,20 @@ async def _unknown_refund(
     stripe_refund_id: str,
     log: dict[str, str],
 ) -> None:
-    """A refund no row holds. One that names a dispute whose refund failed or was abandoned
-    is a refund our rows do not know (a create whose answer was never stored, or one made after
-    the abandon): staff hear of it (an ERROR with the ids), and unless Stripe failed or canceled
-    it, the job's payout is held for them to reconcile (_hold_payout), whatever an admin decided
-    since. Nothing settles through it. Anything else is acknowledged, as before."""
+    """A refund no row holds yet. One whose metadata names a dispute (and that Stripe, read
+    again by its id, says is that dispute's) is placed by its refund_key among the dispute's
+    refunds, under the job's lock, then the dispute's, then the refund rows' (round 3):
+
+    1. The current refund's key (the dispute's refund that is not abandoned): its own refund,
+       early (its create's answer not stored yet) or after a lost answer. Acknowledged, nothing
+       marked: the create's answer or the same decision's retry settles it.
+    2. An abandoned refund's key: a late refund of an attempt staff gave up.
+    3. No key the dispute's refunds hold, or none at all past the first refund's (a refund made
+       by hand, or metadata that cannot be placed): fail closed, as late money.
+    In 2 and 3, unless Stripe failed or canceled it, the dispute's abandoned and failed refunds
+    are marked and the job's payout held for staff (late_refund_seen_at); in 3 with no such row
+    there is nothing to mark, and staff still get the ERROR. Nothing settles through it.
+    Anything else is acknowledged as unknown."""
     named = _named_dispute(event)
     if named is None:
         logger.warning("refund_event_unknown_refund", extra=log)
@@ -131,24 +146,40 @@ async def _unknown_refund(
         logger.warning("refunds_stripe_not_configured", extra=log)
         raise RefundsNotConfiguredError
     read = await client.retrieve_refund(stripe_refund_id)
-    dispute_id = read.dispute_id if read.refund_id == stripe_refund_id else None
-    rows = [] if dispute_id != str(named) else await ledger.all_of_dispute(named)
-    if not any(row.abandoned or row.last_attempt_failed for row in rows):
+    if read.refund_id != stripe_refund_id or read.dispute_id != str(named):
         logger.warning("refund_event_unknown_refund", extra=log)
         return
-    held = 0 if read.dead else await _hold_payout(session, ledger, named)
+    if not await ledger.all_of_dispute(named):
+        # 3, with no refund of ours to mark: money on the dispute's payment our records lack.
+        logger.error(
+            "refund_event_unrecorded_refund",
+            extra={**log, "dispute_id": str(named), "stripe_status": read.status},
+        )
+        return
+    await RefundSettlement(session).lock(named)
+    rows = await ledger.locked_all_of_dispute(named)
+    owner = next((row for row in rows if made_for(read, named, row.idempotency_key)), None)
     ids = {
         **log,
         "dispute_id": str(named),
         "job_id": str(rows[0].job_id),
         "refund_ids": ",".join(str(row.refund_id) for row in rows),
         "stripe_status": read.status,
-        "payout_held": str(held > 0).lower(),
     }
-    if read.succeeded and any(row.abandoned for row in rows):
+    if owner is not None and not owner.abandoned:
+        # 1: the current refund's own, before its create's answer (or after it was lost).
+        logger.info("refund_event_current_refund_early", extra={**ids, **owner.ids})
+        return
+    held = 0 if read.dead else await ledger.hold_for_reconciliation(named, utc_now())
+    ids["payout_held"] = str(held > 0).lower()
+    if owner is None:
+        logger.error("refund_event_unrecorded_refund", extra=ids)
+    elif read.dead:
+        logger.info("refund_event_abandoned_refund", extra=ids)
+    elif read.succeeded:
         logger.error("refund_event_abandoned_refund_succeeded", extra=ids)
     else:
-        logger.error("refund_event_unrecorded_refund", extra=ids)
+        logger.error("refund_event_abandoned_refund_live", extra=ids)
 
 
 def refund_event_handler(stripe: StripeRefundsProvider) -> StripeEventHandler:

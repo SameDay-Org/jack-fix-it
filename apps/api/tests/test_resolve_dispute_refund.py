@@ -7,7 +7,7 @@ import dataclasses
 import io
 import logging
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
@@ -34,6 +34,7 @@ from tests.conftest import make_settings
 from tests.job_world import JobWorld
 from tests.test_create_staff_user import sessions_of
 from tests.test_dispute_resolution_api import (
+    ODD_RELEASE,
     STUCK,
     TOTAL,
     Case,
@@ -718,7 +719,11 @@ async def test_a_refund_stripe_made_after_the_abandon_holds_the_payout_for_staff
         # The sweep leaves it out too.
         await release_confirmed_jobs(worker_ctx(db_session, stripe))
         assert stripe.creates == []
-        alarms = {"refund_event_abandoned_refund_succeeded", "refund_event_unrecorded_refund"}
+        alarms = {
+            "refund_event_abandoned_refund_succeeded",
+            "refund_event_abandoned_refund_live",
+            "refund_event_unrecorded_refund",
+        }
         errors = [r for r in caplog.records if r.getMessage() in alarms]
         # One per delivery, each naming the hold.
         assert [(r.levelno, r.__dict__["payout_held"]) for r in errors] == [
@@ -808,3 +813,146 @@ async def test_an_operator_who_loses_admin_during_the_apply_is_refused_and_audit
         {"outcome": "operator_not_admin", "refund_id": str(row.id)},
         REASON,
     )
+
+
+# --- Round 3: a late refund is placed by its key ---------------------------------------------
+
+
+class AnswerLaterFake(ListingFake):
+    """Stripe makes the refund, then `after_create` runs before the create answers: Stripe's
+    event can reach the worker before the API stores the refund's id."""
+
+    after_create: Callable[[RefundFacts], Awaitable[None]] | None = None
+
+    async def create_refund(self, **kwargs: Any) -> RefundFacts:
+        made = await super().create_refund(**kwargs)
+        hook, self.after_create = self.after_create, None
+        if hook is not None:
+            await hook(made)
+        return made
+
+
+def event_of(made: RefundFacts) -> Any:
+    """Stripe's refund.updated for `made`, its metadata as Stripe holds it."""
+    base = refund_event("refund.updated", made.refund_id, made.status)
+    metadata = {
+        key: value
+        for key, value in (("dispute_id", made.dispute_id), ("refund_key", made.refund_key))
+        if value is not None
+    }
+    refund = {"id": made.refund_id, "object": "refund", "metadata": metadata}
+    return dataclasses.replace(base, payload={**base.payload, "data": {"object": refund}})
+
+
+@pytest.mark.parametrize("arrives", ["before_its_answer", "after_its_answer", "after_lost_answer"])
+async def test_a_new_decision_s_own_early_refund_event_holds_nothing(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    settings: Settings,
+    caplog: pytest.LogCaptureFixture,
+    arrives: str,
+) -> None:
+    """After an abandon, an admin decides a partial refund: its refund (key
+    dispute:<id>:refund:2) is the dispute's current one. Its event, whether it comes before the
+    create's answer is stored, after it, or after that answer was lost, is never taken for the
+    abandoned refund's late money: nothing is marked, and the partial payout is paid."""
+    stripe = AnswerLaterFake()
+    app.dependency_overrides[get_stripe_refunds] = lambda: stripe
+    case = await refused_by_stripe(db_client, db_session, world, stripe)
+    clock.now += timedelta(minutes=1)
+    assert (await abandon(db_session, settings, stripe, case, caplog))[0] == 0
+    early: list[RefundFacts] = []
+
+    async def event_before_the_answer(made: RefundFacts) -> None:
+        early.append(made)
+        await deliver(db_session, stripe, queue, event_of(made))
+
+    if arrives == "before_its_answer":
+        stripe.after_create = event_before_the_answer
+    if arrives == "after_lost_answer":
+        stripe.lost_answers = 1
+        lost = await resolve(db_client, world, case, "partial", ODD_RELEASE)
+        assert lost.status_code == 503
+        [made] = [
+            r for r in stripe.refunds.values() if r.refund_key and r.refund_key.endswith(":2")
+        ]
+        await deliver(db_session, stripe, queue, event_of(made))
+        clock.now += timedelta(minutes=1)
+
+    decided = await resolve(db_client, world, case, "partial", ODD_RELEASE)
+    assert decided.status_code == 200, decided.text
+    assert decided.json()["status"] == "resolved"
+    if arrives == "after_its_answer":
+        [made] = [
+            r for r in stripe.refunds.values() if r.refund_key and r.refund_key.endswith(":2")
+        ]
+        await deliver(db_session, stripe, queue, event_of(made))
+    if arrives == "before_its_answer":
+        assert len(early) == 1
+
+    rows = await refund_rows(db_session, case)
+    assert [row.late_refund_seen_at for row in rows] == [None, None]
+    assert await reconcile_flag(db_client, world, case) == (False, False)
+    assert not [
+        r for r in caplog.records if r.getMessage().startswith("refund_event_") and r.levelno >= 40
+    ]
+    transfers = FakeStripeTransfers()
+    service = TransferService(db_session, transfers, TransferConfig(STUCK), clock)
+    assert await service.release(case.job_id) is ReleaseOutcome.CREATED
+    [paid] = transfers.creates
+    assert paid["amount_cents"] == ODD_RELEASE
+
+
+@pytest.mark.parametrize("key", ["abandoned_attempt", "no_attempt"])
+async def test_a_late_refund_of_the_abandoned_attempt_or_of_no_attempt_still_holds(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    queue: RecordingQueue,
+    settings: Settings,
+    caplog: pytest.LogCaptureFixture,
+    key: str,
+) -> None:
+    """The new partial decision settled; then Stripe shows a refund carrying the abandoned
+    attempt's key (dispute:<id>:refund), or a key no attempt of the dispute holds: money may
+    have gone back outside the records. The payout stays held and staff see it."""
+    stripe = AnswerLaterFake()
+    app.dependency_overrides[get_stripe_refunds] = lambda: stripe
+    case = await refused_by_stripe(db_client, db_session, world, stripe)
+    clock.now += timedelta(minutes=1)
+    assert (await abandon(db_session, settings, stripe, case, caplog))[0] == 0
+    assert (await resolve(db_client, world, case, "partial", ODD_RELEASE)).status_code == 200
+    refund_key = (
+        f"dispute:{case.dispute_id}:refund"
+        if key == "abandoned_attempt"
+        else f"dispute:{case.dispute_id}:refund:9"
+    )
+    late = RefundFacts(
+        "re_probe76late3", 700, "usd", str(case.dispute_id), "succeeded", None, refund_key
+    )
+    stripe.add(late, case.payment_intent_id)
+
+    await deliver(db_session, stripe, queue, event_of(late))
+    await deliver(db_session, stripe, queue, event_of(late))
+
+    rows = await refund_rows(db_session, case)
+    [abandoned] = [row for row in rows if row.status is RefundStatus.ABANDONED]
+    assert abandoned.late_refund_seen_at is not None
+    assert await reconcile_flag(db_client, world, case) == (True, True)
+    transfers = FakeStripeTransfers()
+    service = TransferService(db_session, transfers, TransferConfig(STUCK), clock)
+    assert await service.release(case.job_id) is ReleaseOutcome.HELD
+    assert transfers.creates == []
+    expected = (
+        "refund_event_abandoned_refund_succeeded"
+        if key == "abandoned_attempt"
+        else "refund_event_unrecorded_refund"
+    )
+    alarms = [r for r in caplog.records if r.getMessage() == expected]
+    assert [(r.levelno, r.__dict__["payout_held"]) for r in alarms] == [(logging.ERROR, "true")] * 2
