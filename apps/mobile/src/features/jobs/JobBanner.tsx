@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, Text, useWindowDimensions, View } from "react-native";
 
 import { ControlIcon } from "@/components/icons";
-import { GlassSurface, useFlag } from "@/components/ui";
+import { accessoryLines, GlassSurface, useFlag } from "@/components/ui";
 import { useGuardedPush } from "@/features/quotes/navigation";
 import { pressedTransform, tokens, withOpacity } from "@/theme";
 
@@ -26,7 +26,8 @@ export type JobBannerProps = {
 
 /**
  * The tabs' one line about the job under way ("Dan is on the way · 12 min"; when it does not fit,
- * the sentence is cut short, never the time it ends with), floating over the
+ * the sentence is cut short, never the time it ends with; at large text the sentence and the time
+ * take a line each, as the accessory is two lines tall there, #486), floating over the
  * tab bar as its accessory: a dark pill on the controls layer (Liquid Glass where the device
  * draws it) with a green dot, the line, the pro's unread messages as a small count (#74) and a
  * chevron. A tap opens the ongoing job screen. It never carries the arrival code.
@@ -37,10 +38,12 @@ export function JobBanner({ active, updatedAt }: JobBannerProps) {
   const now = useMinuteClock(updatedAt, job.eta_at === null ? null : Date.parse(job.eta_at));
   const [pressed, pressIn, pressOut] = useFlag();
   const push = useGuardedPush();
+  const twoLines = accessoryLines(useWindowDimensions().fontScale) === 2;
   const text = bannerText(t, job, now, jobsConfig.etaCloseMinutes);
   const parts = bannerParts(t, job, now, jobsConfig.etaCloseMinutes);
   if (text === null || parts === null) return null;
   const unread = job.unread_messages;
+  const tailClass = `text-callout font-semibold ${parts.action ? "text-green-500" : "text-white"}`;
 
   return (
     <GlassSurface tone="dark" shape="pill" interactive className="flex-1 overflow-hidden">
@@ -60,21 +63,34 @@ export function JobBanner({ active, updatedAt }: JobBannerProps) {
         testID="job-banner"
       >
         <View className="rounded-pill bg-green-500" style={{ width: DOT, height: DOT }} />
-        {/* The sentence gives way first; the time it ends with always shows. */}
-        <View className="flex-1 flex-row">
-          <Text numberOfLines={1} className="shrink text-callout font-semibold text-white">
-            {parts.main}
-          </Text>
-          {parts.tail ? (
+        {twoLines ? (
+          // Large text: the sentence on its line (both lines when nothing follows), the time under it.
+          <View className="flex-1" testID="job-banner-lines">
             <Text
-              numberOfLines={1}
-              className={`text-callout font-semibold ${parts.action ? "text-green-500" : "text-white"}`}
-              testID="job-banner-tail"
+              numberOfLines={parts.tail ? 1 : 2}
+              className="text-callout font-semibold text-white"
             >
-              {` · ${parts.tail}`}
+              {parts.main}
             </Text>
-          ) : null}
-        </View>
+            {parts.tail ? (
+              <Text numberOfLines={1} className={tailClass} testID="job-banner-tail">
+                {parts.tail}
+              </Text>
+            ) : null}
+          </View>
+        ) : (
+          // The sentence gives way first; the time it ends with always shows.
+          <View className="flex-1 flex-row">
+            <Text numberOfLines={1} className="shrink text-callout font-semibold text-white">
+              {parts.main}
+            </Text>
+            {parts.tail ? (
+              <Text numberOfLines={1} className={tailClass} testID="job-banner-tail">
+                {` · ${parts.tail}`}
+              </Text>
+            ) : null}
+          </View>
+        )}
         {unread > 0 ? (
           <View
             className="min-h-6 min-w-6 items-center justify-center rounded-pill bg-green-500 px-1.5"

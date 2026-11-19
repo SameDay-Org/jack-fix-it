@@ -866,6 +866,7 @@
         "arrived": "Ya registraste tu llegada. Empieza el trabajo cuando comiences.",
         "done": "Marcaste este trabajo como terminado.",
         "closed": "Este trabajo se canceló.",
+        "closedAfterReport": "Este trabajo se cerró cuando se resolvió un reporte.",
         "working": "Cuando termines el trabajo, toca Trabajo terminado.",
         "waiting": "Trabajo terminado. Esperando que {{name}} lo confirme."
       },
@@ -1326,6 +1327,7 @@
       "done": "Trabajo confirmado",
       "attention": "Este trabajo necesita atención",
       "cancelled": "Este trabajo se canceló",
+      "refunded": "Tu reporte se resolvió",
       "finished": "{{name}} marcó el trabajo como terminado",
       "thanks": "¡Gracias! Trabajo confirmado"
     },
@@ -1338,7 +1340,8 @@
       "finished": "Revisa cómo quedó y luego confirma que está terminado.",
       "done": "Este trabajo se completó.",
       "attention": "Se reportó un problema en este trabajo.",
-      "cancelled": "No necesitas hacer nada más."
+      "cancelled": "No necesitas hacer nada más.",
+      "refunded": "Tu pago de este trabajo volvió a tu método de pago."
     },
     "eta": {
       "close": "Llegada estimada: {{time}} · {{countdown}}",
@@ -1378,7 +1381,8 @@
       "completed": "Marcado como terminado",
       "confirmed": "Confirmado",
       "disputed": "Problema reportado",
-      "cancelled": "Cancelado"
+      "cancelled": "Cancelado",
+      "refunded": "Reporte resuelto"
     },
     "banner": {
       "scheduled": "Reservaste a {{inline}} · {{date}}",

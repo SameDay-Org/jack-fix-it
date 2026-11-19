@@ -866,6 +866,7 @@
         "arrived": "You're checked in. Start the job when you begin the work.",
         "done": "You marked this job done.",
         "closed": "This job was cancelled.",
+        "closedAfterReport": "This job was closed after a report was resolved.",
         "working": "When the work is finished, tap Job's done.",
         "waiting": "Job's done. Waiting for {{name}} to confirm."
       },
@@ -1326,6 +1327,7 @@
       "done": "Job confirmed",
       "attention": "This job needs attention",
       "cancelled": "This job was cancelled",
+      "refunded": "Your report was resolved",
       "finished": "{{name}} marked the job done",
       "thanks": "Thanks! Job confirmed"
     },
@@ -1338,7 +1340,8 @@
       "finished": "Take a look at the work, then confirm it's done.",
       "done": "This job is complete.",
       "attention": "A problem was reported on this job.",
-      "cancelled": "Nothing more is needed from you."
+      "cancelled": "Nothing more is needed from you.",
+      "refunded": "Your payment for this job went back to your payment method."
     },
     "eta": {
       "close": "Arriving around {{time}} · {{countdown}}",
@@ -1378,7 +1381,8 @@
       "completed": "Marked as done",
       "confirmed": "Confirmed",
       "disputed": "Problem reported",
-      "cancelled": "Cancelled"
+      "cancelled": "Cancelled",
+      "refunded": "Report resolved"
     },
     "banner": {
       "scheduled": "{{name}} is booked · {{date}}",
