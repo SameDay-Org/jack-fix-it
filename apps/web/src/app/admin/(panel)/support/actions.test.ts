@@ -16,7 +16,10 @@ const { jar, revalidatePath } = vi.hoisted(() => ({
   revalidatePath: vi.fn<(path: string) => void>(),
 }));
 
-vi.mock("next/headers", () => ({ cookies: async () => jar.current }));
+vi.mock("next/headers", () => ({
+  cookies: async () => jar.current,
+  headers: async () => new Headers(),
+}));
 vi.mock("next/navigation", async () => {
   const { RedirectSignal: Signal } = await import("@/lib/test-helpers");
   return {

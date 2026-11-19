@@ -32,3 +32,9 @@ export function siteUrl(): URL | null {
   if (url.protocol !== "https:" && url.protocol !== "http:") return null;
   return new URL(url.origin);
 }
+
+/** A public page's language from its path (query ignored): Spanish under `/es`, else English. */
+export function localeOfPath(path: string): Locale {
+  const pathname = path.split(/[?#]/)[0];
+  return pathname === "/es" || pathname.startsWith("/es/") ? "es" : "en";
+}
