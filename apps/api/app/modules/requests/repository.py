@@ -202,10 +202,12 @@ class ServiceRequestRepository:
         category_ids: Collection[uuid.UUID] | None,
     ) -> list[tuple[uuid.UUID, uuid.UUID]]:
         """(id, address_id) of up to `limit` requests in `statuses` with a category, created
-        after `created_after`, whose id is not in `dispatched`, oldest first."""
+        after `created_after`, whose id is not in `dispatched`, oldest first. A request the BDC
+        holds while it waits for the customer (info_requested_at, #82) is left out."""
         statement = select(ServiceRequest.id, ServiceRequest.address_id).where(
             ServiceRequest.status.in_(statuses),
             ServiceRequest.category_id.is_not(None),
+            ServiceRequest.info_requested_at.is_(None),
             ServiceRequest.created_at >= created_after,
             ServiceRequest.id.not_in(dispatched),
         )

@@ -17,19 +17,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.integrations.storage import get_storage
+from app.modules.addresses.models import Address
 from app.modules.audit.models import AuditLog
 from app.modules.audit.types import AuditAction
 from app.modules.categories.models import Category
+from app.modules.dispatch.tasks import redispatch_for_pro, redispatch_stalled_requests
 from app.modules.jobs.models import JobStatus
-from app.modules.ops.models import RequestFollowup
+from app.modules.ops.models import RequestFollowup, RequestNote
 from app.modules.ops.router import get_ops_clock
+from app.modules.pros.models import ProCategory, ProServiceArea
 from app.modules.requests.models import RequestStatus, ServiceRequest
 from app.modules.requests.queue import RequestQueueReader
+from app.modules.service_areas.models import ServiceArea
 from app.modules.users.models import User
 from app.modules.users.types import UserRole, UserStatus
 from app.rate_limit import get_rate_limiter
 from tests.conftest import InMemoryRateLimiter, make_settings
 from tests.job_world import JobWorld, Party, headers_for, make_job, record_pushes
+from tests.test_dispatch import sessions_of
 from tests.test_ops_queue_api import (
     BASE,
     HELD,
@@ -40,6 +45,8 @@ from tests.test_ops_queue_api import racers as racers
 from tests.test_ops_queue_api import storage as storage
 from tests.test_ops_queue_api import world as world
 from tests.test_pros_profile_api import FakeStorage
+from tests.test_redispatch import sweep_ctx
+from tests.test_requests_api import RecordingQueue
 
 # 10:00 EST, 9 March 2031: New York moves to EDT at 02:00 that day (the day is 23 hours).
 NOW: Final = datetime(2031, 3, 9, 15, 0, tzinfo=UTC)
@@ -109,7 +116,12 @@ ACTIONS: Final = [
     ("contacted", {}),
     ("classify", {"category_id": "CATEGORY"}),
     ("followups", "FOLLOWUP"),
+    ("more-info", {"question": "x"}),
+    ("resume", {}),
 ]
+# A status change cannot be made twice (the holder's, then the admin's): its roles have their
+# own test; the demoted actor's is in the table.
+STATUS_CHANGE: Final = ("status", {"to": "cancelled", "reason": "x"})
 
 
 def body_of(spec: Any, world: JobWorld) -> dict[str, Any]:
@@ -153,7 +165,7 @@ async def test_only_staff_act_and_a_held_request_needs_its_holder_or_an_admin(
         assert response.headers["cache-control"] == "no-store"
 
 
-@pytest.mark.parametrize(("action", "spec"), ACTIONS)
+@pytest.mark.parametrize(("action", "spec"), [*ACTIONS, STATUS_CHANGE])
 async def test_an_actor_demoted_since_authentication_writes_nothing(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
@@ -183,6 +195,10 @@ async def test_an_actor_demoted_since_authentication_writes_nothing(
     assert response.status_code == 403, response.text
     row = await request_row(db_session, request_id)
     assert row.first_contact_at is None
+    assert (row.status, row.info_requested_at) == (RequestStatus.RECEIVED, None)
+    assert (
+        await db_session.scalars(select(RequestNote).where(RequestNote.request_id == request_id))
+    ).all() == []
     assert (
         await db_session.scalars(select(AuditLog).where(AuditLog.entity_id == request_id))
     ).all() == []
@@ -651,3 +667,280 @@ async def test_the_card_says_whether_the_caller_may_act(
     assert open_card.json()["actions_allowed"] is True
     assert claimed.status_code == 200, claimed.text
     assert held == {"holder": True, "other": False, "admin": True}
+
+
+# --- More info, resume, status (part 2) ---------------------------------------------------------
+
+QUESTION: Final = "zq82 question-sentinel: which floor is the leak on?"
+REASON: Final = "zq82 reason-sentinel: the customer called to cancel"
+INVALID_TRANSITION = {
+    "error": {
+        "code": "invalid_transition",
+        "message": "The request cannot move to that status from its current one.",
+    }
+}
+# What a status change accepts from each status (the card's allowed_status_changes): the state
+# machine's staff edges, never into finding_pro (dispatch owns it), nothing out of accepted
+# (the payment and its cancellation own it).
+MOVES: Final = {
+    RequestStatus.RECEIVED: ["reviewing", "cancelled"],
+    RequestStatus.REVIEWING: ["cancelled"],
+    RequestStatus.FINDING_PRO: ["reviewing", "cancelled"],
+    RequestStatus.QUOTE_READY: ["cancelled"],
+    RequestStatus.ACCEPTED: [],
+    RequestStatus.EXPIRED: [],
+    RequestStatus.CANCELLED: [],
+}
+
+
+async def card_of(client: httpx.AsyncClient, party: Party, request_id: uuid.UUID) -> Any:
+    response = await client.get(f"{BASE}/{request_id}", headers=party.headers)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+async def notes_of(session: AsyncSession, request_id: uuid.UUID) -> list[str]:
+    statement = select(RequestNote.body).where(RequestNote.request_id == request_id)
+    return list((await session.scalars(statement)).all())
+
+
+@pytest.mark.parametrize(
+    "start", [RequestStatus.RECEIVED, RequestStatus.REVIEWING, RequestStatus.FINDING_PRO]
+)
+async def test_asking_for_more_info_holds_the_request_in_reviewing(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    caplog: pytest.LogCaptureFixture,
+    start: RequestStatus,
+) -> None:
+    """The question is a note, the request is in reviewing (moved by the state machine, or
+    already there) and on hold; nobody messages the customer, and the answer says so."""
+    caplog.set_level(logging.INFO)
+    request = await make_request(db_session, world, start)
+    request_id = request.id
+    await db_session.commit()
+
+    asked = await act(db_client, world.agent, request_id, "more-info", question=QUESTION)
+
+    assert asked.status_code == 200, asked.text
+    answer = asked.json()
+    assert (answer["status"], answer["customer_notified"], answer["note"]["body"]) == (
+        "reviewing",
+        False,
+        QUESTION,
+    )
+    assert datetime.fromisoformat(answer["info_requested_at"]) == NOW
+    row = await request_row(db_session, request_id)
+    assert (row.status, row.info_requested_at) == (RequestStatus.REVIEWING, NOW)
+    card = await card_of(db_client, world.agent, request_id)
+    assert datetime.fromisoformat(card["info_requested_at"]) == NOW
+    assert [note["body"] for note in card["notes"]] == [QUESTION]
+    [audit] = await audits(db_session, request_id, AuditAction.REQUEST_ASK_INFO)
+    assert (audit.actor_user_id, audit.before, audit.after) == (
+        world.agent.id,
+        {"status": start.value, "info_requested_at": None},
+        {
+            "status": "reviewing",
+            "info_requested_at": NOW.isoformat(),
+            "note_id": answer["note"]["id"],
+            "customer_notified": False,
+        },
+    )
+    assert QUESTION not in caplog.text + "".join(str(r.__dict__) for r in caplog.records)
+
+
+@pytest.mark.parametrize(
+    "start",
+    [
+        RequestStatus.QUOTE_READY,
+        RequestStatus.ACCEPTED,
+        RequestStatus.EXPIRED,
+        RequestStatus.CANCELLED,
+    ],
+)
+async def test_more_info_is_asked_only_where_reviewing_can_be_reached(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    start: RequestStatus,
+) -> None:
+    request = await make_request(db_session, world, start)
+    request_id = request.id
+    await db_session.commit()
+
+    asked = await act(db_client, world.agent, request_id, "more-info", question=QUESTION)
+
+    assert (asked.status_code, asked.json()) == (409, INVALID_TRANSITION)
+    row = await request_row(db_session, request_id)
+    assert (row.status, row.info_requested_at) == (start, None)
+    assert await notes_of(db_session, request_id) == []
+    assert await audits(db_session, request_id, AuditAction.REQUEST_ASK_INFO) == []
+
+
+async def cover(session: AsyncSession, world: JobWorld) -> None:
+    """The world's pro takes requests in its category and at its address's ZIP: what the
+    re-dispatch's kick looks for (#478)."""
+    zip_code = await session.scalar(select(Address.zip_code).where(Address.id == world.address_id))
+    assert zip_code is not None
+    area = await session.scalar(select(ServiceArea).where(ServiceArea.zip_code == zip_code[:5]))
+    if area is None:
+        area = ServiceArea(region="Test", city="Orlando", state="FL", zip_code=zip_code[:5])
+        session.add(area)
+    area.active = True
+    await session.flush()
+    session.add_all(
+        [
+            ProCategory(pro_id=world.pro.profile_id, category_id=world.category_id),
+            ProServiceArea(pro_id=world.pro.profile_id, service_area_id=area.id),
+        ]
+    )
+    await session.flush()
+
+
+async def test_a_held_request_is_never_swept_or_kicked_and_a_resumed_one_is(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, clock: Clock
+) -> None:
+    """Asked for more info: the re-dispatch's sweep and the kick for an eligible pro both
+    leave the request alone. Resumed: both queue its dispatch again."""
+    await cover(db_session, world)
+    request = await make_request(db_session, world)
+    request_id = request.id
+    await db_session.commit()
+
+    async def swept_and_kicked() -> tuple[bool, bool]:
+        sweep, kick = RecordingQueue(), RecordingQueue()
+        await redispatch_stalled_requests(sweep_ctx(sessions_of(db_session), sweep))
+        await redispatch_for_pro(
+            sweep_ctx(sessions_of(db_session), kick), str(world.pro.profile_id)
+        )
+        job = f"dispatch:{request_id}"
+        return job in sweep.jobs, job in kick.jobs
+
+    assert await swept_and_kicked() == (True, True)  # control: both take it before the hold
+    asked = await act(db_client, world.agent, request_id, "more-info", question=QUESTION)
+    assert asked.status_code == 200, asked.text
+
+    assert await swept_and_kicked() == (False, False)
+
+    resumed = await act(db_client, world.agent, request_id, "resume")
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json() == {
+        "id": str(request_id),
+        "status": "reviewing",
+        "info_requested_at": None,
+    }
+    assert (await request_row(db_session, request_id)).info_requested_at is None
+    [audit] = await audits(db_session, request_id, AuditAction.REQUEST_RESUME)
+    assert (audit.before, audit.after) == (
+        {"info_requested_at": NOW.isoformat()},
+        {"info_requested_at": None},
+    )
+    assert await swept_and_kicked() == (True, True)
+    # Again: not on hold, nothing written.
+    again = await act(db_client, world.agent, request_id, "resume")
+    assert again.status_code == 200
+    assert len(await audits(db_session, request_id, AuditAction.REQUEST_RESUME)) == 1
+
+
+@pytest.mark.parametrize("start", list(MOVES))
+async def test_a_status_changes_only_along_the_card_s_allowed_moves(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    start: RequestStatus,
+) -> None:
+    """The card lists the moves; every other target is 409 invalid_transition and writes
+    nothing; each listed one goes through the state machine with the reason as a note."""
+    refused = [status for status in RequestStatus if status.value not in MOVES[start]]
+    request = await make_request(db_session, world, start)
+    request_id = request.id
+    await db_session.commit()
+
+    card = await card_of(db_client, world.agent, request_id)
+    assert card["allowed_status_changes"] == MOVES[start]
+    for target in refused:
+        response = await act(
+            db_client, world.agent, request_id, "status", to=target.value, reason=REASON
+        )
+        assert (response.status_code, response.json()) == (409, INVALID_TRANSITION), target
+    assert (await request_row(db_session, request_id)).status is start
+    assert await notes_of(db_session, request_id) == []
+    for allowed in MOVES[start]:
+        fresh = await make_request(db_session, world, start)
+        fresh_id = fresh.id
+        await db_session.commit()
+        moved = await act(db_client, world.agent, fresh_id, "status", to=allowed, reason=REASON)
+        assert moved.status_code == 200, moved.text
+        assert (moved.json()["status"], moved.json()["note"]["body"]) == (allowed, REASON)
+        assert (await request_row(db_session, fresh_id)).status.value == allowed
+        assert await notes_of(db_session, fresh_id) == [REASON]
+        [audit] = await audits(db_session, fresh_id, AuditAction.REQUEST_CHANGE_STATUS)
+        assert (audit.before["status"], audit.after["status"]) == (start.value, allowed)
+
+
+async def test_a_status_change_releases_the_hold(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, clock: Clock
+) -> None:
+    request = await make_request(db_session, world)
+    request_id = request.id
+    await db_session.commit()
+    assert (
+        await act(db_client, world.agent, request_id, "more-info", question=QUESTION)
+    ).status_code == 200
+
+    moved = await act(db_client, world.agent, request_id, "status", to="cancelled", reason=REASON)
+
+    assert moved.status_code == 200, moved.text
+    row = await request_row(db_session, request_id)
+    assert (row.status, row.info_requested_at) == (RequestStatus.CANCELLED, None)
+    [audit] = await audits(db_session, request_id, AuditAction.REQUEST_CHANGE_STATUS)
+    assert (audit.before["info_requested_at"], audit.after["info_requested_at"]) == (
+        NOW.isoformat(),
+        None,
+    )
+
+
+async def test_only_staff_change_a_status_and_a_held_request_needs_its_holder_or_an_admin(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, clock: Clock
+) -> None:
+    held = await make_request(db_session, world, assigned_agent_id=world.agent.id)
+    other = await make_request(db_session, world, assigned_agent_id=world.agent.id)
+    held_id, other_id = held.id, other.id
+    other_agent = await staff(db_session, UserRole.AGENT)
+    await db_session.commit()
+    body = {"to": "cancelled", "reason": REASON}
+
+    anonymous = await db_client.post(path(held_id, "status"), json=body)
+    customer = await act(db_client, world.customer, held_id, "status", **body)
+    pro = await act(db_client, world.pro, held_id, "status", **body)
+    by_other = await act(db_client, other_agent, held_id, "status", **body)
+    holder = await act(db_client, world.agent, held_id, "status", **body)
+    admin = await act(db_client, world.admin, other_id, "status", **body)
+
+    assert (anonymous.status_code, customer.status_code, pro.status_code) == (401, 403, 403)
+    assert (by_other.status_code, by_other.json()) == (409, HELD)
+    assert (holder.status_code, admin.status_code) == (200, 200)
+    assert holder.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize("field", ["question", "reason"])
+async def test_the_question_and_the_reason_are_plain_text_of_1_to_2000_characters(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    field: str,
+) -> None:
+    request = await make_request(db_session, world)
+    request_id = request.id
+    await db_session.commit()
+    action, extra = ("more-info", {}) if field == "question" else ("status", {"to": "cancelled"})
+
+    for bad in ["", "   ", "x" * 2001, "a\x00b"]:
+        response = await act(db_client, world.agent, request_id, action, **{field: bad}, **extra)
+        assert response.status_code == 422, (bad[:5], response.text)
+    assert (await request_row(db_session, request_id)).status is RequestStatus.RECEIVED

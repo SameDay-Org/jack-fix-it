@@ -51,6 +51,7 @@ class QueuedRequest:
     next_action: str | None
     first_contact_at: datetime | None
     last_contact_at: datetime | None
+    info_requested_at: datetime | None
     created_at: datetime
     updated_at: datetime
     bucket: QueueBucket
@@ -76,6 +77,7 @@ class LockedRequest:
     status: RequestStatus
     category_id: uuid.UUID | None
     first_contact_at: datetime | None
+    info_requested_at: datetime | None
     _row: ServiceRequest = field(repr=False, compare=False)
 
 
@@ -125,6 +127,7 @@ class RequestQueueReader:
             request.status,
             request.category_id,
             request.first_contact_at,
+            request.info_requested_at,
             request,
         )
 
@@ -148,6 +151,12 @@ class RequestQueueReader:
         and that the category is active, and commits."""
         await self._queue.set_category(locked._row, category_id)
 
+    async def hold(self, locked: LockedRequest, at: datetime | None) -> None:
+        """Writes the BDC's hold on the locked request (#82): `at` while it waits for the
+        customer, None to release it. The re-dispatch (#478) leaves a held request alone. The
+        caller commits."""
+        await self._queue.set_info_requested(locked._row, at)
+
 
 def _queued(row: QueueRow) -> QueuedRequest:
     request = row.request
@@ -170,6 +179,7 @@ def _queued(row: QueueRow) -> QueuedRequest:
         next_action=request.next_action,
         first_contact_at=request.first_contact_at,
         last_contact_at=request.last_contact_at,
+        info_requested_at=request.info_requested_at,
         created_at=request.created_at,
         updated_at=request.updated_at,
         bucket=row.bucket,

@@ -25,12 +25,17 @@ from app.modules.ops.schemas import (
     FollowupOut,
     FollowupsPage,
     FollowupsSummary,
+    MoreInfoIn,
+    MoreInfoOut,
     NoteIn,
     NoteOut,
     QueuePage,
     QueueSummary,
     RequestCard,
+    ResumeOut,
     StaffList,
+    StatusChangeIn,
+    StatusChangeOut,
 )
 from app.modules.ops.service import OpsConfig, OpsQueueService
 from app.modules.requests.queue import RequestStatus
@@ -295,6 +300,60 @@ async def staff_classify_request(
     """Only while the request is received or reviewing, to an active category. Runs nothing
     else. Recorded in the audit log."""
     return await actions.classify(user, request_id, data.category_id)
+
+
+_INVALID_TRANSITION = (
+    "request_held: another agent holds the request. invalid_transition: the request cannot "
+    "move there from its current status."
+)
+
+
+@staff_router.post(
+    "/{request_id}/more-info",
+    response_model=MoreInfoOut,
+    summary="Ask the customer for more information (staff)",
+    dependencies=[Depends(limit_ops_actions)],
+    responses={**_ACTION_ERRORS, status.HTTP_409_CONFLICT: _error(_INVALID_TRANSITION)},
+)
+async def staff_request_more_info(
+    request_id: uuid.UUID, data: MoreInfoIn, user: PanelUser, actions: Actions
+) -> MoreInfoOut:
+    """Keeps the question as an internal note, moves the request to reviewing (the state
+    machine's staff edge) and holds it there: no re-dispatch takes it until staff resume it,
+    change its status or assign a pro. The customer is not messaged (`customer_notified` is
+    false): no channel takes a staff message yet. Recorded in the audit log."""
+    return await actions.request_more_info(user, request_id, data.question)
+
+
+@staff_router.post(
+    "/{request_id}/resume",
+    response_model=ResumeOut,
+    summary="Release a request held for the customer's answer (staff)",
+    dependencies=[Depends(limit_ops_actions)],
+    responses=_ACTION_ERRORS,
+)
+async def staff_resume_request(
+    request_id: uuid.UUID, user: PanelUser, actions: Actions
+) -> ResumeOut:
+    """Clears the hold; the next re-dispatch sweep takes the request when it can (received or
+    reviewing, a category, no offer yet). A request not on hold: nothing changes. Recorded in
+    the audit log."""
+    return await actions.resume(user, request_id)
+
+
+@staff_router.post(
+    "/{request_id}/status",
+    response_model=StatusChangeOut,
+    summary="Change a request's status (staff)",
+    dependencies=[Depends(limit_ops_actions)],
+    responses={**_ACTION_ERRORS, status.HTTP_409_CONFLICT: _error(_INVALID_TRANSITION)},
+)
+async def staff_change_request_status(
+    request_id: uuid.UUID, data: StatusChangeIn, user: PanelUser, actions: Actions
+) -> StatusChangeOut:
+    """Only to one of the card's allowed_status_changes, through the request state machine,
+    with the reason kept as an internal note. Releases a hold. Recorded in the audit log."""
+    return await actions.change_status(user, request_id, data.to, data.reason)
 
 
 @staff_router.post(

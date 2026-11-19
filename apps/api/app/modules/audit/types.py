@@ -47,6 +47,11 @@ class AuditAction(StrEnum):
     REQUEST_CLASSIFY = "service_request.classify"
     REQUEST_FOLLOWUP_SCHEDULE = "service_request.schedule_followup"
     REQUEST_FOLLOWUP_DONE = "service_request.followup_done"
+    # The BDC asked the customer for more information, resumed the request, or changed its
+    # status (#82 part 2).
+    REQUEST_ASK_INFO = "service_request.ask_info"
+    REQUEST_RESUME = "service_request.resume"
+    REQUEST_CHANGE_STATUS = "service_request.change_status"
     # A staff read of a dispute: both sides' text and the photos' URLs (#76).
     DISPUTE_READ = "dispute.read"
     # An admin resolved a dispute: released, partly released or refunded money (#76). For a

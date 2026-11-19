@@ -26,6 +26,13 @@ takes, so two staff members acting on one request take turns), and in that trans
 - Due: the caller's follow-ups not done (an admin may read another staff member's), due before
   the end of today in BUSINESS_TIME_ZONE (overdue included) or whenever, by due time, cursor
   paged. Each names its request by code and status: no contact.
+- More info (part 2): the question is kept as a note; the request goes to reviewing through the
+  state machine's staff edge (already there: it stays) and is held there (info_requested_at),
+  so the re-dispatch (#478) leaves it alone. Nobody messages the customer: no channel exists
+  for a staff message yet (customer_notified is false), so the agent reaches them.
+- Resume: releases the hold; the next re-dispatch sweep takes the request when it can.
+- Status: only to the statuses status_changes() lists, through the state machine, with the
+  reason kept as a note. It releases a hold.
 
 Logs carry ids and actions only: never a note, a name or a contact.
 """
@@ -74,12 +81,17 @@ from app.modules.ops.schemas import (
     FollowupOut,
     FollowupsPage,
     FollowupsSummary,
+    MoreInfoOut,
     NoteOut,
     QueueAgent,
+    ResumeOut,
     StaffList,
     StaffMemberOut,
+    StatusChangeOut,
 )
+from app.modules.requests.errors import InvalidTransitionError
 from app.modules.requests.queue import LockedRequest, RequestQueueReader, RequestStatus
+from app.modules.requests.state_machine import RequestStateMachine, staff_moves
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount, UserRole, UserStatus
 
@@ -88,6 +100,24 @@ logger = logging.getLogger(__name__)
 # The statuses a category may be set in: before dispatch takes the request.
 CLASSIFIABLE: Final = frozenset({RequestStatus.RECEIVED, RequestStatus.REVIEWING})
 _STAFF: Final = frozenset({UserRole.AGENT, UserRole.ADMIN})
+# Never moved by hand (#82): into finding_pro, which dispatch owns (the offers and the move in
+# one transaction; by hand the request would wait with no offer anything ever sends), nor out
+# of accepted, whose moves the payment and its cancellation own (#61, #69): a paid job's
+# request is accepted.
+_DISPATCH_OWNED: Final = frozenset({RequestStatus.FINDING_PRO})
+_MONEY_OWNED: Final = frozenset({RequestStatus.ACCEPTED})
+
+
+def status_changes(status: RequestStatus) -> tuple[RequestStatus, ...]:
+    """The statuses staff may move a request in `status` to by hand: the state machine's staff
+    edges, but never into finding_pro nor out of accepted (the card's allowed_status_changes)."""
+    if status in _MONEY_OWNED:
+        return ()
+    return tuple(to for to in staff_moves(status) if to not in _DISPATCH_OWNED)
+
+
+def _iso(value: datetime | None) -> str | None:
+    return None if value is None else value.isoformat()
 
 
 def utc_now() -> datetime:
@@ -155,6 +185,7 @@ class OpsActions:
         self._config = config
         self._clock = clock
         self._requests = RequestQueueReader(session)
+        self._machine = RequestStateMachine(session)
         self._notes = NoteRepository(session)
         self._followups = FollowupRepository(session)
         self._categories = CategoryService(session)
@@ -223,6 +254,74 @@ class OpsActions:
         else:
             await self._session.commit()  # the same category again: nothing written
         return ClassifyOut(id=locked.id, category=category)
+
+    async def request_more_info(
+        self, staff: UserAccount, request_id: uuid.UUID, question: str
+    ) -> MoreInfoOut:
+        locked = await self._acting(staff, request_id)
+        moving = locked.status is not RequestStatus.REVIEWING
+        if moving and RequestStatus.REVIEWING not in staff_moves(locked.status):
+            await self._session.rollback()
+            raise InvalidTransitionError
+        now = self._clock()
+        note = await self._note(staff, locked, question)
+        await self._requests.hold(locked, now)
+        if moving:
+            await self._machine.transition(locked.id, RequestStatus.REVIEWING, staff)
+        await self._audited(
+            staff,
+            AuditAction.REQUEST_ASK_INFO,
+            locked.id,
+            {"status": locked.status.value, "info_requested_at": _iso(locked.info_requested_at)},
+            {
+                "status": RequestStatus.REVIEWING.value,
+                "info_requested_at": now.isoformat(),
+                "note_id": str(note.id),
+                "customer_notified": False,
+            },
+        )
+        return MoreInfoOut(
+            id=locked.id,
+            status=RequestStatus.REVIEWING,
+            info_requested_at=now,
+            note=note,
+            customer_notified=False,
+        )
+
+    async def resume(self, staff: UserAccount, request_id: uuid.UUID) -> ResumeOut:
+        locked = await self._acting(staff, request_id)
+        if locked.info_requested_at is None:
+            await self._session.commit()  # not on hold: nothing written; the row lock goes
+            return ResumeOut(id=locked.id, status=locked.status)
+        await self._requests.hold(locked, None)
+        await self._audited(
+            staff,
+            AuditAction.REQUEST_RESUME,
+            locked.id,
+            {"info_requested_at": _iso(locked.info_requested_at)},
+            {"info_requested_at": None},
+        )
+        return ResumeOut(id=locked.id, status=locked.status)
+
+    async def change_status(
+        self, staff: UserAccount, request_id: uuid.UUID, to: RequestStatus, reason: str
+    ) -> StatusChangeOut:
+        locked = await self._acting(staff, request_id)
+        if to not in status_changes(locked.status):
+            await self._session.rollback()
+            raise InvalidTransitionError
+        note = await self._note(staff, locked, reason)
+        if locked.info_requested_at is not None:
+            await self._requests.hold(locked, None)
+        await self._machine.transition(locked.id, to, staff)
+        await self._audited(
+            staff,
+            AuditAction.REQUEST_CHANGE_STATUS,
+            locked.id,
+            {"status": locked.status.value, "info_requested_at": _iso(locked.info_requested_at)},
+            {"status": to.value, "info_requested_at": None, "note_id": str(note.id)},
+        )
+        return StatusChangeOut(id=locked.id, status=to, note=note)
 
     async def schedule_followup(
         self, staff: UserAccount, request_id: uuid.UUID, data: FollowupIn
@@ -363,6 +462,18 @@ class OpsActions:
             raise RequestHeldError
         await self._active(staff)
         return locked
+
+    async def _note(self, staff: UserAccount, locked: LockedRequest, body: str) -> NoteOut:
+        """An internal note by the actor on the locked request, in its transaction."""
+        note = await self._notes.add(
+            RequestNote(request_id=locked.id, author_id=staff.id, body=body)
+        )
+        return NoteOut(
+            id=note.id,
+            author=await self._agent(staff.id),
+            body=note.body,
+            created_at=note.created_at,
+        )
 
     async def _active(self, staff: UserAccount) -> None:
         if not await self._audit.active_staff(staff.id):

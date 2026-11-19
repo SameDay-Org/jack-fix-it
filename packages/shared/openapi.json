@@ -7288,6 +7288,323 @@
         }
       }
     },
+    "/v1/admin/requests/{request_id}/more-info": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Ask the customer for more information (staff)",
+        "description": "Keeps the question as an internal note, moves the request to reviewing (the state\nmachine's staff edge) and holds it there: no re-dispatch takes it until staff resume it,\nchange its status or assign a pro. The customer is not messaged (`customer_notified` is\nfalse): no channel takes a staff message yet. Recorded in the audit log.",
+        "operationId": "staff_request_more_info_v1_admin_requests__request_id__more_info_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoreInfoIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoreInfoOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only active agents and admins (checked again as the action is written).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request_held: another agent holds the request. invalid_transition: the request cannot move there from its current status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/requests/{request_id}/resume": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Release a request held for the customer's answer (staff)",
+        "description": "Clears the hold; the next re-dispatch sweep takes the request when it can (received or\nreviewing, a category, no offer yet). A request not on hold: nothing changes. Recorded in\nthe audit log.",
+        "operationId": "staff_resume_request_v1_admin_requests__request_id__resume_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only active agents and admins (checked again as the action is written).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request_held: another agent holds the request (they, or an admin, act on it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/requests/{request_id}/status": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Change a request's status (staff)",
+        "description": "Only to one of the card's allowed_status_changes, through the request state machine,\nwith the reason kept as an internal note. Releases a hold. Recorded in the audit log.",
+        "operationId": "staff_change_request_status_v1_admin_requests__request_id__status_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatusChangeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusChangeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only active agents and admins (checked again as the action is written).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request_held: another agent holds the request. invalid_transition: the request cannot move there from its current status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/requests/{request_id}/followups": {
       "post": {
         "tags": [
@@ -12407,6 +12724,59 @@
         ],
         "title": "MetricsOut"
       },
+      "MoreInfoIn": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Question",
+            "description": "What the BDC asks the customer, kept as an internal note: plain text, 1 to 2000 characters (staff only, never logged)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "title": "MoreInfoIn"
+      },
+      "MoreInfoOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RequestStatus"
+          },
+          "info_requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Info Requested At"
+          },
+          "note": {
+            "$ref": "#/components/schemas/NoteOut"
+          },
+          "customer_notified": {
+            "type": "boolean",
+            "title": "Customer Notified",
+            "description": "Whether the customer was messaged. Always false today: no channel takes a staff message to the customer yet, so the agent reaches the customer themselves."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "info_requested_at",
+          "note",
+          "customer_notified"
+        ],
+        "title": "MoreInfoOut",
+        "description": "The request on hold in reviewing, and the question as a note."
+      },
       "MultiChoiceQuestion": {
         "properties": {
           "key": {
@@ -15353,6 +15723,27 @@
             "title": "Actions Allowed",
             "description": "Whether the caller may act on this request now (#82): it is unassigned, held by them, or they are an admin. The API stays the guard (409 request_held).",
             "default": true
+          },
+          "info_requested_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Info Requested At",
+            "description": "When the BDC asked the customer for more information (#82): the request waits in reviewing and no re-dispatch takes it until staff resume it, change its status or assign a pro. Null when it is not on hold."
+          },
+          "allowed_status_changes": {
+            "items": {
+              "$ref": "#/components/schemas/RequestStatus"
+            },
+            "type": "array",
+            "title": "Allowed Status Changes",
+            "description": "The statuses staff may move the request to now (#82), from the request state machine's staff edges: never finding_pro, which dispatch owns. The API stays the guard (409 invalid_transition)."
           }
         },
         "type": "object",
@@ -15753,6 +16144,29 @@
           "denominator"
         ],
         "title": "ResponseTimeMetric"
+      },
+      "ResumeOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RequestStatus"
+          },
+          "info_requested_at": {
+            "type": "null",
+            "title": "Info Requested At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status"
+        ],
+        "title": "ResumeOut",
+        "description": "The request off hold: the next re-dispatch sweep (REDISPATCH_SWEEP_MINUTES) takes it\nwhen it is received or reviewing with a category and no offer yet."
       },
       "ReverseAddressOut": {
         "properties": {
@@ -18010,6 +18424,51 @@
           "next_cursor"
         ],
         "title": "StaffSupportTicketPage"
+      },
+      "StatusChangeIn": {
+        "properties": {
+          "to": {
+            "$ref": "#/components/schemas/RequestStatus",
+            "description": "One of the card's allowed_status_changes."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Reason",
+            "description": "Why, kept as an internal note: plain text, 1 to 2000 characters."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "to",
+          "reason"
+        ],
+        "title": "StatusChangeIn"
+      },
+      "StatusChangeOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RequestStatus"
+          },
+          "note": {
+            "$ref": "#/components/schemas/NoteOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "note"
+        ],
+        "title": "StatusChangeOut"
       },
       "SupportTicketCreatedOut": {
         "properties": {
