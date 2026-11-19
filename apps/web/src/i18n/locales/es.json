@@ -1052,6 +1052,7 @@
           "proRelease": "Pagado al profesional",
           "customerRefund": "Reembolsado al cliente",
           "noPayment": "No hay un pago registrado para este trabajo: hay que revisarlo antes de resolver la disputa.",
+          "needsReversal": "Puede que haya que revertir un pago al profesional: pide ayuda a un ingeniero.",
           "none": "Ninguno",
           "stripeCode": "Código de Stripe: {{code}}",
           "paymentStatus": {
