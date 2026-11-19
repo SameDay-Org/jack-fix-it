@@ -1,24 +1,25 @@
 """request_notes and request_followups: the BDC's internal notes and follow-ups (#82)
 
 Revision ID: e9125c0828a1
-Revises: 49fad9f10ec9
+Revises: 976a3b246655
 Create Date: 2026-11-19 14:00:00.000000
 
 """
 
 from collections.abc import Sequence
+from datetime import datetime
 
 import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e9125c0828a1"
-down_revision: str | Sequence[str] | None = "49fad9f10ec9"
+down_revision: str | Sequence[str] | None = "976a3b246655"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-def _timestamps() -> list[sa.Column[object]]:
+def _timestamps() -> list[sa.Column[datetime]]:
     return [
         sa.Column(
             "created_at",
