@@ -733,6 +733,21 @@ describe("JobScreen", () => {
     },
   );
 
+  it("under what was paid, See receipt opens the job's receipt (#62)", async () => {
+    answerJob(ON_THE_WAY);
+    await renderWithQuery(<JobScreen />);
+    await loaded("Dan is on the way");
+
+    const see = screen.getByRole("button", { name: "See receipt" });
+    // Its own stop, outside the paid row's one label.
+    expect(within(screen.getByTestId("job-paid")).queryByText("See receipt")).toBeNull();
+    await act(async () => fireEvent.press(see));
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/requests/[id]/receipt",
+      params: { id: REQUEST_ID },
+    });
+  });
+
   it("the timeline lists the known events newest first, each with its time", async () => {
     answerJob(WORKING);
     await renderWithQuery(<JobScreen />);

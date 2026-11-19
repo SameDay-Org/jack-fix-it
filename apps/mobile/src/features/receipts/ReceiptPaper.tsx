@@ -8,13 +8,7 @@ import { categoryName } from "@/features/home/useCategories";
 import { tokens, withOpacity } from "@/theme";
 
 import type { ReceiptOut } from "./api";
-import {
-  lineLabel,
-  paymentMethodText,
-  receiptDay,
-  receiptMoney,
-  STATUS_TONE,
-} from "./format";
+import { lineLabel, paymentMethodText, receiptDay, receiptMoney, STATUS_TONE } from "./format";
 
 // The torn edge: teeth this wide and this tall, as many as fit the paper's width.
 const TOOTH = 12;

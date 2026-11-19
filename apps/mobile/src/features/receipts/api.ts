@@ -8,7 +8,6 @@
  * a small diff here.
  */
 import { queryOptions, useQuery } from "@tanstack/react-query";
-import type { Href } from "expo-router";
 
 import { apiGet, useSessionGeneration } from "@/api";
 
@@ -91,11 +90,6 @@ declare module "@jack/shared" {
 
 /** Not there yet: the job's payment has not gone through (404 `receipt_not_available`). */
 export const RECEIPT_NOT_AVAILABLE = "receipt_not_available";
-
-export const receiptHref = (requestId: string): Href => ({
-  pathname: "/requests/[id]/receipt",
-  params: { id: requestId },
-});
 
 export const receiptQueryKey = (requestId: string, generation: number) =>
   ["receipt", requestId, generation] as const;

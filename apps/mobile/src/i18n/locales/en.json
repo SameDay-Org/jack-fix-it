@@ -546,13 +546,7 @@
   },
   "launch": {
     "headline": "Whatever happens at home, we {{word}} it.",
-    "words": [
-      "fix",
-      "clean",
-      "paint",
-      "mow",
-      "move"
-    ],
+    "words": ["fix", "clean", "paint", "mow", "move"],
     "skip": "Skip intro"
   },
   "media": {
