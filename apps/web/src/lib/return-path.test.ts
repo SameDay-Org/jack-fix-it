@@ -41,6 +41,11 @@ describe("safeReturnPath (#464)", () => {
     "/admin%09",
     "/admin%0d%0aLocation:%20https://evil.example",
     "/admin/queue\n",
+    // In the query the parser rewrites these silently ("\\" to %5C, tab and newline dropped), and
+    // only the path is compared after parsing: the character guard is what refuses them (#479 r1).
+    "/admin?x=\\foo",
+    "/admin?x=a\tb",
+    "/admin?x=a\nb",
     "/admin/login",
     "/admin/login?next=/admin",
     "/admin/logout",
