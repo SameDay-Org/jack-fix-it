@@ -248,7 +248,8 @@ async def test_notes_never_reach_a_customer_or_pro_answer(
     """Every GET route outside /v1/admin, read as the job's customer and as its pro with the
     job's own ids: the note's text appears in none of their answers. Every answer is a real
     one: never an internal error, which would hide a leak (the routes that presign media
-    need the storage, some the queue), and the views of the note's own request and job answer their owners."""
+    need the storage, some the queue), and the views of the note's own request and job
+    answer their owners."""
     app.dependency_overrides[get_storage] = lambda: storage
     record_pushes(app)
     job = await make_job(db_session, world, JobStatus.SCHEDULED)
