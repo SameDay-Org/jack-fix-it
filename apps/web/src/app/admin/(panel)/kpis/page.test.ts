@@ -250,7 +250,7 @@ describe("the KPI page", () => {
     for (const text of [
       es.admin.kpis.range.presets[30],
       "31 de 40",
-      es.admin.kpis.beforeRefunds,
+      es.admin.kpis.formula.revenue_net_of_refunds,
       es.admin.kpis.howCalculated,
       es.admin.kpis.formula.gmv,
       es.admin.kpis.series.showTable,

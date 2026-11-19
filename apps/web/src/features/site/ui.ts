@@ -14,6 +14,9 @@ export const FOCUS_ON_NAVY =
 export const PRIMARY_ACTION =
   "inline-flex h-12 items-center justify-center gap-2 rounded-pill bg-green-500 px-7 text-base font-bold text-navy-900 transition-colors hover:bg-green-700 hover:text-white";
 
+/** The outlined pill beside it, on navy. */
+export const SECONDARY_ACTION_ON_NAVY = `inline-flex h-12 items-center justify-center rounded-pill border-2 border-white/40 px-7 text-base font-bold text-white transition-colors hover:border-white ${FOCUS_ON_NAVY}`;
+
 /** The small label above a headline. */
 export const EYEBROW = "text-sm font-bold tracking-widest uppercase";
 

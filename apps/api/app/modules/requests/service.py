@@ -495,6 +495,12 @@ class CustomerRequestReader:
             raise NotFoundError
         return request.public_code
 
+    async def category_ids(
+        self, request_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, uuid.UUID | None]:
+        """Each request's category, for a pro's earnings (#70): nothing about the customer."""
+        return await self._requests.category_ids(request_ids)
+
     async def public_codes(self, request_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str]:
         """The public code of each request among `request_ids`, for staff lists (#76)."""
         return await self._requests.public_codes(request_ids)

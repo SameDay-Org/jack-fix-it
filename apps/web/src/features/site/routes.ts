@@ -6,6 +6,8 @@ import type { Locale } from "@/i18n/config";
  */
 export const LANDING_PATHS: Record<Locale, string> = { en: "/", es: "/es" };
 export const SHOWCASE_PATHS: Record<Locale, string> = { en: "/app", es: "/es/app" };
+/** The page for professionals (#88): how pros get work, what we ask of them. */
+export const FOR_PROS_PATHS: Record<Locale, string> = { en: "/for-pros", es: "/es/for-pros" };
 
 /** The legal pages the footer links to: placeholders until the texts are approved (#10). */
 export const TERMS_PATHS: Record<Locale, string> = { en: "/terms", es: "/es/terms" };

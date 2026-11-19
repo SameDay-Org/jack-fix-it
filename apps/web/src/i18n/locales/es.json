@@ -22,6 +22,7 @@
       "label": "Secciones",
       "services": "Servicios",
       "how": "Cómo funciona",
+      "forPros": "Para profesionales",
       "getApp": "Obtén la app",
       "menu": "Menú"
     },
@@ -116,14 +117,134 @@
         "leads": "Sin pagar por clientes potenciales.",
         "paid": "Recibes tu pago cuando el trabajo se hace."
       },
-      "link": "Ver la app para profesionales"
+      "link": "Ver la app para profesionales",
+      "more": "Cómo funciona para profesionales"
     },
     "footer": {
       "label": "Legal y contacto",
+      "forPros": "Para profesionales",
       "terms": "Términos",
       "privacy": "Privacidad",
       "contact": "Contacto",
       "rights": "© {{year}} Jack Fix It. Todos los derechos reservados."
+    }
+  },
+  "forPros": {
+    "meta": {
+      "title": "Para profesionales | Jack Fix It",
+      "description": "Recibe solicitudes de clientes cerca de ti, envía tus presupuestos y maneja tus trabajos desde la app de Jack Fix It. Sin cargos por clientes potenciales.",
+      "ogAlt": "Jack Fix It para profesionales: trabajo que llega a ti.",
+      "ogLine": "Trabajo que llega a ti."
+    },
+    "nav": {
+      "how": "Cómo funciona",
+      "faq": "Preguntas"
+    },
+    "hero": {
+      "eyebrow": "Para profesionales",
+      "title": "Trabajo que llega a ti.",
+      "body": "Recibe solicitudes de clientes cerca de ti, envía tus presupuestos y maneja tus trabajos desde la app.",
+      "getApp": "Obtén la app",
+      "how": "Cómo funciona",
+      "badgesLabel": "Trabajar con Jack",
+      "badges": {
+        "leadFees": "Sin cargos por clientes potenciales",
+        "paid": "Recibe tu pago cuando el trabajo se hace",
+        "records": "Registros claros del servicio"
+      }
+    },
+    "how": {
+      "eyebrow": "Cómo consigues trabajo",
+      "title": "De tu perfil a tu primer trabajo.",
+      "steps": {
+        "profile": {
+          "title": "Crea tu perfil",
+          "body": "Regístrate en la app, elige los servicios que ofreces y la zona donde trabajas, y agrega tus documentos."
+        },
+        "review": {
+          "title": "Nuestro equipo revisa tus documentos",
+          "body": "Una persona de nuestro equipo revisa cada documento antes de aprobar tu perfil."
+        },
+        "payouts": {
+          "title": "Configura tus pagos",
+          "body": "Conecta una cuenta para recibir pagos con Stripe, desde la app."
+        },
+        "requests": {
+          "title": "Recibe solicitudes a tu medida",
+          "body": "Las solicitudes llegan para los servicios y la zona que elegiste. Tú decides cuáles cotizar."
+        },
+        "job": {
+          "title": "Cotiza, haz el trabajo, recibe tu pago",
+          "body": "Envía tu presupuesto. El día del trabajo, avisa al cliente que vas en camino, registra tu llegada con el código y agrega fotos del antes y el después. Recibes tu pago cuando el cliente confirma el trabajo."
+        }
+      }
+    },
+    "why": {
+      "eyebrow": "Por qué Jack",
+      "title": "Pensado para tu trabajo.",
+      "items": {
+        "leads": {
+          "title": "Sin cargos por clientes potenciales",
+          "body": "No pagas por ver solicitudes."
+        },
+        "paid": {
+          "title": "Tu pago cuando el trabajo se hace",
+          "body": "El cliente paga en la app y tú recibes tu pago a través de ella: una experiencia de pago segura."
+        },
+        "records": {
+          "title": "Registros claros del servicio",
+          "body": "Cada presupuesto, mensaje y foto de cada trabajo queda guardado en la app."
+        },
+        "support": {
+          "title": "Apoyo cuando lo necesites",
+          "body": "Personas reales de nuestro equipo te ayudan si algo sale mal con un trabajo."
+        }
+      }
+    },
+    "ask": {
+      "eyebrow": "Lo que te pedimos",
+      "title": "Algunas cosas antes de tu primera solicitud.",
+      "items": {
+        "documents": "Tu identificación y los documentos que tu oficio requiere, cuando corresponde, revisados por nuestro equipo.",
+        "payouts": "Una cuenta para recibir pagos con Stripe.",
+        "profile": "Un perfil aprobado, con tus servicios y tu zona."
+      },
+      "note": "Solo los profesionales aprobados reciben solicitudes."
+    },
+    "faq": {
+      "eyebrow": "Preguntas",
+      "title": "Lo que nos preguntan los profesionales",
+      "items": {
+        "fees": {
+          "question": "¿Pago por recibir solicitudes?",
+          "answer": "No. No hay cargos por clientes potenciales: no pagas por ver solicitudes."
+        },
+        "paid": {
+          "question": "¿Cuándo recibo mi pago?",
+          "answer": "Cuando el trabajo se hace: el cliente paga en la app y tú recibes tu pago cuando el cliente confirma el trabajo."
+        },
+        "documents": {
+          "question": "¿Qué documentos necesito?",
+          "answer": "Tu identificación y los documentos que tu oficio requiere, cuando corresponde. Los agregas en la app y nuestro equipo revisa cada uno antes de aprobar tu perfil."
+        },
+        "choose": {
+          "question": "¿Puedo elegir mis trabajos?",
+          "answer": "Sí. Recibes solicitudes de tus servicios y tu zona, y tú eliges cuáles cotizar."
+        },
+        "problem": {
+          "question": "¿Y si hay un problema con un trabajo?",
+          "answer": "Nuestro equipo puede ayudarte. Escríbenos desde la app y te responderemos."
+        },
+        "areas": {
+          "question": "¿En qué zonas trabajan?",
+          "answer": "Por ahora, el sur de Florida. Al registrarte, la app te dice si tu código postal está en nuestra zona."
+        }
+      }
+    },
+    "final": {
+      "title": "Listos cuando tú lo estés.",
+      "body": "Los profesionales se registran en la app.",
+      "getApp": "Obtén la app"
     }
   },
   "showcase": {
@@ -783,7 +904,7 @@
         "dispute_rate": "Problemas reportados (disputas abiertas) en el período ÷ trabajos completados en el período (por fecha de finalización).",
         "repeat_rate": "Entre los clientes con al menos un trabajo confirmado en el período, la parte que tiene al menos dos trabajos confirmados antes del fin del período.",
         "gmv": "Lo que se cobró a los clientes (el precio fijado del trabajo más impuestos) por los trabajos confirmados en el período. Un trabajo pagado al profesional por la liberación de una disputa nunca se confirmó y no cuenta.",
-        "revenue_gross_of_refunds": "La comisión de la plataforma (el porcentaje fijado al pagar) sobre los trabajos confirmados en el período, tal como se cobró. Los reembolsos todavía no se restan."
+        "revenue_net_of_refunds": "La comisión que la plataforma conserva. En los trabajos confirmados en el período: su comisión fijada al pagar. En los problemas que un administrador resolvió en el período: toda la comisión si se pagó al profesional, su parte en un reparto y nada en un reembolso total. El GMV solo cuenta los trabajos confirmados."
       },
       "series": {
         "title": "Por día",
