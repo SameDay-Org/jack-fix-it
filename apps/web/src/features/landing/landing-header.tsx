@@ -3,7 +3,12 @@ import Link from "next/link";
 
 import { LanguageToggle } from "@/features/site/language-toggle";
 import { type MenuLink, MobileMenu } from "@/features/site/mobile-menu";
-import { FOR_PROS_PATHS, LANDING_PATHS, SHOWCASE_PATHS } from "@/features/site/routes";
+import {
+  FOR_PROS_PATHS,
+  LANDING_PATHS,
+  REQUEST_PATHS,
+  SHOWCASE_PATHS,
+} from "@/features/site/routes";
 import { CONTAINER, FOCUS_ON_NAVY } from "@/features/site/ui";
 import { Wordmark } from "@/features/site/wordmark";
 import type { Locale } from "@/i18n/config";
@@ -16,8 +21,11 @@ const NAV_LINK = cn(
   FOCUS_ON_NAVY,
 );
 
-/** The pages that share this header: the landing (#85) and the page for professionals (#88). */
-export type SitePage = "landing" | "forPros";
+/**
+ * The pages that share this header: the landing (#85), the page for professionals (#88) and the
+ * web request flow (#86).
+ */
+export type SitePage = "landing" | "forPros" | "request";
 
 /** The page's own sections, in its header. */
 const SECTIONS = {
@@ -29,7 +37,16 @@ const SECTIONS = {
     ["how", "forPros.nav.how"],
     ["faq", "forPros.nav.faq"],
   ],
+  // A form: no sections to jump to.
+  request: [],
 } as const satisfies Record<SitePage, readonly (readonly [string, string])[]>;
+
+/** Where the language switch leads: the same page in the other language. */
+const PAGE_PATHS: Record<SitePage, Record<Locale, string>> = {
+  landing: LANDING_PATHS,
+  forPros: FOR_PROS_PATHS,
+  request: REQUEST_PATHS,
+};
 
 /**
  * The public pages' header, kept in view while scrolling: the brand (the landing's top), the
@@ -76,11 +93,7 @@ export function LandingHeader({
             </a>
           ))}
         </nav>
-        <LanguageToggle
-          t={t}
-          locale={locale}
-          paths={page === "landing" ? LANDING_PATHS : FOR_PROS_PATHS}
-        />
+        <LanguageToggle t={t} locale={locale} paths={PAGE_PATHS[page]} />
         <Link
           href={app.href}
           prefetch={false}

@@ -11,11 +11,14 @@ const nextConfig: NextConfig = {
   },
   // The admin panel is per-user and staff-only: never stored by a browser or a proxy (#80).
   // Its server actions keep Next's default Origin check (no serverActions.allowedOrigins).
+  // The web request flow (#86) holds what a visitor types: never stored either.
   async headers() {
     const noStore = [{ key: "Cache-Control", value: "no-store" }];
     return [
       { source: "/admin", headers: noStore },
       { source: "/admin/:path*", headers: noStore },
+      { source: "/request", headers: noStore },
+      { source: "/es/request", headers: noStore },
     ];
   },
 };
