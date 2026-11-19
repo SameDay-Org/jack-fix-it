@@ -4,7 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { router, Slot, useLocalSearchParams } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { createElement } from "react";
-import { AppState, Text, type AppStateStatus } from "react-native";
+import { AppState, Dimensions, StyleSheet, Text, type AppStateStatus } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -194,7 +194,18 @@ async function expectBanner(line: string) {
   expect(screen.getByTestId("tab-bar-accessory")).toBeTruthy();
 }
 
+let dimensions: jest.SpyInstance;
+
+/** The system font scale the tree reads (`useWindowDimensions`, the tab bar's geometry). */
+function setFontScale(fontScale: number) {
+  const real = Dimensions.get("window");
+  dimensions.mockReturnValue({ ...real, fontScale });
+}
+
 beforeEach(() => {
+  // The one-line banner: below the accessory's two-line scale (Jest's own default is 2).
+  dimensions = jest.spyOn(Dimensions, "get");
+  setFontScale(1);
   freezeClock();
   client = newQueryClient();
   // RN's AppState mock keeps every listener ever added: only this test's trees are told.
@@ -221,6 +232,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  dimensions.mockRestore();
   jest.useRealTimers();
   await act(() => i18n.changeLanguage("en"));
 });
@@ -254,6 +266,44 @@ describe("the tabs' job banner (#64)", () => {
       .map(([, options]) => options?.params?.request_id);
     expect(asked.length).toBeGreaterThan(0);
     expect(new Set(asked)).toEqual(new Set([requestId(1)]));
+  });
+
+  // #486: one line at 2.0 cut "Dan is booked · Sun, 9 AM" to "Da… · Sun, 9 AM" on a 320 dp screen.
+  it.each([
+    [
+      "the sentence, then its time",
+      SCHEDULED,
+      ["Dan is booked", scheduledFor(SCHEDULED.scheduled_start_at)],
+    ],
+    ["a sentence alone, on up to two lines", ARRIVED, ["Dan has arrived"]],
+  ] as const)("at large text draws %s, in a two-line pill", async (_, active, lines) => {
+    setFontScale(2);
+    mockApi.requests = [request(1, "accepted")];
+    mockApi.jobs = { [requestId(1)]: active };
+    await renderRouter(routes, { initialUrl: "/" });
+
+    const banner = await screen.findByTestId("job-banner");
+    // Still read as one line.
+    expect(banner.props.accessibilityLabel).toBe(lines.join(" · "));
+    const drawn = within(screen.getByTestId("job-banner-lines")).getAllByText(/./);
+    expect(drawn.map((node) => [node.props.children].flat().join(""))).toEqual(lines);
+    // The sentence keeps one line above a time, both lines on its own; the time never wraps.
+    expect(drawn.map((node) => node.props.numberOfLines)).toEqual(
+      lines.length === 2 ? [1, 1] : [2],
+    );
+    expect(StyleSheet.flatten(screen.getByTestId("tab-bar-accessory").props.style).height).toBe(
+      104,
+    );
+  });
+
+  it("keeps one line below the large-text scale", async () => {
+    setFontScale(1.3);
+    mockApi.requests = [request(1, "accepted")];
+    mockApi.jobs = { [requestId(1)]: SCHEDULED };
+    await renderRouter(routes, { initialUrl: "/" });
+
+    await expectBanner(`Dan is booked · ${scheduledFor(SCHEDULED.scheduled_start_at)}`);
+    expect(screen.queryByTestId("job-banner-lines")).toBeNull();
   });
 
   it("is hidden with no accepted request, and no job is asked for", async () => {
