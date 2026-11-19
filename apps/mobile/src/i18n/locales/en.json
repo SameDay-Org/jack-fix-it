@@ -546,7 +546,13 @@
   },
   "launch": {
     "headline": "Whatever happens at home, we {{word}} it.",
-    "words": ["fix", "clean", "paint", "mow", "move"],
+    "words": [
+      "fix",
+      "clean",
+      "paint",
+      "mow",
+      "move"
+    ],
     "skip": "Skip intro"
   },
   "media": {
@@ -2174,7 +2180,8 @@
       "noCategory": "Job",
       "paidOn": "Paid on {{date}}",
       "completed": "Completed {{date}}",
-      "confirmedBy": "Usually confirmed by {{date}}"
+      "confirmedBy": "Usually confirmed by {{date}}",
+      "tip": "+ {{amount}} tip"
     },
     "empty": {
       "title": "No earnings yet",
@@ -2207,5 +2214,25 @@
       "body": "Connect a payout account with Stripe so we can send you your earnings.",
       "action": "Set up payouts"
     }
+  },
+  "tips": {
+    "title": "Add a tip for {{name}}?",
+    "body": "Tips are optional. {{name}} gets 100% of it.",
+    "group": "Tip amount",
+    "none": "No tip",
+    "percent": "{{percent}}% · {{amount}}",
+    "custom": "Custom",
+    "customLabel": "Tip amount",
+    "customHint": "From {{min}} to {{max}}",
+    "customOutOfRange": "Enter an amount from {{min}} to {{max}}.",
+    "customInvalid": "Enter an amount, like 10 or 12.50.",
+    "pay": "Tip {{amount}}",
+    "payNoAmount": "Tip",
+    "done": "You tipped {{name}} {{amount}}. Thank you!",
+    "skipped": "No tip added",
+    "failed": "The tip didn't go through. Your job is still confirmed.",
+    "offline": "You're offline. Your job is still confirmed; try the tip again when you're back online.",
+    "generic": "Something went wrong with the tip. Your job is still confirmed.",
+    "delayed": "We're still confirming your tip. It shows here soon."
   }
 }
