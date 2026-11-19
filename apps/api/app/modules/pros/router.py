@@ -11,6 +11,7 @@ from app.integrations.storage import Storage, get_storage
 from app.middleware import NoStoreRoute
 from app.modules.auth.permissions import PanelUser, ProUser
 from app.modules.categories.service import CategoryService
+from app.modules.dispatch.kicks import RedispatchKick
 from app.modules.pros.documents import ProDocumentService
 from app.modules.pros.models import REVIEW_REASON_MAX_LENGTH, ProVerificationStatus
 from app.modules.pros.review import ProReviewConfig, ProReviewService
@@ -28,6 +29,7 @@ from app.modules.pros.schemas import (
 )
 from app.modules.pros.service import ProProfileConfig, ProProfileService
 from app.modules.service_areas.service import ServiceAreaService
+from app.queue import JobQueue, get_job_queue
 
 router = APIRouter(prefix="/pros", tags=["pros"])
 # The BDC and admins review the pros in the panel (#41). No HTTP cache may keep an answer:
@@ -39,10 +41,19 @@ def _error(description: str) -> dict[str, Any]:
     return {"model": ErrorResponse, "description": description}
 
 
+def get_redispatch_kick(
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> RedispatchKick:
+    """The re-dispatch kick after a change that may make a pro eligible (#478)."""
+    return RedispatchKick(queue, settings.job_enqueue_timeout_seconds)
+
+
 def get_pro_profile_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     storage: Annotated[Storage, Depends(get_storage)],
     settings: Annotated[Settings, Depends(get_app_settings)],
+    kick: Annotated[RedispatchKick, Depends(get_redispatch_kick)],
 ) -> ProProfileService:
     return ProProfileService(
         session,
@@ -50,6 +61,7 @@ def get_pro_profile_service(
         ServiceAreaService(session),
         storage,
         ProProfileConfig.from_settings(settings),
+        kick,
     )
 
 
@@ -147,6 +159,7 @@ def get_pro_review_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     storage: Annotated[Storage, Depends(get_storage)],
     settings: Annotated[Settings, Depends(get_app_settings)],
+    kick: Annotated[RedispatchKick, Depends(get_redispatch_kick)],
 ) -> ProReviewService:
     return ProReviewService(
         session,
@@ -154,6 +167,7 @@ def get_pro_review_service(
         ServiceAreaService(session),
         storage,
         ProReviewConfig.from_settings(settings),
+        kick,
     )
 
 

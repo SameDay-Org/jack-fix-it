@@ -24,8 +24,11 @@ from app.modules.service_areas.models import ServiceArea
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
+from app.queue import get_job_queue
 from tests.conftest import TEST_JWT_SECRET, Committed, make_settings
 from tests.test_auth_api import register
+from tests.test_dispatch import record_commits
+from tests.test_requests_api import RecordingQueue
 
 # Distinct from the defaults, so the tests prove the values come from settings.
 MAX_CATEGORIES = 2
@@ -71,6 +74,15 @@ def storage(app: FastAPI) -> FakeStorage:
     fake = FakeStorage()
     app.dependency_overrides[get_storage] = lambda: fake
     return fake
+
+
+@pytest.fixture(autouse=True)
+def queue(app: FastAPI) -> RecordingQueue:
+    """The re-dispatch kick's queue (#478): the profile and review routes queue it after
+    their commit; recorded here, never Redis."""
+    recorder = RecordingQueue()
+    app.dependency_overrides[get_job_queue] = lambda: recorder
+    return recorder
 
 
 @dataclass(frozen=True)
@@ -588,3 +600,35 @@ async def test_patch_is_one_transaction_on_database_failure(
 
 def _caller(user_id: uuid.UUID, headers: dict[str, str]) -> Caller:
     return Caller(id=user_id, headers=headers)
+
+
+async def test_a_coverage_change_kicks_the_redispatch_after_its_commit(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    queue: RecordingQueue,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """New categories or service areas may make the pro eligible for requests no pro could take
+    (#478): one redispatch_for_pro job, queued after the update's commit, deduped while queued.
+    A change to the bio alone kicks nothing."""
+    caller = await make_caller(db_session)
+    [category] = await make_categories(db_session, f"kick-{uuid.uuid4().hex[:8]}")
+    [area] = await make_areas(db_session, uuid.uuid4().hex[:5])
+    record_commits(monkeypatch)
+
+    bio = await patch_me(db_client, caller, bio=BIO)
+    assert bio.status_code == 200
+    assert queue.jobs == {}
+    categories = await patch_me(db_client, caller, category_ids=[str(category.id)])
+    areas = await patch_me(db_client, caller, service_area_ids=[str(area.id)])
+
+    assert (categories.status_code, areas.status_code) == (200, 200)
+    profile_id = await db_session.scalar(
+        select(ProProfile.id).where(ProProfile.user_id == caller.id)
+    )
+    assert queue.jobs == {
+        f"redispatch-pro:{profile_id}": ("redispatch_for_pro", (str(profile_id),))
+    }
+    # Each kick queued after its update's commit (the bio's, then its own).
+    assert queue.before == ["commit,commit", "commit,commit,commit"]

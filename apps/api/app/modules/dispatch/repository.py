@@ -24,6 +24,11 @@ class DispatchRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    @staticmethod
+    def dispatched_request_ids() -> Select[uuid.UUID]:
+        """The ids of the requests with any dispatch row, as a subquery (#478)."""
+        return select(RequestDispatch.request_id)
+
     async def exists_for(self, request_id: uuid.UUID) -> bool:
         statement = select(exists().where(RequestDispatch.request_id == request_id))
         return bool(await self._session.scalar(statement))

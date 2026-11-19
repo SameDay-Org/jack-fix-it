@@ -47,6 +47,7 @@ from app.modules.audit.types import (
     ReaderNotStaffError,
 )
 from app.modules.categories.service import CategoryService
+from app.modules.dispatch.kicks import RedispatchKick
 from app.modules.pros.documents import (
     expired,
     latest_and_history,
@@ -117,6 +118,7 @@ class ProReviewService:
         service_areas: ServiceAreaService,
         storage: Storage,
         config: ProReviewConfig,
+        kick: RedispatchKick,
     ) -> None:
         self._session = session
         self._profiles = ProProfileRepository(session)
@@ -125,6 +127,7 @@ class ProReviewService:
         self._service_areas = service_areas
         self._storage = storage
         self._config = config
+        self._kick = kick
         self._users = UserService(session)
         self._audit = AuditService(session)
 
@@ -311,6 +314,9 @@ class ProReviewService:
                 "to_status": target.value,
             },
         )
+        if target == ProVerificationStatus.APPROVED:
+            # Committed: requests no pro could take may be this pro's now (#478).
+            await self._kick.after_commit(pro_id, "approved")
         return _decision_out(profile)
 
     async def _required_types(self, category_ids: Sequence[uuid.UUID]) -> list[ProDocumentType]:
