@@ -192,6 +192,28 @@ class ServiceRequestRepository:
         """The file keys among `keys` that request media hold, for another module's query."""
         return select(RequestMedia.file_key).where(RequestMedia.file_key.in_(keys))
 
+    async def undispatched(
+        self,
+        dispatched: Select[uuid.UUID],
+        statuses: Collection[RequestStatus],
+        *,
+        created_after: datetime,
+        limit: int,
+        category_ids: Collection[uuid.UUID] | None,
+    ) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """(id, address_id) of up to `limit` requests in `statuses` with a category, created
+        after `created_after`, whose id is not in `dispatched`, oldest first."""
+        statement = select(ServiceRequest.id, ServiceRequest.address_id).where(
+            ServiceRequest.status.in_(statuses),
+            ServiceRequest.category_id.is_not(None),
+            ServiceRequest.created_at >= created_after,
+            ServiceRequest.id.not_in(dispatched),
+        )
+        if category_ids is not None:
+            statement = statement.where(ServiceRequest.category_id.in_(category_ids))
+        statement = statement.order_by(ServiceRequest.created_at, ServiceRequest.id).limit(limit)
+        return [(row.id, row.address_id) for row in (await self._session.execute(statement)).all()]
+
     @staticmethod
     def ids_with_status(statuses: Collection[RequestStatus]) -> Select[uuid.UUID]:
         """A subquery of the ids of requests in these statuses, for another module's query."""
