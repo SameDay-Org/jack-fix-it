@@ -546,7 +546,13 @@
   },
   "launch": {
     "headline": "Whatever happens at home, we {{word}} it.",
-    "words": ["fix", "clean", "paint", "mow", "move"],
+    "words": [
+      "fix",
+      "clean",
+      "paint",
+      "mow",
+      "move"
+    ],
     "skip": "Skip intro"
   },
   "media": {
@@ -2206,6 +2212,42 @@
       "title": "Set up payouts to get paid",
       "body": "Connect a payout account with Stripe so we can send you your earnings.",
       "action": "Set up payouts"
+    }
+  },
+  "receipt": {
+    "title": "Receipt",
+    "number": "Receipt {{code}}",
+    "paidOn": "Paid on {{date}}",
+    "service": "Service",
+    "serviceOf": "{{category}} service",
+    "tax": "Tax",
+    "tip": "Tip for {{name}}",
+    "returned": "Returned to your payment method",
+    "total": "Total paid",
+    "paidWith": "Paid with {{method}}",
+    "paidByCard": "Paid by card",
+    "pro": "With {{name}}",
+    "done": "Done {{date}}",
+    "scheduled": "Scheduled for {{date}}",
+    "thanks": "Thank you for using Jack Fix It.",
+    "questions": "Questions? {{email}}",
+    "status": {
+      "paid": "Paid",
+      "under_review": "Under review",
+      "partly_returned": "Partly returned",
+      "returned": "Returned"
+    },
+    "see": "See receipt",
+    "share": "Share",
+    "shareDialog": "Share your receipt",
+    "shareFailed": "We couldn't share the receipt. Try again.",
+    "addTip": "Add a tip",
+    "loading": "Loading your receipt",
+    "notYet": "Your receipt shows here once the payment goes through.",
+    "error": {
+      "title": "We couldn't load your receipt",
+      "body": "Check your connection and try again.",
+      "retry": "Try again"
     }
   }
 }
