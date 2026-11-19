@@ -97,13 +97,13 @@ const scrollTo = ScrollView.prototype.scrollTo as jest.Mock;
 beforeEach(() => {
   client = newQueryClient();
   jest.mocked(useSession).mockReturnValue(signedIn({ role: "customer" }));
-  // The customer's History asks for their requests (#47) and Account counts their saved
-  // addresses: none of either yet.
+  // The customer's History asks for their requests (#47), a pro's for their jobs (#467), and
+  // Account counts a customer's saved addresses: none of any yet.
   jest
     .mocked(apiGet)
     .mockReset()
     .mockImplementation((async (path: string) =>
-      path === "/v1/requests"
+      path === "/v1/requests" || path === "/v1/pros/me/jobs"
         ? { items: [], next_cursor: null }
         : path === "/v1/addresses"
           ? { items: [] }

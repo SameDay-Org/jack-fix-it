@@ -1,3 +1,5 @@
+export { AccessoryBanner } from "./AccessoryBanner";
+export type { AccessoryBannerProps } from "./AccessoryBanner";
 export { AccordionRow, useAccordion } from "./Accordion";
 export type { AccordionAnchor, AccordionRowProps } from "./Accordion";
 export { Avatar, initialsOf } from "./Avatar";
@@ -43,7 +45,13 @@ export type { SheetDetents } from "./sheet";
 export { SheetContent } from "./SheetContent";
 export type { SheetContentProps } from "./SheetContent";
 export { Skeleton, useSkeletonPulse } from "./Skeleton";
-export { TabBar, TabBarAccessoryContext, tabBarGeometry, useTabBarInset } from "./TabBar";
+export {
+  accessoryLines,
+  TabBar,
+  TabBarAccessoryContext,
+  tabBarGeometry,
+  useTabBarInset,
+} from "./TabBar";
 export type { TabBarGeometry, TabBarItem, TabBarProps } from "./TabBar";
 export type { SkeletonProps } from "./Skeleton";
 export { TextSkeleton } from "./TextSkeleton";

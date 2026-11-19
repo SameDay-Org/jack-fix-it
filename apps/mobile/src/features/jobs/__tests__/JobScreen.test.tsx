@@ -823,6 +823,18 @@ describe("JobScreen, the finished job (#66)", () => {
     expect(screen.queryByTestId("job-photo-hero")).toBeNull();
     expect(screen.getByTestId("job-map", HIDDEN)).toBeTruthy();
     expect(screen.getByTestId("job-confirm")).toBeTruthy();
+    // Over the navy drawn map the way back stays the translucent white pill.
+    expect(screen.getByTestId("job-back")).toBeTruthy();
+    expect(screen.queryByTestId("job-back-glass")).toBeNull();
+  });
+
+  it("over a photo of the work, the way back is the light glass pill with a navy arrow (#477)", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    const glass = screen.getByTestId("job-back-glass");
+    expect(within(glass).getByRole("button", { name: "Back" })).toBeTruthy();
   });
 
   it("when the full confirm words would wrap at this size, the button says Confirm and keeps them as its name", async () => {

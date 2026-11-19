@@ -8,6 +8,8 @@ export const LANDING_PATHS: Record<Locale, string> = { en: "/", es: "/es" };
 export const SHOWCASE_PATHS: Record<Locale, string> = { en: "/app", es: "/es/app" };
 /** The page for professionals (#88): how pros get work, what we ask of them. */
 export const FOR_PROS_PATHS: Record<Locale, string> = { en: "/for-pros", es: "/es/for-pros" };
+/** The web request flow (#86): no account needed. Not indexed, never cached. */
+export const REQUEST_PATHS: Record<Locale, string> = { en: "/request", es: "/es/request" };
 
 /** The legal pages the footer links to: placeholders until the texts are approved (#10). */
 export const TERMS_PATHS: Record<Locale, string> = { en: "/terms", es: "/es/terms" };

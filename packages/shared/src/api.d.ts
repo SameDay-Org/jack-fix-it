@@ -2442,6 +2442,11 @@ export interface components {
              * @description Photos whose copy is still being prepared.
              */
             photos_pending: number;
+            /**
+             * Customer Refund Cents
+             * @description What the resolution gives back to the customer (#472): 0 for a release, part of the payment for a partial, the whole payment for a refund; null while open. Always sent; optional in the schema so clients built before #472 keep compiling.
+             */
+            customer_refund_cents?: number | null;
         };
         /** CustomerDisputeView */
         CustomerDisputeView: {
@@ -2517,6 +2522,10 @@ export interface components {
              * @description What the customer paid: amount plus tax.
              */
             customer_total_cents: number;
+            /** @description The job's reported problem, if any (#472): open, or resolved. null when none was reported. Optional in the schema so older clients keep compiling. */
+            dispute_status?: components["schemas"]["DisputeStatus"] | null;
+            /** @description How an admin resolved it (released, partial_release, refunded); null while open or without a report. */
+            dispute_resolution?: components["schemas"]["DisputeResolution"] | null;
             /**
              * Unread Messages
              * @description The pro's chat messages the customer has not marked read (#71).
@@ -3921,6 +3930,11 @@ export interface components {
              * @description What the pro receives for the job.
              */
             pro_payout_cents: number;
+            /**
+             * Pro Receives Cents
+             * @description What the pro will actually receive for this job (#488): the full payout normally and while a reported problem is open (under review); once an admin resolved it, the full payout for a release, the released part for a partial, 0 for a refund; 0 for a cancelled or refunded job. pro_payout_cents stays the quote's frozen payout. Always sent; optional in the schema so older clients keep compiling.
+             */
+            pro_receives_cents?: number | null;
             /** @description The transfer of that amount to the pro's account: null until the job is confirmed (and for a job that was never confirmed, or whose transfer was reversed). */
             payout: components["schemas"]["JobPayout"] | null;
             /**

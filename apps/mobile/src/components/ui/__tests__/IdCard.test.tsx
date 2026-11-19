@@ -13,6 +13,7 @@ import i18n from "@/i18n";
 import { tokens } from "@/theme";
 
 import { IdCard, type IdCardProps } from "../IdCard";
+import { SHEEN_REST } from "../idCardModel";
 
 jest.mock("react-native-reanimated", () => {
   const actual =
@@ -81,6 +82,15 @@ const renderCard = (props: IdCardProps) => render(card(props));
 const settle = () =>
   act(async () => {
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
+
+/** Long enough for a flip's spring to pass edge-on and settle (it takes about 0.7 s). */
+const SETTLE_MS = 1200;
+
+/** Lets the card's animations run for `ms` of real time. */
+const frames = (ms: number) =>
+  act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, ms));
   });
 
 beforeEach(() => {
@@ -181,11 +191,13 @@ describe("IdCard", () => {
 
     expect(screen.getByRole("button", { name: BACK_LABEL })).toBeOnTheScreen();
     expect(screen.getByText("K7Q2-9MXA")).toBeOnTheScreen();
-    expect(screen.getByText("K7Q2-9MXA").props.allowFontScaling).toBe(true);
+    // An image-like object: its type ignores the font scale; the label carries the data.
+    expect(screen.getByText("K7Q2-9MXA").props.allowFontScaling).toBe(false);
     expect(screen.queryByRole("button", { name: FRONT_LABEL })).toBeNull();
     expect(withSpring).toHaveBeenLastCalledWith(180, expect.any(Object));
-    expect(Haptics.impactAsync).toHaveBeenCalledTimes(1);
     expect(onFlip).toHaveBeenLastCalledWith("back");
+    // The tick comes as the card passes edge-on, once.
+    await waitFor(() => expect(Haptics.impactAsync).toHaveBeenCalledTimes(1));
 
     await act(async () => flipByAssistiveTech("card-back"));
 
@@ -310,10 +322,12 @@ describe("IdCard", () => {
     expect(still.transform).toEqual([{ perspective: 700 }]);
     expect(still.opacity).toBe(1);
     expect(animatedStyle("card-back").opacity).toBe(0);
-    expect(animatedStyle("card-front-sheen")).toEqual({ opacity: 0.18, transform: [] });
+    expect(animatedStyle("card-front-sheen")).toEqual({ opacity: SHEEN_REST, transform: [] });
 
     await act(async () => flipByAssistiveTech("card-front"));
     expect(withTiming).toHaveBeenLastCalledWith(1, { duration: 200, reduceMotion: "never" });
+    // A crossfade has no edge-on moment: the tick comes with the flip.
+    expect(Haptics.impactAsync).toHaveBeenCalledTimes(1);
     expect(withSpring).not.toHaveBeenCalledWith(180, expect.any(Object));
     expect(screen.getByRole("button", { name: BACK_LABEL })).toBeOnTheScreen();
   });
@@ -366,6 +380,9 @@ describe("IdCard", () => {
     const view = await renderCard(props);
     await act(async () => flipByAssistiveTech("card-front"));
     expect(screen.getByRole("button", { name: BACK_LABEL })).toBeOnTheScreen();
+    // The person's flip ticks, then settles on its back.
+    await waitFor(() => expect(Haptics.impactAsync).toHaveBeenCalledTimes(1));
+    await frames(SETTLE_MS);
     jest.mocked(withSpring).mockClear();
     jest.mocked(withTiming).mockClear();
     jest.mocked(Haptics.impactAsync).mockClear();
@@ -380,7 +397,8 @@ describe("IdCard", () => {
       expect(withSpring).toHaveBeenCalledWith(0, expect.any(Object));
     }
     expect(onFlip).toHaveBeenLastCalledWith("front");
-    // Set down, not flipped by the person: no tap feedback.
+    // Set down, not flipped by the person: no tick, even once the turn back has passed edge-on.
+    await frames(SETTLE_MS);
     expect(Haptics.impactAsync).not.toHaveBeenCalled();
 
     // Already on its front, a card set at rest stays as it is.
@@ -454,9 +472,10 @@ describe("IdCard", () => {
     expect(face("card-back")).toBe(back);
   });
 
-  // Gatekeeper round 1 (B2). Jest lays no text out, so the scaled proof is the emulator strip at
-  // font scale 1.3 and 2.0 (#291 evidence); this pins the structure that makes it hold at any scale.
-  it("holds two lines of the name's own scaled type, so a name that wraps never moves the place", async () => {
+  // v2: the card is an image-like object at ID-1 size, so its type ignores the font scale (the
+  // label carries the data) and the column flows: the place follows the name, with no empty line
+  // under a one-line name. #291 B2's reserved room is gone with the scaling it guarded against.
+  it("keeps its ID-1 size and fixed type: the name fits two lines, the place follows it", async () => {
     const props = { variant: "customer" as const, width: 288, city: "Miami", state: "FL" };
     const view = await renderCard({ ...props, name: "Mar", testID: "card" });
 
@@ -464,23 +483,185 @@ describe("IdCard", () => {
       card({ ...props, name: "María Fernanda Pérez de la Cruz", testID: "card" }),
     );
 
-    const room = screen.getByTestId("card-name-room", { includeHiddenElements: true });
     const name = screen.getByTestId("card-name");
-    const roomStyle = StyleSheet.flatten(room.props.style);
-    const nameStyle = StyleSheet.flatten(name.props.style);
-    // The room: two lines whatever the name says, sized by the font scale like the name itself.
-    expect(room.props.children).toBe("M\nM");
-    expect(room.props.numberOfLines).toBe(2);
-    expect(room.props.allowFontScaling).toBe(true);
-    expect(name.props.allowFontScaling).toBe(true);
-    expect(roomStyle.fontSize).toBe(nameStyle.fontSize);
-    expect(roomStyle.lineHeight).toBe(nameStyle.lineHeight);
-    expect(roomStyle.minHeight).toBeUndefined();
-    // Hidden from sight and from assistive technology.
-    expect(roomStyle.opacity).toBe(0);
-    expect(room.props.importantForAccessibility).toBe("no-hide-descendants");
-    // The name lies over its room, out of the flow, capped at the room's two lines.
-    expect(nameStyle).toMatchObject({ position: "absolute", top: 0, left: 0, right: 0 });
     expect(name.props.numberOfLines).toBe(2);
+    expect(name.props.adjustsFontSizeToFit).toBe(true);
+    expect(name.props.allowFontScaling).toBe(false);
+    expect(screen.getByText("Miami, FL").props.allowFontScaling).toBe(false);
+    expect(screen.getByText("Miami, FL").props.numberOfLines).toBe(1);
+    expect(screen.queryByTestId("card-name-room", { includeHiddenElements: true })).toBeNull();
+    // Every face is exactly the card: 288 x 182, never taller with a long name.
+    for (const id of ["card-front", "card-back"]) {
+      expect(StyleSheet.flatten(face(id).props.style)).toMatchObject({ width: 288, height: 182 });
+    }
+    // The whole name stays in the label, however the drawn one shrinks.
+    expect(
+      screen.getByRole("button", { name: "ID card, María Fernanda Pérez de la Cruz, Miami, FL" }),
+    ).toBeOnTheScreen();
+  });
+
+  it("seals the name only when verified, and reads the seal and the member-since line", async () => {
+    const props: IdCardProps = { variant: "pro", width: 320, ...ALEX, testID: "card" };
+    const view = await renderCard(props);
+    expect(screen.queryByTestId("card-seal", { includeHiddenElements: true })).toBeNull();
+    expect(screen.queryByText("MEMBER SINCE")).toBeNull();
+
+    await view.rerender(card({ ...props, verified: true, memberSince: "March 2026" }));
+
+    expect(screen.getByTestId("card-seal", { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.getByText("MEMBER SINCE")).toBeOnTheScreen();
+    expect(screen.getByText("March 2026")).toBeOnTheScreen();
+    expect(
+      screen.getByRole("button", {
+        name: "ID card, PRO, Alex Morgan, verified, Fort Lauderdale, FL, (954) 555-0142, member since March 2026",
+      }),
+    ).toBeOnTheScreen();
+
+    await i18n.changeLanguage("es");
+    await view.rerender(card({ ...props, verified: true, memberSince: "marzo de 2026" }));
+    expect(screen.getByText("MIEMBRO DESDE")).toBeOnTheScreen();
+    expect(
+      screen.getByRole("button", {
+        name: "Tarjeta de identificación, PRO, Alex Morgan, verificado, Fort Lauderdale, FL, (954) 555-0142, miembro desde marzo de 2026",
+      }),
+    ).toBeOnTheScreen();
+  });
+
+  it("labels the back's engraved code, beside the support line", async () => {
+    await renderCard({ variant: "customer", width: 320, ...ALEX, testID: "card" });
+    await act(async () => flipByAssistiveTech("card-front"));
+
+    expect(screen.getByText("MEMBER CODE")).toBeOnTheScreen();
+    expect(screen.getByTestId("card-code")).toHaveTextContent("K7Q2-9MXA");
+    expect(screen.getByText("Support when you need it")).toBeOnTheScreen();
+  });
+
+  it("turns away the face that looks away: both hide their backs, the back starts half a turn round", async () => {
+    await renderCard({ variant: "pro", width: 320, ...ALEX, testID: "card" });
+    await settle();
+
+    for (const id of ["card-front", "card-back"]) {
+      expect(StyleSheet.flatten(face(id).props.style).backfaceVisibility).toBe("hidden");
+    }
+    expect(rotation(animatedStyle("card-front").transform, "rotateY")).toBe(0);
+    expect(rotation(animatedStyle("card-back").transform, "rotateY")).toBe(180);
+  });
+
+  it("slides its layers against each other and its shadow against the lean", async () => {
+    await renderCard({ variant: "pro", width: 320, ...ALEX, testID: "card" });
+    await settle();
+    const pan = createGestureController<PanPayload>("card-pan");
+
+    await act(async () => {
+      pan.begin();
+      pan.activate();
+      pan.update({ translationX: 80, translationY: 0 });
+    });
+
+    const shiftX = (testID: string) => {
+      const part = animatedStyle(testID).transform?.find((step) => "translateX" in step);
+      return Number(part?.translateX ?? 0);
+    };
+    // The right edge leans back: the ink (photo plate, text, badge) slides right, the print under
+    // the laminate slides left, and the shadow moves the other way from the lean.
+    expect(shiftX("card-front-print")).toBeLessThan(0);
+    expect(shiftX("card-front-ink")).toBeGreaterThan(0);
+    expect(shiftX("card-shadow")).toBeLessThan(0);
+    // The face that looks away holds still: its layers and its pose are parked, half a turn round.
+    expect(animatedStyle("card-back-print").transform).toEqual([]);
+    expect(animatedStyle("card-back-ink").transform).toEqual([]);
+    expect(rotation(animatedStyle("card-back").transform, "rotateY")).toBe(180);
+    expect(rotation(animatedStyle("card-back").transform, "rotateX")).toBe(0);
+  });
+
+  it("holds every layer and its shadow still under Reduce Motion", async () => {
+    jest.mocked(useReducedMotion).mockReturnValue(true);
+    await renderCard({ variant: "pro", width: 320, ...ALEX, testID: "card" });
+    await settle();
+
+    await act(async () => {
+      fireGestureHandler(getByGestureTestId("card-pan"), [
+        { state: State.BEGAN },
+        { state: State.ACTIVE },
+        { translationX: 120, translationY: -60 },
+      ]);
+    });
+    for (const id of ["card-front-print", "card-front-ink", "card-back-print", "card-back-ink"]) {
+      expect(animatedStyle(id).transform).toEqual([]);
+    }
+    expect(animatedStyle("card-shadow")).toMatchObject({ opacity: 1 });
+    const shadowShift = animatedStyle("card-shadow").transform?.[0]?.translateX;
+    expect(shadowShift).toBeCloseTo(0, 5);
+  });
+
+  it("draws the share image flat: no shadow, no edge, the light at rest, fixed type", async () => {
+    await renderCard({
+      variant: "pro",
+      width: 960,
+      ...ALEX,
+      verified: true,
+      memberSince: "March 2026",
+      shareable: true,
+      testID: "share",
+    });
+    await settle();
+
+    expect(screen.queryByTestId("share-shadow", { includeHiddenElements: true })).toBeNull();
+    expect(screen.queryByTestId("share-edge", { includeHiddenElements: true })).toBeNull();
+    expect(screen.getByTestId("share-seal", { includeHiddenElements: true })).toBeTruthy();
+    expect(screen.getByTestId("share-name").props.allowFontScaling).toBe(false);
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("share-front-sheen", { includeHiddenElements: true }).props.style,
+      ),
+    ).toMatchObject({
+      opacity: SHEEN_REST,
+    });
+    expect(
+      screen.getByRole("image", {
+        name: "ID card, PRO, Alex Morgan, verified, Fort Lauderdale, FL, member since March 2026",
+      }),
+    ).toBeOnTheScreen();
+  });
+
+  it("ticks once per flip: as it passes edge-on, or at the tap that reverses it before then", async () => {
+    await renderCard({ variant: "pro", width: 320, ...ALEX, testID: "card" });
+    await settle();
+
+    await act(async () => flipByAssistiveTech("card-front"));
+    await waitFor(() => expect(Haptics.impactAsync).toHaveBeenCalledTimes(1));
+    // Its overshoot stays past the half turn: no second tick as it settles.
+    await frames(SETTLE_MS);
+    expect(Haptics.impactAsync).toHaveBeenCalledTimes(1);
+
+    // Two taps at once: the second reverses the first before it is edge-on.
+    jest.mocked(Haptics.impactAsync).mockClear();
+    await act(async () => {
+      flipByAssistiveTech("card-back");
+      flipByAssistiveTech("card-front");
+    });
+    expect(Haptics.impactAsync).toHaveBeenCalledTimes(1);
+    await frames(SETTLE_MS);
+    expect(Haptics.impactAsync).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: BACK_LABEL })).toBeOnTheScreen();
+  });
+
+  it("never ticks for a card set at rest mid-flip, and its next flip ticks once", async () => {
+    const props: IdCardProps = { variant: "pro", width: 320, ...ALEX, testID: "card" };
+    const view = await renderCard(props);
+    await settle();
+
+    // Set at rest before the flip it was given passes edge-on: it turns back, silently.
+    await act(async () => {
+      flipByAssistiveTech("card-front");
+      await view.rerender(card({ ...props, interactive: false }));
+    });
+    await frames(SETTLE_MS);
+    expect(Haptics.impactAsync).not.toHaveBeenCalled();
+
+    await view.rerender(card({ ...props, interactive: true }));
+    await act(async () => flipByAssistiveTech("card-front"));
+    await frames(SETTLE_MS);
+    expect(Haptics.impactAsync).toHaveBeenCalledTimes(1);
   });
 });
