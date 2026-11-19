@@ -108,6 +108,21 @@ class JobRepository:
             Job.status.label("job_status"),
         ).subquery()
 
+    async def statuses_of_requests(
+        self, request_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, tuple[uuid.UUID, JobStatus]]:
+        """The id and status of each request's job (one job per request), by request, in one
+        statement; requests without a job are left out."""
+        if not request_ids:
+            return {}
+        statement = select(Job.request_id, Job.id, Job.status).where(
+            Job.request_id.in_(request_ids)
+        )
+        return {
+            request_id: (job_id, status)
+            for request_id, job_id, status in await self._session.execute(statement)
+        }
+
     async def get_for_update(self, job_id: uuid.UUID) -> Job | None:
         """The job, locked until the transaction ends, so transitions on it run one at a time.
 

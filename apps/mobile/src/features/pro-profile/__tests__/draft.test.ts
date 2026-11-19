@@ -160,19 +160,45 @@ describe("profileFailure", () => {
 });
 
 describe("readProProfileConfig", () => {
-  const read = (maxCategories?: string, maxServiceAreas?: string) =>
-    readProProfileConfig({ maxCategories, maxServiceAreas });
+  const read = (maxCategories?: string, maxServiceAreas?: string, reviewPollSeconds?: string) =>
+    readProProfileConfig({ maxCategories, maxServiceAreas, reviewPollSeconds });
 
-  it("allows 5 categories and 50 ZIP codes when nothing is set", () => {
-    expect(read()).toEqual({ maxCategories: 5, maxServiceAreas: 50 });
+  it("allows 5 categories and 50 ZIP codes, and polls a pending review every 30 s, when nothing is set", () => {
+    expect(read()).toEqual({ maxCategories: 5, maxServiceAreas: 50, reviewPollMs: 30_000 });
   });
 
   it("takes the environment's values", () => {
-    expect(read("3", "20")).toEqual({ maxCategories: 3, maxServiceAreas: 20 });
+    expect(read("3", "20", "10")).toEqual({
+      maxCategories: 3,
+      maxServiceAreas: 20,
+      reviewPollMs: 10_000,
+    });
   });
 
   it.each(["0", "-2", "1.5", "many"])("refuses %p", (value) => {
     expect(() => read(value)).toThrow(/EXPO_PUBLIC_PRO_MAX_CATEGORIES must be a positive whole/);
     expect(() => read(undefined, value)).toThrow(/EXPO_PUBLIC_PRO_MAX_SERVICE_AREAS/);
+  });
+
+  // The review poll is optional tuning: a bad value falls back to 30 s, never stops the app (#481 r1).
+  it.each(["0", "-5", "2.5", "abc", "15s", "3601", "Infinity", "NaN", " "])(
+    "polls a pending review every 30 s for %j",
+    (value) => {
+      expect(read(undefined, undefined, value).reviewPollMs).toBe(30_000);
+    },
+  );
+
+  it("loads with a bad review poll set, on the default", () => {
+    const saved = process.env.EXPO_PUBLIC_PRO_REVIEW_POLL_SECONDS;
+    process.env.EXPO_PUBLIC_PRO_REVIEW_POLL_SECONDS = "0";
+    try {
+      jest.isolateModules(() => {
+        const { proProfileConfig } = jest.requireActual<typeof import("../config")>("../config");
+        expect(proProfileConfig.reviewPollMs).toBe(30_000);
+      });
+    } finally {
+      if (saved === undefined) delete process.env.EXPO_PUBLIC_PRO_REVIEW_POLL_SECONDS;
+      else process.env.EXPO_PUBLIC_PRO_REVIEW_POLL_SECONDS = saved;
+    }
   });
 });

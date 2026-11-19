@@ -28,6 +28,17 @@ _RESWEEP_SETTINGS: dict[str, int | None] = {
     "media_sanitize_resweep_timeout_seconds": None,
 }
 
+# Optional whole-number settings that a bad value must never stop the API or the worker for: a
+# value that is not a whole number from 1 to its highest (None: no highest) is the field's
+# default, with a warning naming the setting, never its value (_int_or_default, #478).
+_FALLBACK_INT_SETTINGS: dict[str, int | None] = {
+    "redispatch_sweep_minutes": 60,
+    "redispatch_sweep_timeout_seconds": None,
+    "redispatch_max_age_days": None,
+    "redispatch_batch_size": None,
+    "redispatch_retry_minutes": None,
+}
+
 _ASYNC_SCHEME = "postgresql+asyncpg://"
 _SYNC_SCHEMES = ("postgres://", "postgresql://")
 
@@ -306,6 +317,19 @@ class Settings(BaseSettings):
     # are safe (each request is locked), so the timeout only bounds a stuck run.
     quote_expiry_sweep_minutes: int = Field(default=5, ge=1, le=60)
     quote_expiry_timeout_seconds: int = Field(default=240, gt=0)
+    # Re-dispatch of stalled requests (#478): a request sent while no pro was eligible keeps
+    # no dispatch row. Every REDISPATCH_SWEEP_MINUTES the worker queues the dispatch again for
+    # up to REDISPATCH_BATCH_SIZE of the oldest such requests created within
+    # REDISPATCH_MAX_AGE_DAYS (requests have no lifetime of their own yet); one run may take
+    # REDISPATCH_SWEEP_TIMEOUT_SECONDS. An invalid value is the default (_FALLBACK_INT_SETTINGS).
+    redispatch_sweep_minutes: int = Field(default=5, ge=1, le=60)
+    redispatch_sweep_timeout_seconds: int = Field(default=240, gt=0)
+    redispatch_max_age_days: int = Field(default=7, gt=0)
+    redispatch_batch_size: int = Field(default=100, gt=0)
+    # The sweep reads forward from where its last run stopped (#500 round 1); a request it
+    # queued within this many minutes is passed over, so one no pro can take is retried about
+    # once per window rather than every run.
+    redispatch_retry_minutes: int = Field(default=60, gt=0)
     # Stripe webhooks (D7.3, #40): the endpoint's signing secret (whsec_...). Optional: without
     # it POST /v1/webhooks/stripe answers 503 and Stripe retries. How old a signature may be
     # (Stripe's default tolerance), the largest body read, and the worker's handling: the runs
@@ -629,6 +653,24 @@ class Settings(BaseSettings):
     @classmethod
     def _empty_is_none(cls, value: object) -> object:
         return None if value == "" else value
+
+    @field_validator(*_FALLBACK_INT_SETTINGS, mode="before")
+    @classmethod
+    def _int_or_default(cls, value: object, info: ValidationInfo) -> object:
+        """An optional whole-number setting that is not a whole number in range (empty, a word,
+        0, a negative, a fraction, above its highest) is its default, with a warning naming the
+        setting (never its value): the API and the worker still start (#478)."""
+        name = info.field_name or ""
+        highest = _FALLBACK_INT_SETTINGS[name]
+        number: int | None = None
+        if type(value) is int:
+            number = value
+        elif isinstance(value, str) and value.strip().isascii() and value.strip().isdigit():
+            number = int(value.strip())
+        if number is None or number < 1 or (highest is not None and number > highest):
+            logger.warning("setting_invalid_default_used", extra={"setting": name.upper()})
+            return cls.model_fields[name].default
+        return number
 
     @field_validator("stripe_publishable_key")
     @classmethod

@@ -18,7 +18,7 @@ from app.integrations.mapbox import MapboxRouteProvider, UnconfiguredRouteProvid
 from app.integrations.stripe_payments import StripePaymentsClient
 from app.integrations.stripe_transfers import StripeTransfersClient
 from app.modules.chat.tasks import purge_chat_originals
-from app.modules.dispatch.tasks import dispatch_request
+from app.modules.dispatch.tasks import dispatch_request, redispatch_stalled_requests
 from app.modules.jobs.tasks import auto_confirm_jobs
 from app.modules.media.resweep import requeue_stale_media_copies
 from app.modules.notifications.push_tasks import check_push_receipts
@@ -78,6 +78,8 @@ def test_registration_keeps_names_tries_and_timeouts() -> None:
     assert functions == {
         "ping": (None, None),
         "dispatch_request": (None, None),
+        # One run per kick (#478): the re-dispatch sweep is its retry.
+        "redispatch_for_pro": (1, None),
         "send_push": (get_settings().push_max_attempts, None),
         "sanitize_request_media": (
             get_settings().media_sanitize_max_tries + SANITIZE_SPARE_TRIES,
@@ -123,6 +125,12 @@ def test_cron_jobs_keep_names_cadences_and_timeouts() -> None:
             sweep_orphan_uploads,
             every(get_settings().orphan_upload_sweep_minutes),
             get_settings().orphan_upload_sweep_timeout_seconds,
+            1,
+        ),
+        "cron:redispatch_stalled_requests": (
+            redispatch_stalled_requests,
+            every(get_settings().redispatch_sweep_minutes),
+            get_settings().redispatch_sweep_timeout_seconds,
             1,
         ),
         "cron:expire_quotes": (

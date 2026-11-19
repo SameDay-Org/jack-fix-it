@@ -20,7 +20,11 @@ from app.integrations.stripe_payments import StripePaymentsClient
 from app.integrations.stripe_transfers import StripeTransfersClient
 from app.modules.addresses.tasks import geocode_address
 from app.modules.chat.tasks import purge_chat_originals
-from app.modules.dispatch.tasks import dispatch_request
+from app.modules.dispatch.tasks import (
+    dispatch_request,
+    redispatch_for_pro,
+    redispatch_stalled_requests,
+)
 from app.modules.disputes.tasks import dispute_photo_sanitize_task
 from app.modules.jobs.tasks import auto_confirm_jobs, photo_sanitize_task
 from app.modules.media.resweep import requeue_stale_media_copies
@@ -110,6 +114,8 @@ class WorkerSettings:
     functions = (
         discarding_result(ping),
         discarding_result(dispatch_request),
+        # One run per kick (#478): the re-dispatch sweep below is its retry.
+        discarding_result(redispatch_for_pro, max_tries=1),
         # With no result kept, a receipt that asks for a resend can queue the message's job id
         # again once the first run is over; the tries match the sends per device.
         discarding_result(send_push, max_tries=get_settings().push_max_attempts),
@@ -147,6 +153,13 @@ class WorkerSettings:
             sweep_orphan_uploads,
             minute=every(get_settings().orphan_upload_sweep_minutes),
             timeout=get_settings().orphan_upload_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        cron(
+            redispatch_stalled_requests,
+            minute=every(get_settings().redispatch_sweep_minutes),
+            timeout=get_settings().redispatch_sweep_timeout_seconds,
             keep_result=0,
             keep_result_forever=False,
         ),

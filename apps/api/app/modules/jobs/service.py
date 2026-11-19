@@ -34,6 +34,7 @@ from sqlalchemy.exc import DBAPIError, PendingRollbackError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.errors import ForbiddenError, NotFoundError
+from app.modules.disputes.outcomes import dispute_outcomes
 from app.modules.jobs.errors import InvalidTransitionError
 from app.modules.jobs.location import JobLocationStore, forget_position
 from app.modules.jobs.models import Job, JobEvent
@@ -41,7 +42,13 @@ from app.modules.jobs.models import Job, JobEvent
 # Re-exported: other modules name a job's status through this module (ADR 0003).
 from app.modules.jobs.models import JobStatus as JobStatus
 from app.modules.jobs.repository import JobRepository
-from app.modules.jobs.transitions import CHAT_OPEN, REVIEWABLE, TRANSITIONS, ActorKind
+from app.modules.jobs.transitions import (
+    CHAT_OPEN,
+    REVIEWABLE,
+    TRANSITIONS,
+    ActorKind,
+    customer_status_of,
+)
 from app.modules.pros.service import ProService
 from app.modules.users.types import UserAccount, UserRole
 
@@ -209,6 +216,24 @@ def job_earning_facts() -> Subquery:
     """Each job's ids, status, completion, the pro's frozen payout and paid-out time, as
     JobRepository.earning_facts names them: a subquery for the pro's earnings (#70)."""
     return JobRepository.earning_facts()
+
+
+async def job_customer_statuses_of_requests(
+    session: AsyncSession, request_ids: Collection[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """What the customer sees of each request's job, by request, for the customer's own request
+    views (#466): once a request is paid, its job's status takes over, a disputed job whose
+    dispute is resolved reading completed (#472, customer_status_of). Two statements; requests
+    without a job are left out."""
+    jobs = await JobRepository(session).statuses_of_requests(request_ids)
+    disputed = [job_id for job_id, status in jobs.values() if status is JobStatus.DISPUTED]
+    outcomes = await dispute_outcomes(session, disputed)
+    return {
+        request_id: customer_status_of(
+            status, dispute_resolved=job_id in outcomes and outcomes[job_id].resolved
+        )
+        for request_id, (job_id, status) in jobs.items()
+    }
 
 
 def _actor_id(actor: UserAccount | SystemActor | AdminDecision) -> uuid.UUID | None:

@@ -29,12 +29,14 @@ import {
 import { ID_CARD_SHARE_DIR } from "@/components/ui";
 import { moveAccessibilityFocus } from "@/components/ui/focus";
 import { toastStore } from "@/components/ui/toast";
+import { myProProfileQueryKey, type ProProfile } from "@/features/pro-profile/api";
 import { joinFacts } from "@/features/quotes/format";
 import { myRatingKey, type MyRating } from "@/features/reviews/api";
 import i18n from "@/i18n";
 
 import { deferred, settle } from "../../../api/__tests__/helpers";
 import { METRICS } from "../../auth/__tests__/helpers";
+import { FULL_PROFILE } from "../../pro-profile/__tests__/helpers";
 import { newQueryClient, signedIn } from "../../home/__tests__/helpers";
 import { savedAddress } from "../../request/__tests__/helpers";
 import { AccountScreen } from "../AccountScreen";
@@ -109,7 +111,7 @@ const ALEX: Partial<SessionUser> = {
 const PHONE = "+1 (954) 555-0142";
 const CARD_BUTTON = "Your ID card, Alex Morgan, Fort Lauderdale, FL";
 // The live card reads its phone out too (#295); the share render never does.
-const FRONT_LABEL = `ID card, PRO, Alex Morgan, Fort Lauderdale, FL, ${PHONE}`;
+const FRONT_LABEL = `ID card, PRO, Alex Morgan, Fort Lauderdale, FL, ${PHONE}, member since March 2026`;
 const BACK_BUTTON = "Back to your account";
 const SHARE = "Share your ID card as an image";
 
@@ -134,6 +136,15 @@ const renderAccount = () => render(tree());
 const ratingRead = (rating: MyRating) => {
   queryClient.setQueryDefaults(["rating"], { staleTime: Infinity });
   queryClient.setQueryData(myRatingKey(1), rating);
+};
+
+/** The pro's own profile already read (the card's verified seal comes from it), for the same reason. */
+const proProfileRead = (verification: ProProfile["verification_status"]) => {
+  queryClient.setQueryDefaults(["pro-profile"], { staleTime: Infinity });
+  queryClient.setQueryData(myProProfileQueryKey(1), {
+    ...FULL_PROFILE,
+    verification_status: verification,
+  });
 };
 
 /** How far the card's stage is translated down, from Reanimated's Jest style. */
@@ -173,6 +184,7 @@ const busyOf = (name: string) =>
 beforeEach(() => {
   queryClient = newQueryClient();
   ratingRead({ average: null, count: 0 });
+  proProfileRead("pending");
   jest.mocked(useSession).mockReturnValue(signedIn(ALEX));
   jest.mocked(useIsFocused).mockReturnValue(true);
   jest.mocked(useReducedMotion).mockReturnValue(false);
@@ -226,6 +238,34 @@ describe("AccountScreen", () => {
     expect(screen.getByTestId("account-since")).toHaveTextContent("Member sinceMarch 2026");
     expect(screen.getByLabelText("Rating, No ratings yet")).toBeOnTheScreen();
     expect(screen.getByRole("button", { name: SHARE })).toBeOnTheScreen();
+  });
+
+  it("seals the card only once the platform approved the pro, on screen and on the shared image", async () => {
+    // Pending (as in every other test here): no seal anywhere.
+    await renderAccount();
+    expect(onScreenCard().queryByTestId("account-card-seal", HIDDEN)).toBeNull();
+    expect(shareCard().queryByTestId("account-share-render-card-seal", HIDDEN)).toBeNull();
+    expect(onScreenCard().getByText("MEMBER SINCE", HIDDEN)).toBeTruthy();
+    expect(onScreenCard().getByText("March 2026", HIDDEN)).toBeTruthy();
+
+    await act(async () => proProfileRead("approved"));
+
+    // The query's observers hear of the new data on the next notify tick.
+    await waitFor(() =>
+      expect(onScreenCard().getByTestId("account-card-seal", HIDDEN)).toBeTruthy(),
+    );
+    expect(shareCard().getByTestId("account-share-render-card-seal", HIDDEN)).toBeTruthy();
+    expect(
+      shareCard().getByLabelText(
+        "ID card, PRO, Alex Morgan, verified, Fort Lauderdale, FL, member since March 2026",
+        HIDDEN,
+      ),
+    ).toBeTruthy();
+
+    await act(async () => proProfileRead("rejected"));
+    await waitFor(() =>
+      expect(onScreenCard().queryByTestId("account-card-seal", HIDDEN)).toBeNull(),
+    );
   });
 
   it("shows Share as a word beside the title, and as its glyph when the title would not fit", async () => {

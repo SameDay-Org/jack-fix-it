@@ -33,7 +33,8 @@ export type TabBarProps = {
   /** Out of sight or on its way: the bar takes no taps and screen readers skip it. */
   hidden?: boolean;
   /**
-   * A one-line control floating just above the tabs (an ongoing job), drawn while
+   * A one-line control floating just above the tabs (an ongoing job; two lines at large text,
+   * `accessoryLines`), drawn while
    * `TabBarAccessoryContext` says one is shown: the context also grows `useTabBarInset`, so the
    * screens under the bar keep their last row clear of it. It fills a pill of the height
    * `tabBarGeometry` gives it.
@@ -59,8 +60,14 @@ const MIN_TARGET = 48;
 const FLOAT_MARGIN = 16;
 const FLOAT_GAP = 8;
 const LABEL_LINE_HEIGHT = tokens.fontSize.caption.lineHeight;
-// The accessory: one line of callout text with this padding above and below, 48 dp at least.
+// The accessory: one line of callout text (two at large text) with this padding above and below,
+// 48 dp at least.
 const ACCESSORY_LINE_HEIGHT = tokens.fontSize.callout.lineHeight;
+/**
+ * From this font scale the accessory gives its text two lines: on one, a 320 dp screen at 2.0
+ * cut "Dan is booked · Sun, 9 AM" to "Da… · Sun, 9 AM" (#486).
+ */
+export const ACCESSORY_TWO_LINES_FROM = 1.5;
 const ACCESSORY_PADDING_Y = 12;
 const RIPPLE_OPACITY = 0.1;
 const HAIRLINE_OPACITY = 0.1;
@@ -76,6 +83,11 @@ export type TabBarGeometry = {
   accessoryHeight: number;
   accessoryBottom: number;
 };
+
+/** How many lines of callout text the accessory holds at a font scale: two at large text. */
+export function accessoryLines(fontScale: number): 1 | 2 {
+  return fontScale >= ACCESSORY_TWO_LINES_FROM ? 2 : 1;
+}
 
 /** The bar floats as a pill on iOS (the system's own tab bar shape) and docks on Android. */
 const floats = () => Platform.OS === "ios";
@@ -100,7 +112,8 @@ export function tabBarGeometry(
   if (!accessory) return { barHeight, bottom, inset: base, accessoryHeight: 0, accessoryBottom: 0 };
   const accessoryHeight = Math.max(
     MIN_TARGET,
-    Math.ceil(ACCESSORY_LINE_HEIGHT * fontScale) + 2 * ACCESSORY_PADDING_Y,
+    Math.ceil(ACCESSORY_LINE_HEIGHT * fontScale * accessoryLines(fontScale)) +
+      2 * ACCESSORY_PADDING_Y,
   );
   const accessoryBottom = top + FLOAT_GAP;
   return {
