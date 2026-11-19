@@ -74,6 +74,17 @@ class JobPhotoRows:
         return await JobPhotoRepository(session).fail_pending(row_ids)
 
 
+async def stale_pending_photos(
+    session: AsyncSession, before: datetime, limit: int
+) -> dict[uuid.UUID, list[uuid.UUID]]:
+    """The photos still waiting for their safe copy since before `before`, by job, oldest
+    first: for the sweep (app.modules.media.resweep, #473)."""
+    found: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for parent_id, photo_id in await JobPhotoRepository(session).stale_pending(before, limit):
+        found.setdefault(parent_id, []).append(photo_id)
+    return found
+
+
 async def enqueue_photo_sanitize(
     queue: JobQueue, job_id: uuid.UUID, photo_ids: Sequence[uuid.UUID], timeout_seconds: float
 ) -> bool:

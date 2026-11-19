@@ -11,6 +11,10 @@ try again, or an upload a timeout left running, rewrites that one copy and never
 A transient failure (the storage, a timeout, ffmpeg missing for now) leaves the row pending and
 asks for a retry, until the job's last try, where it fails like a file that can never be made
 safe (it does not decode, has too many pixels, ffmpeg rejects it). A failed row is never served.
+An outage of our own infrastructure is not the file's fault, though (#473): when the storage, or
+ffmpeg, is still unavailable at the last try, the row stays pending (an ERROR for staff,
+media_sanitize_postponed), and the worker's sweep (app.modules.media.resweep) queues its copy
+again once MEDIA_SANITIZE_RESWEEP_AFTER_MINUTES have passed.
 
 ARQ stops a job at MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS and never runs it again, so a try stops
 itself first. Every step has a bound: a download, an image transform, an ffmpeg or ffprobe run
@@ -41,6 +45,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Final, Literal, Protocol
@@ -69,8 +74,12 @@ from app.queue import JobQueue, enqueue
 logger = logging.getLogger(__name__)
 
 SANITIZE_TASK: Final = "sanitize_request_media"
-# What one row's run ended in; "skipped": another run had already settled it.
-_RowResult = Literal["ready", "failed", "waiting", "skipped"]
+# What one row's run ended in; "skipped": another run had already settled it; "postponed": an
+# outage of the storage or of ffmpeg outlasted the tries, and the row is left for the sweep.
+_RowResult = Literal["ready", "failed", "waiting", "skipped", "postponed"]
+# The transient reasons that are an outage of our own infrastructure, not the file's fault: at
+# the last try they postpone the row instead of failing it (#473).
+OUTAGES: Final = frozenset({SanitizeFailure.STORAGE, SanitizeFailure.FFMPEG_UNAVAILABLE})
 SAFE_KEY_PREFIX: Final = "m/"
 # Makes a row's safe key from its id (uuid5): stable for the row, and its id cannot be read back.
 _SAFE_KEY_NAMESPACE: Final = uuid.UUID("5d1f0b0e-6a43-4f4e-9b8a-173c0a5e1d7f")
@@ -93,6 +102,14 @@ async def enqueue_sanitize(queue: JobQueue, request_id: uuid.UUID, timeout_secon
         job_id=sanitize_job_id(request_id),
         timeout_seconds=timeout_seconds,
     )
+
+
+async def stale_pending_requests(
+    session: AsyncSession, before: datetime, limit: int
+) -> list[uuid.UUID]:
+    """The requests whose media still waits for its safe copy since before `before`: for the
+    sweep (app.modules.media.resweep, #473)."""
+    return await ServiceRequestRepository(session).stale_pending_media(before, limit)
 
 
 def safe_key_for(media_id: uuid.UUID, extension: str) -> str:
@@ -128,12 +145,15 @@ class MediaCopyOutcome:
     failed: int = 0
     waiting: int = 0  # still pending after a transient failure: the job should run again
     deferred: int = 0  # not tried, or cut by the try's deadline: the next try goes on
+    postponed: int = 0  # an outage outlasted the tries: pending, for the sweep (#473)
 
     def __str__(self) -> str:
-        return (
+        counts = (
             f"ready={self.ready} failed={self.failed} waiting={self.waiting} "
             f"deferred={self.deferred}"
         )
+        # Only when some were: the run's summary reads as before otherwise.
+        return f"{counts} postponed={self.postponed}" if self.postponed else counts
 
 
 class _OutOfTimeError(Exception):
@@ -323,7 +343,13 @@ class MediaCopier:
             )
         except _OutOfTimeError:
             raise TimeoutError from None
-        settled: dict[_RowResult, int] = {"ready": 0, "failed": 0, "waiting": 0, "skipped": 0}
+        settled: dict[_RowResult, int] = {
+            "ready": 0,
+            "failed": 0,
+            "waiting": 0,
+            "skipped": 0,
+            "postponed": 0,
+        }
         unsettled: list[uuid.UUID] = []
         stuck: list[uuid.UUID] = []  # final: rows still waiting after their failing write failed
         for index, (media_id, file_key) in enumerate(pending):
@@ -351,6 +377,7 @@ class MediaCopier:
             failed=settled["failed"],
             waiting=settled["waiting"],
             deferred=len(unsettled),
+            postponed=settled["postponed"],
         )
 
     async def _pending(self, parent_id: uuid.UUID) -> list[tuple[uuid.UUID, str]]:
@@ -433,10 +460,8 @@ class MediaCopier:
         attempt: int,
         error_class: str | None = None,
     ) -> _RowResult:
-        """A failure that may pass: retried, until the last try fails the row."""
-        if attempt >= self._config.max_tries:
-            await self._fail(run, media_id, parent_id, reason, None)
-            return "failed"
+        """A failure that may pass: retried, until the last try fails the row; an outage of
+        the storage or of ffmpeg postpones it instead (#473), for the sweep."""
         extra: dict[str, object] = {
             "media_id": str(media_id),
             self._rows.parent_field: str(parent_id),
@@ -445,6 +470,12 @@ class MediaCopier:
         }
         if error_class is not None:
             extra["error_class"] = error_class
+        if attempt >= self._config.max_tries:
+            if reason in OUTAGES:
+                logger.error("media_sanitize_postponed", extra=extra)
+                return "postponed"
+            await self._fail(run, media_id, parent_id, reason, None)
+            return "failed"
         logger.warning("media_sanitize_retry", extra=extra)
         return "waiting"
 

@@ -68,6 +68,17 @@ class DisputePhotoRows:
         return await DisputePhotoRepository(session).fail_pending(row_ids)
 
 
+async def stale_pending_photos(
+    session: AsyncSession, before: datetime, limit: int
+) -> dict[uuid.UUID, list[uuid.UUID]]:
+    """The photos still waiting for their safe copy since before `before`, by dispute, oldest
+    first: for the sweep (app.modules.media.resweep, #473)."""
+    found: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for parent_id, photo_id in await DisputePhotoRepository(session).stale_pending(before, limit):
+        found.setdefault(parent_id, []).append(photo_id)
+    return found
+
+
 async def enqueue_dispute_photo_sanitize(
     queue: JobQueue,
     dispute_id: uuid.UUID,

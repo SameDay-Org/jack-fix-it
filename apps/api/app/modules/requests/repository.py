@@ -146,6 +146,22 @@ class ServiceRequestRepository:
         )
         return list((await self._session.scalars(statement)).all())
 
+    async def stale_pending_media(self, before: datetime, limit: int) -> list[uuid.UUID]:
+        """The requests with a media row still pending that was attached before `before`
+        (#473), longest waiting first, at most `limit`."""
+        oldest = func.min(RequestMedia.created_at)
+        statement = (
+            select(RequestMedia.request_id)
+            .where(
+                RequestMedia.safe_status == MediaSafeStatus.PENDING,
+                RequestMedia.created_at < before,
+            )
+            .group_by(RequestMedia.request_id)
+            .order_by(oldest, RequestMedia.request_id)
+            .limit(limit)
+        )
+        return list(await self._session.scalars(statement))
+
     async def fail_pending_media(self, media_ids: Collection[uuid.UUID]) -> list[uuid.UUID]:
         """Marks those of the media rows still pending failed (#173); the ids it changed."""
         statement = (

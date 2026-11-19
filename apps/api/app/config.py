@@ -258,6 +258,17 @@ class Settings(BaseSettings):
     # The end of each try, kept for after its work: asking ARQ for the next try or, on the last
     # one, failing what is left in one write. It also covers ARQ's own start of the job.
     media_sanitize_settle_seconds: float = Field(default=60.0, gt=0)
+    # Safe copies left pending (#473): an outage of the storage or of ffmpeg that outlasted a
+    # copy's tries leaves its row pending, as does a copy that was never queued. Every
+    # MEDIA_SANITIZE_RESWEEP_MINUTES (a cron, minutes of the hour) the worker queues the copy
+    # again for up to MEDIA_SANITIZE_RESWEEP_BATCH_SIZE rows of each kind (request media, job
+    # photos, dispute photos) pending for longer than MEDIA_SANITIZE_RESWEEP_AFTER_MINUTES, in
+    # at most MEDIA_SANITIZE_RESWEEP_TIMEOUT_SECONDS. A copy is idempotent per row, so one
+    # queued while an earlier chain of tries still runs only repeats its work.
+    media_sanitize_resweep_minutes: int = Field(default=30, ge=1, le=60)
+    media_sanitize_resweep_after_minutes: int = Field(default=60, gt=0)
+    media_sanitize_resweep_batch_size: int = Field(default=100, gt=0)
+    media_sanitize_resweep_timeout_seconds: int = Field(default=120, gt=0)
     # Characters of a request's description shown in a pro's opportunities list (#49).
     opportunity_excerpt_chars: int = Field(default=160, gt=0)
     # Pro profile (D6.1, #36): the most categories and service areas one pro may list.
