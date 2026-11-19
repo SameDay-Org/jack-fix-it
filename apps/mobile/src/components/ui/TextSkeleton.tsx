@@ -4,7 +4,7 @@ import { Text, View, type DimensionValue, type TextLayoutEvent } from "react-nat
 import { tokens } from "@/theme";
 
 import { cx } from "./cx";
-import { Skeleton } from "./Skeleton";
+import { Skeleton, type SkeletonTone } from "./Skeleton";
 
 type TypeStyle = keyof typeof tokens.fontSize;
 
@@ -18,6 +18,8 @@ export type TextSkeletonProps = {
    * the space that text would at this width and font scale, and a bar covers each of its lines.
    */
   sample?: string;
+  /** The surface it sits on: `dark` on navy. */
+  tone?: SkeletonTone;
   /** Layout-only classes for the line's box (`shrink` in a wrapping row). */
   className?: string;
   testID?: string;
@@ -50,6 +52,7 @@ export function TextSkeleton({
   type,
   width = "100%",
   sample,
+  tone,
   className,
   testID,
 }: TextSkeletonProps) {
@@ -76,12 +79,12 @@ export function TextSkeleton({
             className="absolute"
             style={{ left: line.x, top: line.y + (line.height - size) / 2, width: line.width }}
           >
-            <Skeleton height={size} />
+            <Skeleton height={size} tone={tone} />
           </View>
         ))
       ) : (
         <View className="absolute inset-0 justify-center">
-          <Skeleton width={width} height={size} />
+          <Skeleton width={width} height={size} tone={tone} />
         </View>
       )}
     </View>

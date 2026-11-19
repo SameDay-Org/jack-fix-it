@@ -29,6 +29,11 @@ jest.mock("@/features/pro-profile", () => ({
     refetch: () => Promise.resolve(),
   }),
 }));
+// The wallet (#70) has its own suite (features/earnings); left out here.
+jest.mock("@/features/earnings", () => ({
+  EarningsCard: () => null,
+  useRefreshEarningsTotals: () => () => Promise.resolve(),
+}));
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
   "react-native-safe-area-context",
