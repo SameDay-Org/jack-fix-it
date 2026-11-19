@@ -8,6 +8,18 @@
       "label": "Idioma",
       "en": "English",
       "es": "Español"
+    },
+    "error": {
+      "title": "Esta página no cargó",
+      "body": "Algo salió mal de nuestro lado. Vuelve a intentarlo en un momento.",
+      "retry": "Volver a intentar",
+      "home": "Ir a la página de inicio"
+    },
+    "notFound": {
+      "metaTitle": "Página no encontrada | Jack Fix It",
+      "title": "No encontramos esta página",
+      "body": "Puede que el enlace sea antiguo o tenga un error.",
+      "home": "Ir a la página de inicio"
     }
   },
   "landing": {
@@ -1125,6 +1137,18 @@
           "unavailable": "Algo salió mal. Revisa la disputa antes de volver a intentarlo."
         }
       }
+    },
+    "error": {
+      "title": "El panel no puede conectarse con el servidor ahora",
+      "body": "Vuelve a intentarlo en un momento. Si sigue pasando, avisa a un ingeniero.",
+      "retry": "Volver a intentar",
+      "home": "Volver al panel"
+    },
+    "notFound": {
+      "metaTitle": "Página no encontrada",
+      "title": "Esta página del panel no existe",
+      "body": "Puede que el enlace sea antiguo o tenga un error.",
+      "home": "Volver al panel"
     }
   }
 }

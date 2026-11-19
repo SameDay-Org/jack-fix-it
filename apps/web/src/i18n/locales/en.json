@@ -8,6 +8,18 @@
       "label": "Language",
       "en": "English",
       "es": "Español"
+    },
+    "error": {
+      "title": "This page didn't load",
+      "body": "Something went wrong on our side. Please try again in a moment.",
+      "retry": "Try again",
+      "home": "Go to the home page"
+    },
+    "notFound": {
+      "metaTitle": "Page not found | Jack Fix It",
+      "title": "We can't find this page",
+      "body": "The link may be old or have a typo.",
+      "home": "Go to the home page"
     }
   },
   "landing": {
@@ -1125,6 +1137,18 @@
           "unavailable": "Something went wrong. Check the dispute before trying again."
         }
       }
+    },
+    "error": {
+      "title": "The panel can't reach the server right now",
+      "body": "Please try again in a moment. If it keeps happening, tell an engineer.",
+      "retry": "Try again",
+      "home": "Back to the panel"
+    },
+    "notFound": {
+      "metaTitle": "Page not found",
+      "title": "This panel page doesn't exist",
+      "body": "The link may be old or have a typo.",
+      "home": "Back to the panel"
     }
   }
 }
