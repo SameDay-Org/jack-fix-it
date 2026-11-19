@@ -10,7 +10,10 @@ export const OG_SIZE = { width: 1200, height: 630 };
 const CATALOGS = { en, es } as const;
 
 /** The card's description for screen readers, in each language: the landing's, or another page's. */
-export function ogAlt(locale: Locale, page: "landing" | "forPros" = "landing"): string {
+export function ogAlt(
+  locale: Locale,
+  page: "landing" | "forPros" | "showcase" = "landing",
+): string {
   return CATALOGS[locale][page].meta.ogAlt;
 }
 

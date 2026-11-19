@@ -262,7 +262,8 @@
   "showcase": {
     "meta": {
       "title": "Jack Fix It: la app para lo que pase en casa",
-      "description": "Cuéntale a Jack qué pasó, compara presupuestos de precio fijo de profesionales verificados y paga en la app. Tú confirmas cuando el trabajo está terminado. Muy pronto en iPhone y Android."
+      "description": "Cuéntale a Jack qué pasó, compara presupuestos de precio fijo de profesionales verificados y paga en la app. Tú confirmas cuando el trabajo está terminado. Muy pronto en iPhone y Android.",
+      "ogAlt": "El nombre Jack Fix It y su frase “Cuéntaselo a Jack. Nosotros nos encargamos del resto.” sobre azul marino."
     },
     "skipToContent": "Saltar al contenido",
     "homeLabel": "Jack Fix It, volver al inicio",

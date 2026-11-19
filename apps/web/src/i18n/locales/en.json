@@ -262,7 +262,8 @@
   "showcase": {
     "meta": {
       "title": "Jack Fix It: the app for whatever happens at home",
-      "description": "Tell Jack what happened, compare fixed-price quotes from verified pros and pay in the app. You confirm when the job is done. Coming soon to iPhone and Android."
+      "description": "Tell Jack what happened, compare fixed-price quotes from verified pros and pay in the app. You confirm when the job is done. Coming soon to iPhone and Android.",
+      "ogAlt": "The Jack Fix It name and its line “Tell Jack. We'll take care of the rest.” on navy."
     },
     "skipToContent": "Skip to content",
     "homeLabel": "Jack Fix It, back to the top",
