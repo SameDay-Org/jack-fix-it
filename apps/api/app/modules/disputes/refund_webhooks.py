@@ -30,6 +30,9 @@ endpoint: a refund is the platform's own object. Each is handled the same way:
   own check and in the sweep), whatever was decided or queued, until staff reconcile it
   (docs/stripe-money.md). Nothing settles through that refund, and staff get an ERROR with the
   ids. A repeated event changes nothing more.
+- A cancelled job's refund (#69, no dispute) goes to payments.cancel_refunds: the refund read
+  again by its id and Stripe's status stored, forward only, under its row's lock; one that will
+  not go through is an ERROR for staff. The job is cancelled already: nothing else moves.
 - Stripe failing, or no Stripe key: raised, so the worker rolls the handler back and runs the
   event again after its backoff, until the event is failed for staff. Nothing is written.
 
@@ -48,6 +51,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.stripe_refunds import StripeRefunds, worker_stripe_refunds
 from app.modules.disputes.resolution import RefundActor, RefundSettlement, utc_now
+from app.modules.payments.cancel_refunds import cancel_refund_event, cancel_refund_of
 from app.modules.payments.refunds import RefundLedger, recheck_refund, refund_fits
 from app.modules.webhooks.events import AfterCommit, StripeEvent, StripeEventHandler
 
@@ -159,7 +163,15 @@ def refund_event_handler(stripe: StripeRefundsProvider) -> StripeEventHandler:
         ledger = RefundLedger(session)
         known = await ledger.by_stripe_id(stripe_refund_id)
         if known is None:
-            await _unknown_refund(session, ledger, stripe, event, stripe_refund_id, log)
+            cancelled = await cancel_refund_of(session, stripe_refund_id)
+            if cancelled is None:
+                await _unknown_refund(session, ledger, stripe, event, stripe_refund_id, log)
+                return
+            cancel_client = stripe()
+            if cancel_client is None:
+                logger.warning("refunds_stripe_not_configured", extra=log)
+                raise RefundsNotConfiguredError
+            await cancel_refund_event(session, cancel_client, cancelled, log)
             return
         client = stripe()
         if client is None:

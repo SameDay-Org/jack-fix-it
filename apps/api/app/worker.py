@@ -24,6 +24,7 @@ from app.modules.dispatch.tasks import dispatch_request
 from app.modules.disputes.tasks import dispute_photo_sanitize_task
 from app.modules.jobs.tasks import auto_confirm_jobs, photo_sanitize_task
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
+from app.modules.payments.cancel_refund_tasks import refund_cancellation, retry_cancel_refunds
 from app.modules.payments.tasks import cancel_unpaid_payments
 from app.modules.payments.transfer_tasks import (
     check_transfer_reversals,
@@ -125,6 +126,9 @@ class WorkerSettings:
         # One run per queued confirmation; it never raises, and the sweep below takes whatever
         # a run could not finish.
         discarding_result(release_transfer, max_tries=1),
+        # One run per cancel (#69); it never raises, and the sweep below makes whatever a run
+        # could not.
+        discarding_result(refund_cancellation, max_tries=1),
     )
     # A cron job keeps no result by default (ARQ's cron keep_result is 0); stated anyway.
     cron_jobs = (
@@ -173,6 +177,14 @@ class WorkerSettings:
             release_confirmed_jobs,
             minute=every(get_settings().transfer_release_sweep_minutes),
             timeout=get_settings().transfer_release_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        # Cancelled jobs' refunds left without Stripe's answer (#69).
+        cron(
+            retry_cancel_refunds,
+            minute=every(get_settings().cancel_refund_sweep_minutes),
+            timeout=get_settings().cancel_refund_sweep_timeout_seconds,
             keep_result=0,
             keep_result_forever=False,
         ),
