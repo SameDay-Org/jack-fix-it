@@ -396,11 +396,13 @@ describe("the request flow", () => {
     jest.mocked(apiPost).mockResolvedValue(created() as never);
     const result = await toReview();
     client.setQueryData(MY_REQUESTS_QUERY_KEY, { pages: [], pageParams: [] });
+    const invalidate = jest.spyOn(client, "invalidateQueries");
 
     await press("Send request");
     await waitFor(() => expect(result.getPathname()).toBe("/request/sent"));
-    // History lists the new request the next time it shows.
-    expect(client.getQueryState(MY_REQUESTS_QUERY_KEY)?.isInvalidated).toBe(true);
+    // History lists the new request the next time it shows: the list is invalidated (asked again
+    // at once when a view watches it, as the tabs' open-request banner does, #474).
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: MY_REQUESTS_QUERY_KEY });
     await press("See my request");
 
     await waitFor(() => expect(result.getPathname()).toBe(`/requests/${created().id}`));
