@@ -1,3 +1,5 @@
+import { pollIntervalMs } from "@/features/jobs/config";
+
 /** The API's limit for a bio (`ProProfileUpdate.bio`). The server stays the authority. */
 export const BIO_MAX = 1000;
 /** The most years of experience the API takes (`ProProfileUpdate.years_of_experience`). */
@@ -16,7 +18,6 @@ export type ProProfileConfig = {
 export const DEFAULT_MAX_CATEGORIES = 5;
 export const DEFAULT_MAX_SERVICE_AREAS = 50;
 export const DEFAULT_REVIEW_POLL_SECONDS = 30;
-const MS_PER_SECOND = 1000;
 
 function positiveWhole(raw: string | undefined, fallback: number, name: string): number {
   const value = raw?.trim() ? Number(raw) : fallback;
@@ -43,12 +44,8 @@ export function readProProfileConfig(raw: {
       DEFAULT_MAX_SERVICE_AREAS,
       "EXPO_PUBLIC_PRO_MAX_SERVICE_AREAS",
     ),
-    reviewPollMs:
-      positiveWhole(
-        raw.reviewPollSeconds,
-        DEFAULT_REVIEW_POLL_SECONDS,
-        "EXPO_PUBLIC_PRO_REVIEW_POLL_SECONDS",
-      ) * MS_PER_SECOND,
+    // Optional tuning: a bad value falls back to the default, never stops the app.
+    reviewPollMs: pollIntervalMs(raw.reviewPollSeconds, DEFAULT_REVIEW_POLL_SECONDS),
   };
 }
 

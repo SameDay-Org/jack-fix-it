@@ -178,6 +178,27 @@ describe("readProProfileConfig", () => {
   it.each(["0", "-2", "1.5", "many"])("refuses %p", (value) => {
     expect(() => read(value)).toThrow(/EXPO_PUBLIC_PRO_MAX_CATEGORIES must be a positive whole/);
     expect(() => read(undefined, value)).toThrow(/EXPO_PUBLIC_PRO_MAX_SERVICE_AREAS/);
-    expect(() => read(undefined, undefined, value)).toThrow(/EXPO_PUBLIC_PRO_REVIEW_POLL_SECONDS/);
+  });
+
+  // The review poll is optional tuning: a bad value falls back to 30 s, never stops the app (#481 r1).
+  it.each(["0", "-5", "2.5", "abc", "15s", "3601", "Infinity", "NaN", " "])(
+    "polls a pending review every 30 s for %j",
+    (value) => {
+      expect(read(undefined, undefined, value).reviewPollMs).toBe(30_000);
+    },
+  );
+
+  it("loads with a bad review poll set, on the default", () => {
+    const saved = process.env.EXPO_PUBLIC_PRO_REVIEW_POLL_SECONDS;
+    process.env.EXPO_PUBLIC_PRO_REVIEW_POLL_SECONDS = "0";
+    try {
+      jest.isolateModules(() => {
+        const { proProfileConfig } = jest.requireActual<typeof import("../config")>("../config");
+        expect(proProfileConfig.reviewPollMs).toBe(30_000);
+      });
+    } finally {
+      if (saved === undefined) delete process.env.EXPO_PUBLIC_PRO_REVIEW_POLL_SECONDS;
+      else process.env.EXPO_PUBLIC_PRO_REVIEW_POLL_SECONDS = saved;
+    }
   });
 });
