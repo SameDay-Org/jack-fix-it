@@ -60,7 +60,6 @@ export function ReceiptScreen() {
             <View className="gap-3">
               <Button
                 label={t("receipt.share")}
-                glyph="share"
                 variant="secondary"
                 loading={sharing}
                 onPress={() => void share()}
@@ -82,11 +81,9 @@ export function ReceiptScreen() {
               prefix="receipt"
               testID="receipt-share-render"
             >
-              {() => (
-                <View className="bg-gray-50 p-4">
-                  <ReceiptPaper receipt={receipt} withAddress={false} />
-                </View>
-              )}
+              <View className="bg-gray-50 p-4">
+                <ReceiptPaper receipt={receipt} withAddress={false} />
+              </View>
             </ShareRender>
           </>
         ) : notYet ? (

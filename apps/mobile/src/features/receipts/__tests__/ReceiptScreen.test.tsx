@@ -96,6 +96,8 @@ describe("ReceiptScreen (#62)", () => {
     expect(paper().getByTestId("receipt-method")).toHaveTextContent("Paid with Visa •••• 4242");
     expect(paper().getByTestId("receipt-status")).toHaveTextContent("Paid");
     expect(paper().getByText("Questions? help@example.com")).toBeTruthy();
+    // Share is a full button with its word, not a bare icon.
+    expect(within(screen.getByTestId("receipt-share")).getByText("Share")).toBeTruthy();
     // Never Jack's fee: the customer pays the total.
     expect(screen.queryByText(/fee/i, HIDDEN)).toBeNull();
   });
@@ -188,12 +190,13 @@ describe("ReceiptScreen (#62)", () => {
 });
 
 describe("receipt format", () => {
+  // The mask and the digits never part (a no-break space): "•••• 4242" wraps as one.
   it.each([
-    [{ brand: "visa", last4: "4242", wallet: null }, "Visa •••• 4242"],
-    [{ brand: "amex", last4: "0005", wallet: null }, "American Express •••• 0005"],
-    [{ brand: "visa", last4: "1111", wallet: "apple_pay" }, "Apple Pay (Visa •••• 1111)"],
-    [{ brand: null, last4: "9999", wallet: "google_pay" }, "Google Pay (•••• 9999)"],
-    [{ brand: "newbrand", last4: "1234", wallet: null }, "newbrand •••• 1234"],
+    [{ brand: "visa", last4: "4242", wallet: null }, "Visa ••••\u00A04242"],
+    [{ brand: "amex", last4: "0005", wallet: null }, "American Express ••••\u00A00005"],
+    [{ brand: "visa", last4: "1111", wallet: "apple_pay" }, "Apple Pay (Visa ••••\u00A01111)"],
+    [{ brand: null, last4: "9999", wallet: "google_pay" }, "Google Pay (••••\u00A09999)"],
+    [{ brand: "newbrand", last4: "1234", wallet: null }, "newbrand ••••\u00A01234"],
     [{ brand: "visa", last4: null, wallet: null }, null],
     [null, null],
   ] as const)("payment method %j reads %j", (method, text) => {

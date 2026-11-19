@@ -31,6 +31,8 @@ const BRANDS: Record<string, string> = {
 };
 const WALLETS: Record<string, string> = { apple_pay: "Apple Pay", google_pay: "Google Pay" };
 const MASK = "••••";
+/** Keeps the mask and the last digits on one line when the text wraps (a large font). */
+const NO_BREAK = "\u00A0";
 
 /**
  * "Visa •••• 4242", "Apple Pay (Visa •••• 4242)", or null when the payment carries no details
@@ -39,7 +41,7 @@ const MASK = "••••";
 export function paymentMethodText(method: ReceiptOut["payment_method"]): string | null {
   if (!method?.last4) return null;
   const brand = method.brand ? (BRANDS[method.brand] ?? method.brand) : null;
-  const card = [brand, MASK, method.last4].filter(Boolean).join(" ");
+  const card = [brand, `${MASK}${NO_BREAK}${method.last4}`].filter(Boolean).join(" ");
   const wallet = method.wallet ? WALLETS[method.wallet] : undefined;
   return wallet ? `${wallet} (${card})` : card;
 }

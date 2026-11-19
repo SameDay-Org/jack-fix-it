@@ -66,7 +66,11 @@ function Rule({ width }: { width: number }) {
   );
 }
 
-/** One line: its words on the left, the amount on the right, read together. */
+/**
+ * One line: its words on the left, the amount on the right, read together. When both don't fit
+ * (a long label, a large font) the amount wraps under the words and stays right-aligned, in the
+ * column of the other amounts.
+ */
 function Row({
   label,
   amount,
@@ -92,7 +96,7 @@ function Row({
         <Text className={`${type} text-navy-900`}>{label}</Text>
         {note ? <Text className="text-footnote text-gray-500">{note}</Text> : null}
       </View>
-      <Text className={`${type} text-navy-900`} style={FIGURES}>
+      <Text className={`${type} grow text-right text-navy-900`} style={FIGURES}>
         {amount}
       </Text>
     </View>
