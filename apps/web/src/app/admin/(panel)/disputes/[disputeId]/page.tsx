@@ -239,6 +239,7 @@ function DisputeView({
             Stripe, by hand; the API never clears this by itself. */}
         {dispute.transfer?.needs_reversal_at ? (
           <p
+            role="alert"
             data-reversal
             className="flex items-start gap-3 rounded-lg bg-danger p-4 font-semibold text-white"
           >
