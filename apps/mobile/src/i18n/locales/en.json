@@ -197,7 +197,14 @@
         "failed": "We couldn't load more requests.",
         "retry": "Try again"
       },
-      "refreshFailed": "Couldn't refresh. Check your connection and try again."
+      "refreshFailed": "Couldn't refresh. Check your connection and try again.",
+      "banner": {
+        "received": "Jack got your request",
+        "findingPro": "Jack is finding a pro",
+        "quoteReady": "Quote ready",
+        "compare": "compare",
+        "hint": "Opens your request"
+      }
     },
     "pro": {
       "title": "Your jobs",

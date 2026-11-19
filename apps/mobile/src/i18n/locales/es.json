@@ -197,7 +197,14 @@
         "failed": "No pudimos cargar más solicitudes.",
         "retry": "Intentar de nuevo"
       },
-      "refreshFailed": "No se pudo actualizar. Revisa tu conexión e inténtalo de nuevo."
+      "refreshFailed": "No se pudo actualizar. Revisa tu conexión e inténtalo de nuevo.",
+      "banner": {
+        "received": "Jack recibió tu solicitud",
+        "findingPro": "Jack busca un profesional",
+        "quoteReady": "Presupuesto listo",
+        "compare": "comparar",
+        "hint": "Abre tu solicitud"
+      }
     },
     "pro": {
       "title": "Tus trabajos",
