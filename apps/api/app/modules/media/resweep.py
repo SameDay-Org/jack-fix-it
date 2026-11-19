@@ -12,10 +12,13 @@ through each module's own task:
   dispute photos one photo at a time, under a job id per row, so a repeated sweep's task dedupes
   against its own (#491 round 1);
 - a row another run holds now (its claim in app.modules.media.copy_store) is left to it;
-- fair progress (#491 round 1): each unit it queues (a request, a photo) is marked for one wait
-  window and skipped while marked, so up to MEDIA_SANITIZE_RESWEEP_BATCH_SIZE units are queued
-  per kind and run from up to SCAN_FACTOR times as many of the oldest rows: rows that keep
-  being postponed never hold every slot, and the rows behind them are reached on the next runs.
+- fair progress (#491 rounds 1 and 2): it reads up to SCAN_FACTOR times
+  MEDIA_SANITIZE_RESWEEP_BATCH_SIZE of the oldest rows per kind, skips the units (a request, a
+  photo) it queued within the wait window, and queues up to the batch size of the rest, never
+  queued first, then least recently queued, then oldest. When each unit was last queued is kept
+  in the queue's Redis (a sorted set per kind, trimmed to HISTORY_WINDOWS windows), so rows
+  that keep being postponed take turns with the others however the window expires: every unit
+  within the scan is queued within as many runs as there are units ahead of it.
 
 A copy is claimed per row (media_copies), so a sweep's copy never runs at once with another copy
 of the same row. Rows that failed for good (a file that can never be made safe) are never queued
@@ -25,6 +28,7 @@ only.
 """
 
 import logging
+import math
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
@@ -54,8 +58,11 @@ logger = logging.getLogger(__name__)
 
 SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 # How many of the oldest pending rows a run reads per unit it may queue: the reach behind
-# units that are marked or held.
+# units that are recent or held.
 SCAN_FACTOR: Final = 10
+# How many wait windows a unit's last queueing is remembered (a week at the default 60 min):
+# a count of windows, so the keep follows MEDIA_SANITIZE_RESWEEP_AFTER_MINUTES.
+HISTORY_WINDOWS: Final = 168
 
 
 def utc_now() -> datetime:
@@ -71,8 +78,23 @@ class _Unit:
     mark: str
 
 
+@dataclass(frozen=True)
+class _Kind:
+    """One kind of media row: its name in the counts, its rows' parent field (the claims' and
+    the history's namespace), and whether a unit is one row (photos) or a parent (requests)."""
+
+    name: str
+    field: str
+    per_row: bool
+
+
+_REQUESTS: Final = _Kind("requests", REQUEST_MEDIA_ROWS.parent_field, per_row=False)
+_JOBS: Final = _Kind("jobs", JobPhotoRows.parent_field, per_row=True)
+_DISPUTES: Final = _Kind("disputes", DisputePhotoRows.parent_field, per_row=True)
+
+
 def store_of(ctx: dict[str, Any], settings: Settings) -> MediaCopyStore:
-    """The rows' claims and the sweep's marks: the queue's own Redis (tests pass their own)."""
+    """The rows' claims and the sweep's history: the queue's own Redis (tests pass their own)."""
     store: MediaCopyStore | None = ctx.get("media_copy_store")
     if store is not None:
         return store
@@ -87,8 +109,8 @@ async def requeue_stale_media_copies(
     sessions: SessionFactory = ctx["session_factory"]
     settings: Settings = ctx["settings"]
     queue: JobQueue = ctx["redis"]
+    now = clock()
     window = timedelta(minutes=settings.media_sanitize_resweep_after_minutes)
-    before = clock() - window
     limit = settings.media_sanitize_resweep_batch_size
     timeout = settings.job_enqueue_timeout_seconds
     counts = {"requests": 0, "jobs": 0, "disputes": 0, "failed": 0}
@@ -96,67 +118,71 @@ async def requeue_stale_media_copies(
         try:
             async with sessions() as session:
                 scan = limit * SCAN_FACTOR
-                requests = await stale_pending_request_media(session, before, scan)
-                jobs = await stale_job_photos(session, before, scan)
-                disputes = await stale_dispute_photos(session, before, scan)
+                rows = {
+                    _REQUESTS: await stale_pending_request_media(session, now - window, scan),
+                    _JOBS: await stale_job_photos(session, now - window, scan),
+                    _DISPUTES: await stale_dispute_photos(session, now - window, scan),
+                }
             store = store_of(ctx, settings)
             chosen = {
-                "requests": await _choose(
-                    store, REQUEST_MEDIA_ROWS.parent_field, requests, limit, per_row=False
-                ),
-                "jobs": await _choose(store, JobPhotoRows.parent_field, jobs, limit, per_row=True),
-                "disputes": await _choose(
-                    store, DisputePhotoRows.parent_field, disputes, limit, per_row=True
-                ),
+                kind: await _choose(store, kind, found, limit, now=now, window=window)
+                for kind, found in rows.items()
             }
         # A batch that cannot be read, or a store that does not answer, ends the run; the next
         # run reads it again. By class only: a database error's text can hold SQL literals.
         except Exception as error:  # noqa: BLE001
             logger.error("media_resweep_unavailable", extra={"error": type(error).__name__})
             return
-        queued: list[str] = []
-        for unit in chosen["requests"]:
-            enqueued = enqueue_sanitize(queue, unit.parent_id, timeout)
-            if await _queue(counts, "requests", unit.parent_id, enqueued):
-                queued.append(unit.mark)
-        for unit in chosen["jobs"]:
-            enqueued = enqueue_photo_sanitize(queue, unit.parent_id, unit.row_ids, timeout)
-            if await _queue(counts, "jobs", unit.parent_id, enqueued):
-                queued.append(unit.mark)
-        for unit in chosen["disputes"]:
-            enqueued = enqueue_dispute_photo_sanitize(queue, unit.parent_id, unit.row_ids, timeout)
-            if await _queue(counts, "disputes", unit.parent_id, enqueued):
-                queued.append(unit.mark)
-        await _mark(store, queued, int(window.total_seconds()))
+        for kind, units in chosen.items():
+            queued: list[str] = []
+            for unit in units:
+                if await _queue(
+                    counts, kind.name, unit.parent_id, _enqueue(queue, kind, unit, timeout)
+                ):
+                    queued.append(unit.mark)
+            await _record(store, kind, queued, now, window)
     finally:
         logger.info("media_copies_requeued", extra={"queued": counts})
 
 
+def _enqueue(queue: JobQueue, kind: _Kind, unit: _Unit, timeout: float) -> Awaitable[bool]:
+    if kind is _REQUESTS:
+        return enqueue_sanitize(queue, unit.parent_id, timeout)
+    if kind is _JOBS:
+        return enqueue_photo_sanitize(queue, unit.parent_id, unit.row_ids, timeout)
+    return enqueue_dispute_photo_sanitize(queue, unit.parent_id, unit.row_ids, timeout)
+
+
 async def _choose(
     store: MediaCopyStore,
-    kind: str,
+    kind: _Kind,
     rows: Sequence[tuple[uuid.UUID, uuid.UUID]],
     limit: int,
     *,
-    per_row: bool,
+    now: datetime,
+    window: timedelta,
 ) -> list[_Unit]:
-    """Up to `limit` units from `rows` (oldest first): rows another run holds are left out, and
-    so are units the sweep queued within their window."""
-    held = await store.held([row_key(kind, row_id) for _, row_id in rows])
-    free = [(parent, row) for parent, row in rows if row_key(kind, row) not in held]
-    units: list[_Unit] = []
-    if per_row:
-        units = [_Unit(parent, (row,), row_key(kind, row)) for parent, row in free]
+    """Up to `limit` units from `rows` (oldest first): rows another run holds are left out,
+    and units queued within the window; the rest never queued first, then least recently
+    queued, then oldest."""
+    held = await store.held([row_key(kind.field, row_id) for _, row_id in rows])
+    free = [(parent, row) for parent, row in rows if row_key(kind.field, row) not in held]
+    units: list[_Unit]
+    if kind.per_row:
+        units = [_Unit(parent, (row,), row_key(kind.field, row)) for parent, row in free]
     else:
         grouped: dict[uuid.UUID, list[uuid.UUID]] = {}
         for parent, row in free:
             grouped.setdefault(parent, []).append(row)
         units = [
-            _Unit(parent, tuple(row_ids), row_key(kind, parent))
+            _Unit(parent, tuple(row_ids), row_key(kind.field, parent))
             for parent, row_ids in grouped.items()
         ]
-    recent = await store.recent([unit.mark for unit in units])
-    return [unit for unit in units if unit.mark not in recent][:limit]
+    last = await store.last_queued(kind.field, [unit.mark for unit in units])
+    since = (now - window).timestamp()
+    due = [unit for unit in units if last.get(unit.mark, -math.inf) <= since]
+    turns = sorted(range(len(due)), key=lambda index: (last.get(due[index].mark, -math.inf), index))
+    return [due[index] for index in turns][:limit]
 
 
 async def _queue(
@@ -176,10 +202,13 @@ async def _queue(
     return True
 
 
-async def _mark(store: MediaCopyStore, marks: Sequence[str], seconds: int) -> None:
-    """The units queued, marked for one window. A store that fails is logged: the next run may
-    then queue them again, which only repeats work."""
+async def _record(
+    store: MediaCopyStore, kind: _Kind, marks: Sequence[str], now: datetime, window: timedelta
+) -> None:
+    """The units queued, recorded at `now`. A store that fails is logged: the next runs may then
+    queue them again sooner, which only repeats work."""
+    keep = int(window.total_seconds()) * HISTORY_WINDOWS
     try:
-        await store.mark(marks, seconds)
+        await store.record_queued(kind.field, marks, now.timestamp(), keep)
     except (RedisError, OSError) as error:
-        logger.warning("media_resweep_mark_failed", extra={"error": type(error).__name__})
+        logger.warning("media_resweep_record_failed", extra={"error": type(error).__name__})

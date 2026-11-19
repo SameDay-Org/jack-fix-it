@@ -7,9 +7,12 @@ Redis: no schema change.
   out (a fault, an outage, the try's deadline, a cancel): only its own token is released.
   A worker that dies leaves a claim that expires on its own. Another run (a retry, the sweep's
   task, an earlier batch's task) finds the row held and leaves it to the holder.
-- A mark: the sweep marks each unit it queued (a request, or a photo) for one wait window, and
-  skips marked units on its next runs, so rows that keep being postponed (an outage that lasts)
-  never hold every slot: the rows behind them are reached (fair progress).
+- When each unit was last queued by the sweep (#491 round 2): a sorted set per kind (the unit's
+  key, the time in epoch seconds). The sweep skips units queued within the wait window and takes
+  the rest never queued first, then least recently queued: rows that keep being postponed (an
+  outage that lasts) take their turn, and the rows behind them are reached within as many runs
+  as there are units in the scan, however the window expires. The set expires with its kind's
+  sweeps, and entries older than its keep are trimmed on every write: it never grows unbounded.
 
 Keys carry ids only.
 """
@@ -46,12 +49,15 @@ class MediaCopyStore(Protocol):
         """The keys among these that a run holds now."""
         ...
 
-    async def recent(self, keys: Sequence[str]) -> set[str]:
-        """The units among these the sweep queued within their window."""
+    async def last_queued(self, kind: str, keys: Sequence[str]) -> dict[str, float]:
+        """When the sweep last queued each unit among these, in epoch seconds; units it never
+        queued (or forgot: past the keep) are left out."""
         ...
 
-    async def mark(self, keys: Sequence[str], seconds: int) -> None:
-        """Marks these units queued, for `seconds`."""
+    async def record_queued(
+        self, kind: str, keys: Sequence[str], at: float, keep_seconds: int
+    ) -> None:
+        """Records these units queued at `at`, and forgets entries older than `keep_seconds`."""
         ...
 
 
@@ -65,8 +71,8 @@ class RedisMediaCopyStore:
     def _claim_key(self, key: str) -> str:
         return f"{self._prefix}:claim:{key}"
 
-    def _mark_key(self, key: str) -> str:
-        return f"{self._prefix}:swept:{key}"
+    def _queued_key(self, kind: str) -> str:
+        return f"{self._prefix}:queued:{kind}"
 
     async def claim(self, key: str) -> str | None:
         token = uuid.uuid4().hex
@@ -81,15 +87,22 @@ class RedisMediaCopyStore:
     async def held(self, keys: Sequence[str]) -> set[str]:
         return await self._present([self._claim_key(key) for key in keys], keys)
 
-    async def recent(self, keys: Sequence[str]) -> set[str]:
-        return await self._present([self._mark_key(key) for key in keys], keys)
+    async def last_queued(self, kind: str, keys: Sequence[str]) -> dict[str, float]:
+        if not keys:
+            return {}
+        scores = await self._redis.zmscore(self._queued_key(kind), list(keys))
+        return {key: score for key, score in zip(keys, scores, strict=True) if score is not None}
 
-    async def mark(self, keys: Sequence[str], seconds: int) -> None:
+    async def record_queued(
+        self, kind: str, keys: Sequence[str], at: float, keep_seconds: int
+    ) -> None:
         if not keys:
             return
+        name = self._queued_key(kind)
         async with self._redis.pipeline(transaction=False) as pipe:
-            for key in keys:
-                pipe.set(self._mark_key(key), "1", ex=seconds)
+            pipe.zadd(name, dict.fromkeys(keys, at))
+            pipe.zremrangebyscore(name, "-inf", at - keep_seconds)
+            pipe.expire(name, keep_seconds)
             await pipe.execute()
 
     async def _present(self, stored: Sequence[str], keys: Sequence[str]) -> set[str]:

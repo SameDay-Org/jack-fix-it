@@ -4,13 +4,15 @@ tries, claims each row before it copies it, and the worker's sweep queues the co
 photo at a time, leaving rows another run holds and reaching rows behind postponed ones.
 
 The copier runs on the rolled-back test session with the storage in memory
-(tests/test_media_copies.py); the claims and marks are in memory too (MemoryStore), except
+(tests/test_media_copies.py); the claims and the sweep's history are in memory too
+(MemoryStore, which trims its history by its keep as Redis does, with no wall clock), except
 for the Redis store's own test; the sweep's queue records what it queued."""
 
 import asyncio
 import logging
 import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -58,10 +60,13 @@ KIND = REQUEST_MEDIA_ROWS.parent_field
 
 @dataclass
 class MemoryStore:
-    """The rows' claims and the sweep's marks, in memory, as RedisMediaCopyStore keeps them."""
+    """The rows' claims and the sweep's history, in memory, as RedisMediaCopyStore keeps
+    them: each kind's last-queued times, trimmed to the keep on every write. `skew` records
+    every write that many seconds late (a sweep slow between choosing and recording)."""
 
     claims: dict[str, str] = field(default_factory=dict)
-    marks: dict[str, int] = field(default_factory=dict)
+    queued: dict[str, dict[str, float]] = field(default_factory=dict)
+    skew: float = 0.0
     claimed: list[str] = field(default_factory=list)
 
     async def claim(self, key: str) -> str | None:
@@ -79,12 +84,16 @@ class MemoryStore:
     async def held(self, keys: Any) -> set[str]:
         return {key for key in keys if key in self.claims}
 
-    async def recent(self, keys: Any) -> set[str]:
-        return {key for key in keys if key in self.marks}
+    async def last_queued(self, kind: str, keys: Any) -> dict[str, float]:
+        history = self.queued.get(kind, {})
+        return {key: history[key] for key in keys if key in history}
 
-    async def mark(self, keys: Any, seconds: int) -> None:
+    async def record_queued(self, kind: str, keys: Any, at: float, keep_seconds: int) -> None:
+        history = self.queued.setdefault(kind, {})
         for key in keys:
-            self.marks[key] = seconds
+            history[key] = at + self.skew
+        for key in [key for key, when in history.items() if when < at - keep_seconds]:
+            del history[key]
 
 
 @pytest.fixture
@@ -368,7 +377,7 @@ async def test_a_row_behind_a_postponed_one_is_reached_with_a_batch_of_one(
     db_session: AsyncSession, storage: MemoryStorage, store: MemoryStore
 ) -> None:
     """The oldest request keeps being postponed (its copy never succeeds); a newer one's task
-    was lost. With a batch of one, the first run queues the oldest and marks it; the next run
+    was lost. With a batch of one, the first run queues the oldest and records it; the next run
     skips it for its window and queues the newer one."""
     oldest = await make_media(db_session, storage, gps_jpeg())
     newer = await make_media(db_session, storage, gps_jpeg())
@@ -384,9 +393,9 @@ async def test_a_row_behind_a_postponed_one_is_reached_with_a_batch_of_one(
 
     assert list(first.jobs) == [sanitize_job_id(oldest.request_id)]
     assert list(second.jobs) == [sanitize_job_id(newer.request_id)]
-    assert store.marks == {
-        row_key(KIND, oldest.request_id): int(AFTER.total_seconds()),
-        row_key(KIND, newer.request_id): int(AFTER.total_seconds()),
+    assert set(store.queued[KIND]) == {
+        row_key(KIND, oldest.request_id),
+        row_key(KIND, newer.request_id),
     }
 
 
@@ -417,8 +426,8 @@ async def test_one_queue_failure_never_stops_the_others_and_leaves_it_unmarked(
         await requeue_stale_media_copies(sweep_ctx(db_session, queue, store), clock=later)
 
     assert list(queue.jobs) == [sanitize_job_id(second.request_id)]
-    # The refused one is not marked: the next run tries it again.
-    assert list(store.marks) == [row_key(KIND, second.request_id)]
+    # The refused one is not recorded: the next run tries it again first.
+    assert list(store.queued[KIND]) == [row_key(KIND, second.request_id)]
     assert first.request_id
     [failed] = [r for r in caplog.records if r.getMessage() == "media_resweep_enqueue_failed"]
     assert failed.levelno == logging.ERROR
@@ -459,8 +468,10 @@ async def test_the_redis_store_claims_once_releases_by_token_and_expires() -> No
         assert 0 < await redis.ttl(f"{prefix}:claim:{key}") <= 30  # a dead worker's ends
         await store.release(key, token)
         assert await store.held([key]) == set()
-        await store.mark([key], 60)
-        assert await store.recent([key, "other"]) == {key}
+        await store.record_queued(KIND, [key], 1_000.0, 60)
+        await store.record_queued(KIND, ["other"], 2_000.0, 60)  # trims the first: too old
+        assert await store.last_queued(KIND, [key, "other"]) == {"other": 2_000.0}
+        assert 0 < await redis.ttl(f"{prefix}:queued:{KIND}") <= 60
     finally:
         keys = [k async for k in redis.scan_iter(match=f"{prefix}:*")]
         if keys:
@@ -542,3 +553,139 @@ async def test_a_final_try_never_fails_a_row_another_run_is_copying(
     assert (outcome.ready, outcome.failed) == (1, 0)
     assert (await row(db_session, later_row)).safe_status == MediaSafeStatus.PENDING
     assert store.claims == {row_key(KIND, later_row): holder}
+
+
+# --- #491 round 2: fair progress across the window's expiry -----------------------------------
+
+
+def fixed(when: datetime) -> Callable[[], datetime]:
+    """A clock that reads `when`."""
+    return lambda: when
+
+
+async def five_units(
+    session: AsyncSession, storage: MemoryStorage, kind: str
+) -> tuple[list[str], str]:
+    """Five pending units of `kind`, oldest first: the queue job ids of the four oldest, which
+    keep being postponed, and of the newest, a healthy one whose task was lost."""
+    hours_ago = [5, 4, 3, 2, 1]
+    if kind == "requests":
+        media = [await make_media(session, storage, gps_jpeg()) for _ in hours_ago]
+        for item, hours in zip(media, hours_ago, strict=True):
+            await session.execute(
+                update(RequestMedia)
+                .where(RequestMedia.id == item.media_id)
+                .values(created_at=datetime.now(UTC) - timedelta(hours=hours))
+            )
+        ids = [sanitize_job_id(item.request_id) for item in media]
+    else:
+        world = await build_world(session)
+        job = await make_job(session, world, JobStatus.DISPUTED)
+        dispute = Dispute(
+            job_id=job.id,
+            opened_by=world.customer.id,
+            reason_code=DisputeReason.DAMAGE,
+            description="zq491 a dent",
+        )
+        session.add(dispute)
+        await session.flush()
+        photos: list[JobPhoto | DisputePhoto] = []
+        for hours in hours_ago:
+            created = datetime.now(UTC) - timedelta(hours=hours)
+            if kind == "jobs":
+                photos.append(
+                    JobPhoto(
+                        job_id=job.id,
+                        kind=JobPhotoKind.AFTER,
+                        file_key=f"u/{world.pro.id}/job_photo/{uuid.uuid4().hex}.jpg",
+                        uploaded_by=world.pro.id,
+                        created_at=created,
+                    )
+                )
+            else:
+                photos.append(
+                    DisputePhoto(
+                        dispute_id=dispute.id,
+                        file_key=f"u/{world.customer.id}/dispute_photo/{uuid.uuid4().hex}.jpg",
+                        uploaded_by=world.customer.id,
+                        created_at=created,
+                    )
+                )
+        session.add_all(photos)
+        await session.flush()
+        prefix = "sanitize-job-photos" if kind == "jobs" else "sanitize-dispute-photos"
+        ids = [f"{prefix}:{photo.id}" for photo in photos]
+    await session.commit()
+    return ids[:4], ids[4]
+
+
+@pytest.mark.parametrize("skew", [0.0, 1.0], ids=["recorded_at_once", "recorded_1s_late"])
+@pytest.mark.parametrize("kind", ["requests", "jobs", "disputes"])
+async def test_a_healthy_unit_behind_four_postponed_ones_is_reached_across_the_window(
+    db_session: AsyncSession, storage: MemoryStorage, kind: str, skew: float
+) -> None:
+    """Batch 1, a sweep every 30 minutes, a 60-minute window, an expiring history: four units
+    that are never copied (an outage that lasts) sit ahead of a healthy one. Oldest-first after
+    the window expires would serve A, B, A, B... forever; least recently queued first reaches
+    the healthy one within five runs, and every run queues exactly one unit."""
+    store = MemoryStore(skew=skew)
+    postponed, healthy = await five_units(db_session, storage, kind)
+    start = later()
+    picked: list[list[str]] = []
+    for run in range(12):
+        queue = RecordingQueue()
+        await requeue_stale_media_copies(
+            sweep_ctx(db_session, queue, store, media_sanitize_resweep_batch_size=1),
+            clock=fixed(start + timedelta(minutes=30 * run)),
+        )
+        picked.append(list(queue.jobs))
+
+    assert all(len(ids) == 1 for ids in picked), picked
+    first_healthy = next(run for run, ids in enumerate(picked) if healthy in ids)
+    assert first_healthy < 5, picked
+    # Every unit takes its turn: none of the five is starved.
+    assert {job_id for ids in picked for job_id in ids} == {*postponed, healthy}
+
+
+async def test_a_healthy_image_behind_videos_ffmpeg_cannot_copy_is_copied(
+    db_session: AsyncSession, store: MemoryStore
+) -> None:
+    """Database-backed: four older requests hold a video each and ffmpeg is missing, so every
+    copy of them is postponed (their last try); a newer request's image was never queued. Each
+    sweep's queued copy is run on its last try: the image is ready within five runs, the videos
+    stay pending, never failed."""
+    storage = MemoryStorage()
+    videos = [await make_media(db_session, storage, b"not decodable", ".mp4") for _ in range(4)]
+    image = await make_media(db_session, storage, gps_jpeg())
+    for hours, item in zip([5, 4, 3, 2], videos, strict=True):
+        await db_session.execute(
+            update(RequestMedia)
+            .where(RequestMedia.id == item.media_id)
+            .values(created_at=datetime.now(UTC) - timedelta(hours=hours))
+        )
+    await db_session.commit()
+    copy_ctx = {
+        **ctx(db_session, storage, MAX_TRIES + 1),
+        "settings": make_settings(
+            media_sanitize_max_tries=MAX_TRIES,
+            ffmpeg_path="missing-ffmpeg-491",
+            ffprobe_path="missing-ffprobe-491",
+        ),
+        "media_copy_store": store,
+    }
+    start = later()
+    for run in range(5):
+        queue = RecordingQueue()
+        await requeue_stale_media_copies(
+            sweep_ctx(db_session, queue, store, media_sanitize_resweep_batch_size=1),
+            clock=fixed(start + timedelta(minutes=30 * run)),
+        )
+        for function, args in queue.jobs.values():
+            assert function == "sanitize_request_media"
+            await sanitize_request_media(copy_ctx, str(args[0]))
+        if (await row(db_session, image.media_id)).safe_status == MediaSafeStatus.READY:
+            break
+    else:
+        pytest.fail("the healthy image was never copied")
+    for video in videos:
+        assert (await row(db_session, video.media_id)).safe_status == MediaSafeStatus.PENDING
