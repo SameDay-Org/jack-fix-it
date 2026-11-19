@@ -126,6 +126,38 @@ def open_dispute_jobs() -> Subquery:
     return DisputeRepository.open_jobs()
 
 
+@dataclass(frozen=True)
+class ReleasedDispute:
+    """A job's dispute resolved with a release (#76), as its transfer reads it: how much of the
+    pro's payout to pay, and the admin whose decision the transfer carries out."""
+
+    pro_release_cents: int
+    resolved_by: uuid.UUID
+
+
+async def released_dispute(session: AsyncSession, job_id: uuid.UUID) -> ReleasedDispute | None:
+    """The job's dispute when an admin resolved it with a release, full or partial; None
+    otherwise (no dispute, still open, or refunded)."""
+    dispute = await DisputeRepository(session).released_of_job(job_id)
+    if dispute is None or dispute.pro_release_cents is None or dispute.resolved_by is None:
+        return None
+    return ReleasedDispute(
+        pro_release_cents=dispute.pro_release_cents, resolved_by=dispute.resolved_by
+    )
+
+
+def released_dispute_jobs() -> Subquery:
+    """The job (`job_id`) of every dispute resolved with a release and the part released
+    (`pro_release_cents`), as a subquery: the transfer sweep reads those jobs as well as the
+    confirmed ones (#76), and a pro's earnings show them on their way (#70)."""
+    return DisputeRepository.released_jobs()
+
+
+def dispute_metric_facts() -> Subquery:
+    """Each dispute's `created_at`, as a subquery for the staff metrics' own query (#84)."""
+    return DisputeRepository.metric_facts()
+
+
 class DisputeService:
     def __init__(
         self,

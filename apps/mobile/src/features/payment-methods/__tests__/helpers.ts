@@ -47,7 +47,6 @@ export const NEW = card({ id: "pm_new", last4: "5556", exp_month: 1, exp_year: 2
 // Recognizable values: no log line, cache entry, toast or screen may ever carry one of them.
 export const SETUP = {
   client_secret: "seti_123_secret_456",
-  ephemeral_key_secret: "ek_test_789",
   customer_id: "cus_jack",
   publishable_key: "pk_test_jack",
 };

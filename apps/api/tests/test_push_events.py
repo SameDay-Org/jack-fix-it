@@ -67,6 +67,18 @@ CALLERS = (
     Caller("push_job_done", "customer_id", "job_done:{job_id}", "/requests/{request_id}/job"),
     Caller("push_job_confirmed", "pro_user_id", "job_confirmed:{job_id}", "/jobs/{job_id}"),
     Caller("push_job_disputed", "pro_user_id", "job_disputed:{job_id}", "/jobs/{job_id}"),
+    *(
+        Caller(f"push_{name}", "customer_id", f"{name}:{{job_id}}", "/requests/{request_id}/job")
+        for name in ("dispute_refunded", "dispute_partly_refunded", "dispute_closed")
+    ),
+    *(
+        Caller(f"push_{name}", "pro_user_id", f"{name}:{{job_id}}", "/jobs/{job_id}")
+        for name in (
+            "dispute_payout_released",
+            "dispute_payout_partly_released",
+            "dispute_payout_refunded",
+        )
+    ),
     Caller(
         "push_booking_not_completed",
         "customer_id",

@@ -229,6 +229,123 @@ async def push_job_disputed(
     )
 
 
+async def push_dispute_refunded(
+    queue: JobQueue,
+    *,
+    customer_id: uuid.UUID,
+    job_id: uuid.UUID,
+    request_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the customer, once an admin refunded their payment in full (#76): one resolution per job.
+    Opens the job of their request."""
+    await _job_push(
+        queue, customer_id, "dispute_refunded", job_id, request_id, public_code, timeout_seconds
+    )
+
+
+async def push_dispute_partly_refunded(
+    queue: JobQueue,
+    *,
+    customer_id: uuid.UUID,
+    job_id: uuid.UUID,
+    request_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the customer, once an admin refunded part of their payment (#76): one resolution per job.
+    Opens the job of their request."""
+    await _job_push(
+        queue,
+        customer_id,
+        "dispute_partly_refunded",
+        job_id,
+        request_id,
+        public_code,
+        timeout_seconds,
+    )
+
+
+async def push_dispute_closed(
+    queue: JobQueue,
+    *,
+    customer_id: uuid.UUID,
+    job_id: uuid.UUID,
+    request_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the customer, once an admin closed their report with the payment released to the pro
+    (#76): one resolution per job. Opens the job of their request."""
+    await _job_push(
+        queue, customer_id, "dispute_closed", job_id, request_id, public_code, timeout_seconds
+    )
+
+
+async def push_dispute_payout_released(
+    queue: JobQueue,
+    *,
+    pro_user_id: uuid.UUID,
+    job_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the pro, once an admin released their payout in full (#76): one resolution per job. Opens
+    the job."""
+    await _push(
+        queue,
+        pro_user_id,
+        message_id=f"dispute_payout_released:{job_id}",
+        kind="dispute_payout_released",
+        params={"public_code": public_code},
+        deep_link=f"/jobs/{job_id}",
+        timeout_seconds=timeout_seconds,
+    )
+
+
+async def push_dispute_payout_partly_released(
+    queue: JobQueue,
+    *,
+    pro_user_id: uuid.UUID,
+    job_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the pro, once an admin released part of their payout (#76): one resolution per job. Opens
+    the job."""
+    await _push(
+        queue,
+        pro_user_id,
+        message_id=f"dispute_payout_partly_released:{job_id}",
+        kind="dispute_payout_partly_released",
+        params={"public_code": public_code},
+        deep_link=f"/jobs/{job_id}",
+        timeout_seconds=timeout_seconds,
+    )
+
+
+async def push_dispute_payout_refunded(
+    queue: JobQueue,
+    *,
+    pro_user_id: uuid.UUID,
+    job_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the pro, once an admin refunded the customer in full: no payout (#76): one resolution per
+    job. Opens the job."""
+    await _push(
+        queue,
+        pro_user_id,
+        message_id=f"dispute_payout_refunded:{job_id}",
+        kind="dispute_payout_refunded",
+        params={"public_code": public_code},
+        deep_link=f"/jobs/{job_id}",
+        timeout_seconds=timeout_seconds,
+    )
+
+
 async def push_booking_not_completed(
     queue: JobQueue,
     *,

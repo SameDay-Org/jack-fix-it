@@ -306,23 +306,35 @@ describe("a write belongs to the session it was asked in", () => {
   /** The GETs sent for the session that asked (the first one, before the switch). */
   const firstSessionGets = () => jest.mocked(apiGet).mock.calls.length - getsAfterSwitch;
   let getsAfterSwitch = 0;
-  const switchSession = async (client: QueryClient, book: SavedAddress[]) => {
+  type Book = { client: QueryClient; rerender: (props: unknown) => Promise<void> };
+  /**
+   * Switches the session under the mounted book, and has the book read the new account's copy
+   * before anything is measured. Whether the hook moves to the new cached book on its own depends
+   * on when it next re-renders: in about half the runs it never did, and on a slow runner it did
+   * after the count was taken, so the new account's GET was counted as the old one's. The test
+   * re-renders it: the hook moves to the new book and sends its one GET (a re-render on the same
+   * book sends none), and that GET is answered before the old session's write lands.
+   */
+  const switchSession = async ({ client, rerender }: Book, book: SavedAddress[]) => {
     const before = jest.mocked(apiGet).mock.calls.length;
     await act(async () => nextSession(client, book));
-    // The mounted book reads the new account's copy: let that settle inside act.
-    await act(() => settle());
-    getsAfterSwitch = jest.mocked(apiGet).mock.calls.length - before;
+    await rerender(undefined);
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(before + 1));
+    await waitFor(() => expect(client.isFetching({ queryKey: SAVED_ADDRESSES_QUERY_KEY })).toBe(0));
+    getsAfterSwitch = 1;
   };
   const CABIN = savedAddress({ id: "cabin", label: "Cabin", is_default: true });
 
   it("a failure after the session changed puts nothing back and shows nothing", async () => {
     const answer = deferred<undefined>();
     jest.mocked(apiDelete).mockReturnValue(answer.promise);
-    const { result, client } = await renderBook();
+    const { result, client, rerender } = await renderBook();
 
     await act(async () => result.current.remove(WORK));
-    await switchSession(client, [CABIN]);
+    await switchSession({ client, rerender }, [CABIN]);
     await act(async () => answer.reject(new ApiError(500, "internal_error")));
+    // Anything the late failure set off runs before anything is counted.
+    await act(() => settle());
 
     expect(cached(client)).toEqual(["cabin*"]);
     expect(toast()).toBeNull();
@@ -333,11 +345,13 @@ describe("a write belongs to the session it was asked in", () => {
   it("an answer after the session changed draws nothing and says nothing", async () => {
     const answer = deferred<SavedAddress>();
     jest.mocked(apiPatch).mockReturnValue(answer.promise);
-    const { result, client } = await renderBook();
+    const { result, client, rerender } = await renderBook();
 
     await act(async () => result.current.makeDefault(MOM));
-    await switchSession(client, [CABIN]);
+    await switchSession({ client, rerender }, [CABIN]);
     await act(async () => answer.resolve({ ...MOM, is_default: true }));
+    // Anything the late answer set off runs before anything is counted.
+    await act(() => settle());
 
     expect(cached(client)).toEqual(["cabin*"]);
     expect(announce).not.toHaveBeenCalled();
@@ -347,7 +361,7 @@ describe("a write belongs to the session it was asked in", () => {
   it("a new address saved after the session changed never joins the next account's book", async () => {
     const answer = deferred<SavedAddress>();
     jest.mocked(apiPost).mockReturnValue(answer.promise);
-    const { result, client } = await renderBook();
+    const { result, client, rerender } = await renderBook();
     const body = { line1: "1 Bay St", city: "Miami", state: "FL", zip_code: "33101" };
 
     let saving: Promise<unknown> = Promise.resolve();
@@ -362,7 +376,7 @@ describe("a write belongs to the session it was asked in", () => {
       { ...body, label: "Office", is_default: false },
       { auth: true, generation: 1 },
     );
-    await switchSession(client, [CABIN]);
+    await switchSession({ client, rerender }, [CABIN]);
     await act(async () => {
       answer.resolve(savedAddress({ id: "office", label: "Office", is_default: false }));
       await saving;
@@ -376,11 +390,11 @@ describe("a write belongs to the session it was asked in", () => {
     const next = deferred<SavedAddress>();
     jest.mocked(apiDelete).mockReturnValue(old.promise);
     jest.mocked(apiPatch).mockReturnValue(next.promise);
-    const { result, client } = await renderBook();
+    const { result, client, rerender } = await renderBook();
     const LAKE = savedAddress({ id: "lake", label: "Lake", is_default: false });
 
     await act(async () => result.current.remove(WORK));
-    await switchSession(client, [CABIN, LAKE]);
+    await switchSession({ client, rerender }, [CABIN, LAKE]);
     // The first account's writes in flight went with its cached book, at the sign-out.
     expect(client.getQueryCache().hasListeners()).toBe(false);
     await act(async () => result.current.makeDefault(LAKE));

@@ -2825,7 +2825,7 @@
           "payments"
         ],
         "summary": "Pay for the quote I accepted",
-        "description": "What the Payment Sheet needs to charge the customer for the quote they accepted: the\nPaymentIntent's client secret, the customer and an ephemeral key for it, the publishable\nkey, and the amount, the tax and the total shown before paying. The amounts are the\naccepted quote's, computed on the server; the body takes no field. The first call creates\nthe PaymentIntent; later calls return the same one (a new ephemeral key each time), until\nthe payment succeeds (then the job exists: 409). The pro is checked again on every call:\none who can no longer be hired is a 409, and nothing is created.",
+        "description": "What the Payment Sheet needs to charge the customer for the quote they accepted: the\nPaymentIntent's client secret, the customer and a CustomerSession for it (the sheet lists\nthe saved cards, never removes one or offers to save one; the ephemeral key is deprecated),\nthe publishable\nkey, and the amount, the tax and the total shown before paying. The amounts are the\naccepted quote's, computed on the server; the body takes no field. The first call creates\nthe PaymentIntent; later calls return the same one (a new session each time), until\nthe payment succeeds (then the job exists: 409). The pro is checked again on every call:\none who can no longer be hired is a 409, and nothing is created.",
         "operationId": "create_payment_v1_requests__request_id__quotes__quote_id__payment_post",
         "security": [
           {
@@ -3040,7 +3040,7 @@
           "payment-methods"
         ],
         "summary": "Start adding a card to my wallet",
-        "description": "What the Payment Sheet needs, in setup mode, to save a card: a new SetupIntent's client\nsecret, the caller's Stripe Customer (created on the first call, the same one ever after)\nand a new ephemeral key for it, and the publishable key. The card data goes from the app to\nStripe, never through this API. The body takes no field.",
+        "description": "What the Payment Sheet needs, in setup mode, to save a card: a new SetupIntent's client\nsecret, the caller's Stripe Customer (created on the first call, the same one ever after)\nand the publishable key; ephemeral_key_secret is deprecated and always null (#253c: the\nsetup sheet opens without the customer). The card data goes from the app to\nStripe, never through this API. The body takes no field.",
         "operationId": "create_setup_intent_v1_me_payment_methods_setup_intent_post",
         "responses": {
           "200": {
@@ -7655,6 +7655,427 @@
         }
       }
     },
+    "/v1/admin/disputes": {
+      "get": {
+        "tags": [
+          "disputes"
+        ],
+        "summary": "List disputes (staff)",
+        "description": "Disputes for the BDC and admins, oldest first (the longest waiting on top): the\nrequest's public code, the reason, the money, the parties' first names, when it was\nopened, and how it was resolved. No text, no photo: those are in the audited detail.",
+        "operationId": "list_disputes_v1_admin_disputes_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DisputeStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "open or resolved; every dispute when absent.",
+              "title": "Status"
+            },
+            "description": "open or resolved; every dispute when absent."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "At most this many (capped at REQUEST_LIST_MAX_LIMIT).",
+              "title": "Limit"
+            },
+            "description": "At most this many (capped at REQUEST_LIST_MAX_LIMIT)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffDisputeList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a bad status or limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/disputes/{dispute_id}": {
+      "get": {
+        "tags": [
+          "disputes"
+        ],
+        "summary": "Read a dispute (staff)",
+        "description": "A dispute in full: both sides' text as stored (contact details masked), the photos'\nsafe copies (signed URLs), the job's history, its payment, refund and transfer, and the\nresolution with its note. Every read is recorded in the audit log.",
+        "operationId": "read_dispute_v1_admin_disputes__dispute_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dispute_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Dispute Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffDisputeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a malformed id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no dispute with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/disputes/{dispute_id}/resolve": {
+      "post": {
+        "tags": [
+          "disputes"
+        ],
+        "summary": "Resolve a dispute (admin)",
+        "description": "Settles the dispute once. `release`: the pro is paid their payout in full; the job\nmoves to paid_out once the transfer is made. `refund`: the customer's total, tax included,\ngoes back to their payment method; the job moves to refunded; no transfer. `partial`: the\npro is paid `pro_release_cents` and the customer gets back the share of their total that\nis not released (rounded half up to the cent); the platform keeps the rest. The amounts\ncome from the job's frozen payment, never from the client beyond `pro_release_cents`.\nSending the same decision again completes what is missing and changes nothing else; a\ndifferent one after the resolution is a 409. Both sides are notified, never with the\nnote, which is kept with the dispute and in the audit log.",
+        "operationId": "resolve_dispute_v1_admin_disputes__dispute_id__resolve_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dispute_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Dispute Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisputeResolveIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisputeResolutionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a malformed id, an unknown decision, pro_release_cents on a release or a refund (or missing on a partial), or a blank note (at most 1000 characters). invalid_split: pro_release_cents is not more than 0 and less than the pro's payout.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only admins resolve disputes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no dispute with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "dispute_already_resolved: resolved with another decision or split (the same one again answers 200). refund_already_attempted: a refund of another amount was tried and the dispute is still open; only the same decision may be retried. resolution_in_progress: another resolve is calling Stripe; retry in a few minutes. dispute_needs_review: the job's payment cannot be refunded as is, or Stripe holds refunds that cannot be matched; nothing is created in Stripe.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "payments_error: Stripe refused the refund; the dispute stays open and the job disputed. The same decision can be sent again, but Stripe answers it with the same refusal for 24 h (one idempotency key per refund).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: refunds are not configured. payments_unavailable: Stripe is not reachable; the dispute stays open, the same decision can be sent again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/metrics": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "The dashboard's metrics (staff)",
+        "description": "The MVP exit metrics over whole days, both inclusive (default: the last\nMETRICS_DEFAULT_RANGE_DAYS days, today included). Ratios come with their numerator and\ndenominator (null when the denominator is 0), each figure with its formula's key\n(docs/kpis.md), and a per-day series. Aggregates only: no name, contact, address or id.\nRevenue is gross of refunds until they are recorded (`refunds_netted`).",
+        "operationId": "read_metrics_v1_admin_metrics_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The first day, YYYY-MM-DD.",
+              "title": "From"
+            },
+            "description": "The first day, YYYY-MM-DD."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The last day, YYYY-MM-DD, inclusive (default: today).",
+              "title": "To"
+            },
+            "description": "The last day, YYYY-MM-DD, inclusive (default: today)."
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "An IANA time zone the days are read in (default: BUSINESS_TIME_ZONE).",
+              "title": "Tz"
+            },
+            "description": "An IANA time zone the days are read in (default: BUSINESS_TIME_ZONE)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a date that is not YYYY-MM-DD. invalid_range: `from` after `to`, a range longer than METRICS_MAX_RANGE_DAYS days, or `tz` not an IANA time zone.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than METRICS_READ_LIMIT reads in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/users/me/rating": {
       "get": {
         "tags": [
@@ -7807,6 +8228,25 @@
           "zip_code"
         ],
         "title": "AddressOut"
+      },
+      "AmountMetric": {
+        "properties": {
+          "formula": {
+            "$ref": "#/components/schemas/MetricFormula"
+          },
+          "value": {
+            "type": "integer",
+            "title": "Value",
+            "description": "Integer cents (USD)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "formula",
+          "value"
+        ],
+        "title": "AmountMetric"
       },
       "ApprovalBlocker": {
         "properties": {
@@ -9265,6 +9705,134 @@
         "title": "DisputeResolution",
         "description": "How an admin settles a dispute (#76)."
       },
+      "DisputeResolutionOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DisputeStatus"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DisputeResolution"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pro_release_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Release Cents",
+            "description": "What the pro is paid; null while open."
+          },
+          "customer_refund_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Refund Cents",
+            "description": "What the customer gets back; null while open."
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "job_status": {
+            "$ref": "#/components/schemas/JobStatus",
+            "description": "disputed until the money moved: paid_out once the transfer to the pro is made (a release, full or partial), refunded at once for a full refund."
+          },
+          "refund": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RefundOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The refund, when the decision has one."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "job_id",
+          "status",
+          "resolution",
+          "pro_release_cents",
+          "customer_refund_cents",
+          "resolved_at",
+          "job_status",
+          "refund"
+        ],
+        "title": "DisputeResolutionOut",
+        "description": "Where the dispute stands after a resolve (#76)."
+      },
+      "DisputeResolveIn": {
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/ResolutionDecision"
+          },
+          "pro_release_cents": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Release Cents",
+            "description": "partial only (required there, refused otherwise): the part of the pro's payout to release, in integer cents, more than 0 and less than the payout. The customer's refund is computed from it on the server."
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Note",
+            "description": "Why, for the record (staff only: never shown to the customer or the pro, never logged). Kept with the dispute and in the audit log."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "decision",
+          "note"
+        ],
+        "title": "DisputeResolveIn"
+      },
       "DisputeStatus": {
         "type": "string",
         "enum": [
@@ -10240,6 +10808,123 @@
         ],
         "title": "MediaOut"
       },
+      "MetricFormula": {
+        "type": "string",
+        "enum": [
+          "first_response_minutes",
+          "contact_rate",
+          "lead_to_job",
+          "completion_rate",
+          "customer_rating",
+          "pro_rating",
+          "dispute_rate",
+          "repeat_rate",
+          "gmv",
+          "revenue_gross_of_refunds"
+        ],
+        "title": "MetricFormula"
+      },
+      "Metrics": {
+        "properties": {
+          "avg_first_response_minutes": {
+            "$ref": "#/components/schemas/ResponseTimeMetric"
+          },
+          "contact_rate": {
+            "$ref": "#/components/schemas/RatioMetric"
+          },
+          "lead_to_job": {
+            "$ref": "#/components/schemas/RatioMetric"
+          },
+          "completion_rate": {
+            "$ref": "#/components/schemas/RatioMetric"
+          },
+          "customer_rating_avg": {
+            "$ref": "#/components/schemas/RatingMetric",
+            "description": "How pros rate their customers."
+          },
+          "pro_rating_avg": {
+            "$ref": "#/components/schemas/RatingMetric",
+            "description": "How customers rate their pros."
+          },
+          "dispute_rate": {
+            "$ref": "#/components/schemas/RatioMetric"
+          },
+          "repeat_rate": {
+            "$ref": "#/components/schemas/RatioMetric"
+          },
+          "gmv_cents": {
+            "$ref": "#/components/schemas/AmountMetric"
+          },
+          "revenue_cents": {
+            "$ref": "#/components/schemas/AmountMetric"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "avg_first_response_minutes",
+          "contact_rate",
+          "lead_to_job",
+          "completion_rate",
+          "customer_rating_avg",
+          "pro_rating_avg",
+          "dispute_rate",
+          "repeat_rate",
+          "gmv_cents",
+          "revenue_cents"
+        ],
+        "title": "Metrics"
+      },
+      "MetricsOut": {
+        "properties": {
+          "from_date": {
+            "type": "string",
+            "format": "date",
+            "title": "From Date",
+            "description": "The first day read, in `time_zone`."
+          },
+          "to_date": {
+            "type": "string",
+            "format": "date",
+            "title": "To Date",
+            "description": "The last day read, in `time_zone` (inclusive)."
+          },
+          "time_zone": {
+            "type": "string",
+            "title": "Time Zone",
+            "examples": [
+              "America/New_York"
+            ]
+          },
+          "refunds_netted": {
+            "type": "boolean",
+            "title": "Refunds Netted",
+            "description": "Whether revenue_cents is net of refunds. False until #76's refunds land: revenue is then the platform's fee as charged."
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/Metrics"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesPoint"
+            },
+            "type": "array",
+            "title": "Series",
+            "description": "One point per day of the range, in order."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "from_date",
+          "to_date",
+          "time_zone",
+          "refunds_netted",
+          "metrics",
+          "series"
+        ],
+        "title": "MetricsOut"
+      },
       "MultiChoiceQuestion": {
         "properties": {
           "key": {
@@ -10989,10 +11674,16 @@
             "title": "Customer Id",
             "description": "The customer's Stripe Customer id, for the sheet."
           },
+          "customer_session_client_secret": {
+            "type": "string",
+            "title": "Customer Session Client Secret",
+            "description": "A CustomerSession's client secret, new on each call: the sheet lists the customer's saved cards with it, and Stripe lets it neither remove one nor offer to save a new one (cards are added in the wallet). Shown once per call, never logged."
+          },
           "ephemeral_key_secret": {
             "type": "string",
             "title": "Ephemeral Key Secret",
-            "description": "A short-lived key that lets the sheet act for the customer; new on each call."
+            "description": "Deprecated (#253c): app builds before the CustomerSession pass it to the sheet, which then has full rights over the customer's cards. Use customer_session_client_secret; this field is removed in a later release.",
+            "deprecated": true
           },
           "publishable_key": {
             "type": "string",
@@ -11028,6 +11719,7 @@
         "required": [
           "payment_intent_client_secret",
           "customer_id",
+          "customer_session_client_secret",
           "ephemeral_key_secret",
           "publishable_key",
           "amount_cents",
@@ -11037,6 +11729,68 @@
         ],
         "title": "PaymentSheetOut",
         "description": "What the app's Payment Sheet (#59) needs, plus what the customer sees before paying.\nNever the pro's payout or the platform's fee."
+      },
+      "PaymentStatus": {
+        "type": "string",
+        "enum": [
+          "requires_payment",
+          "processing",
+          "succeeded",
+          "failed",
+          "canceled"
+        ],
+        "title": "PaymentStatus",
+        "description": "Where a payment stands (internal; the customer sees the request's status). Created\n`requires_payment`; the payment webhooks (#61) move it on from the PaymentIntent's events."
+      },
+      "PaymentSummaryOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "amount_cents": {
+            "type": "integer",
+            "title": "Amount Cents"
+          },
+          "tax_cents": {
+            "type": "integer",
+            "title": "Tax Cents"
+          },
+          "customer_total_cents": {
+            "type": "integer",
+            "title": "Customer Total Cents"
+          },
+          "platform_fee_cents": {
+            "type": "integer",
+            "title": "Platform Fee Cents"
+          },
+          "pro_payout_cents": {
+            "type": "integer",
+            "title": "Pro Payout Cents"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PaymentStatus"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "amount_cents",
+          "tax_cents",
+          "customer_total_cents",
+          "platform_fee_cents",
+          "pro_payout_cents",
+          "currency",
+          "status"
+        ],
+        "title": "PaymentSummaryOut",
+        "description": "A job's payment as staff see it (#76): its amounts, frozen when it was made."
       },
       "PayoutStatus": {
         "type": "string",
@@ -12474,6 +13228,38 @@
         "title": "QuoteStatus",
         "description": "Internal states (docs/glossary.md). Transitions belong to the state machine (#60)."
       },
+      "RatingMetric": {
+        "properties": {
+          "formula": {
+            "$ref": "#/components/schemas/MetricFormula"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value",
+            "description": "The mean overall rating (1 to 5), to 2 decimals; null with no review."
+          },
+          "denominator": {
+            "type": "integer",
+            "title": "Denominator",
+            "description": "Reviews counted."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "formula",
+          "value",
+          "denominator"
+        ],
+        "title": "RatingMetric"
+      },
       "RatingOut": {
         "properties": {
           "average": {
@@ -12501,6 +13287,43 @@
           "count"
         ],
         "title": "RatingOut"
+      },
+      "RatioMetric": {
+        "properties": {
+          "formula": {
+            "$ref": "#/components/schemas/MetricFormula"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value",
+            "description": "numerator / denominator, to 4 decimals; null when the denominator is 0."
+          },
+          "numerator": {
+            "type": "integer",
+            "title": "Numerator"
+          },
+          "denominator": {
+            "type": "integer",
+            "title": "Denominator"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "formula",
+          "value",
+          "numerator",
+          "denominator"
+        ],
+        "title": "RatioMetric",
+        "description": "`numerator` of `denominator`, so the panel can show \"12 of 40\"."
       },
       "ReadinessResponse": {
         "properties": {
@@ -12546,6 +13369,109 @@
           "refresh_token"
         ],
         "title": "RefreshTokenRequest"
+      },
+      "RefundOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "amount_cents": {
+            "type": "integer",
+            "title": "Amount Cents",
+            "description": "What is refunded, in integer cents."
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "examples": [
+              "usd"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/RefundStatus",
+            "description": "pending: Stripe holds no refund of ours yet, an attempt may be under way. created: Stripe holds the refund; stripe_status says whether the money is back. failed: the last attempt's call failed. A retry sends the same idempotency key, and Stripe answers a refusal it already gave under that key (for 24 h) with the same refusal: a retry helps when the call never reached Stripe, or once the key expired."
+          },
+          "stripe_refund_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stripe Refund Id",
+            "description": "Stripe's id of the refund, once made."
+          },
+          "stripe_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stripe Status",
+            "description": "Stripe's status of the refund as last read, as Stripe says it: succeeded (the money is back: only then is the dispute settled), pending or requires_action (not finished: the dispute stays open), failed or canceled (it never will be: staff repair it). Null until Stripe answered with the refund."
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "last_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Code",
+            "description": "Why the last attempt did not make the refund: a Stripe error code, an error class or `refund_needs_review`. Never a message."
+          },
+          "requested_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested At",
+            "description": "When the latest attempt started."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "amount_cents",
+          "currency",
+          "status",
+          "stripe_refund_id",
+          "stripe_status",
+          "attempts",
+          "last_error_code",
+          "requested_at"
+        ],
+        "title": "RefundOut",
+        "description": "A refund to the customer as staff see it (#76): the row, without the idempotency key."
+      },
+      "RefundStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "created",
+          "failed"
+        ],
+        "title": "RefundStatus",
+        "description": "Where a refund to the customer stands (#76; internal: staff read the row)."
       },
       "RegionOut": {
         "properties": {
@@ -13181,6 +14107,61 @@
           "media_count"
         ],
         "title": "RequestSummary"
+      },
+      "ResolutionDecision": {
+        "type": "string",
+        "enum": [
+          "release",
+          "partial",
+          "refund"
+        ],
+        "title": "ResolutionDecision",
+        "description": "What the admin decides (#76): the pro paid in full, the customer refunded in full, or a\nsplit of the two."
+      },
+      "ResponseTimeMetric": {
+        "properties": {
+          "formula": {
+            "$ref": "#/components/schemas/MetricFormula"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value",
+            "description": "The mean, in minutes to 1 decimal; null when no request had a contact."
+          },
+          "median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median",
+            "description": "The median, in minutes to 1 decimal."
+          },
+          "denominator": {
+            "type": "integer",
+            "title": "Denominator",
+            "description": "Requests of the range with a first contact."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "formula",
+          "value",
+          "median",
+          "denominator"
+        ],
+        "title": "ResponseTimeMetric"
       },
       "ReverseAddressOut": {
         "properties": {
@@ -13854,6 +14835,37 @@
         ],
         "title": "SentMessageOut"
       },
+      "SeriesPoint": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day",
+            "description": "A day in `time_zone`."
+          },
+          "requests_created": {
+            "type": "integer",
+            "title": "Requests Created"
+          },
+          "jobs_completed": {
+            "type": "integer",
+            "title": "Jobs Completed"
+          },
+          "gmv_cents": {
+            "type": "integer",
+            "title": "Gmv Cents"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "day",
+          "requests_created",
+          "jobs_completed",
+          "gmv_cents"
+        ],
+        "title": "SeriesPoint"
+      },
       "ServedCheckOut": {
         "properties": {
           "zip_code": {
@@ -13915,9 +14927,17 @@
             "description": "The SetupIntent's client secret: the sheet confirms the card with it. Shown once per call, never logged; a new SetupIntent on every call."
           },
           "ephemeral_key_secret": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Ephemeral Key Secret",
-            "description": "A short-lived key that lets the sheet act for the customer; new on each call."
+            "description": "Deprecated (#253c): always null. The setup sheet opens without the customer (with a key, Stripe would let it list, remove and reuse saved cards behind the API), so no key is minted; the field stays for one release and is then removed.",
+            "deprecated": true
           },
           "customer_id": {
             "type": "string",
@@ -13934,7 +14954,6 @@
         "type": "object",
         "required": [
           "client_secret",
-          "ephemeral_key_secret",
           "customer_id",
           "publishable_key"
         ],
@@ -14086,6 +15105,456 @@
           "next_cursor"
         ],
         "title": "StaffChatPage"
+      },
+      "StaffDisputeList": {
+        "properties": {
+          "disputes": {
+            "items": {
+              "$ref": "#/components/schemas/StaffDisputeSummary"
+            },
+            "type": "array",
+            "title": "Disputes",
+            "description": "Oldest first."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "disputes"
+        ],
+        "title": "StaffDisputeList"
+      },
+      "StaffDisputeOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "public_code": {
+            "type": "string",
+            "title": "Public Code",
+            "description": "The request's public code.",
+            "examples": [
+              "JFX-7Q2K"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/DisputeStatus"
+          },
+          "reason_code": {
+            "$ref": "#/components/schemas/DisputeReason"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DisputeResolution"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "job_status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "customer_first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer First Name"
+          },
+          "pro_first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro First Name"
+          },
+          "customer_total_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Total Cents",
+            "description": "What the customer paid, tax included; null when the job's payment is missing (a dispute that needs review)."
+          },
+          "pro_payout_cents": {
+            "type": "integer",
+            "title": "Pro Payout Cents",
+            "description": "The pro's payout frozen at payment."
+          },
+          "pro_release_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Release Cents"
+          },
+          "customer_refund_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Refund Cents"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "opened_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Opened At",
+            "description": "When the customer reported it: its age."
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "refund_failed": {
+            "type": "boolean",
+            "title": "Refund Failed",
+            "description": "Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it."
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "The customer's text, as stored (masked)."
+          },
+          "pro_reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Reply",
+            "description": "The pro's one answer, as stored (masked)."
+          },
+          "pro_replied_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Replied At"
+          },
+          "resolution_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Note",
+            "description": "The resolving admin's note (staff only)."
+          },
+          "resolved_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By"
+          },
+          "photos": {
+            "items": {
+              "$ref": "#/components/schemas/DisputePhotoOut"
+            },
+            "type": "array",
+            "title": "Photos",
+            "description": "The safe copies, once ready."
+          },
+          "photos_pending": {
+            "type": "integer",
+            "title": "Photos Pending"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/StaffJobEventOut"
+            },
+            "type": "array",
+            "title": "Events",
+            "description": "The job's history, oldest first."
+          },
+          "payment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaymentSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "refund": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RefundOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transfer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TransferOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "job_id",
+          "public_code",
+          "status",
+          "reason_code",
+          "resolution",
+          "job_status",
+          "customer_first_name",
+          "pro_first_name",
+          "customer_total_cents",
+          "pro_payout_cents",
+          "pro_release_cents",
+          "customer_refund_cents",
+          "currency",
+          "opened_at",
+          "resolved_at",
+          "refund_failed",
+          "description",
+          "pro_reply",
+          "pro_replied_at",
+          "resolution_note",
+          "resolved_by",
+          "photos",
+          "photos_pending",
+          "events",
+          "payment",
+          "refund",
+          "transfer"
+        ],
+        "title": "StaffDisputeOut",
+        "description": "A dispute in full for staff (#76). Reading it is recorded in the audit log."
+      },
+      "StaffDisputeSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "public_code": {
+            "type": "string",
+            "title": "Public Code",
+            "description": "The request's public code.",
+            "examples": [
+              "JFX-7Q2K"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/DisputeStatus"
+          },
+          "reason_code": {
+            "$ref": "#/components/schemas/DisputeReason"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DisputeResolution"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "job_status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "customer_first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer First Name"
+          },
+          "pro_first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro First Name"
+          },
+          "customer_total_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Total Cents",
+            "description": "What the customer paid, tax included; null when the job's payment is missing (a dispute that needs review)."
+          },
+          "pro_payout_cents": {
+            "type": "integer",
+            "title": "Pro Payout Cents",
+            "description": "The pro's payout frozen at payment."
+          },
+          "pro_release_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Release Cents"
+          },
+          "customer_refund_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Refund Cents"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "opened_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Opened At",
+            "description": "When the customer reported it: its age."
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "refund_failed": {
+            "type": "boolean",
+            "title": "Refund Failed",
+            "description": "Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "job_id",
+          "public_code",
+          "status",
+          "reason_code",
+          "resolution",
+          "job_status",
+          "customer_first_name",
+          "pro_first_name",
+          "customer_total_cents",
+          "pro_payout_cents",
+          "pro_release_cents",
+          "customer_refund_cents",
+          "currency",
+          "opened_at",
+          "resolved_at",
+          "refund_failed"
+        ],
+        "title": "StaffDisputeSummary",
+        "description": "One line of the staff list."
       },
       "StaffDocumentCounts": {
         "properties": {
@@ -14256,6 +15725,53 @@
         ],
         "title": "StaffDocumentReviewOut",
         "description": "A document as a review answers it: never its file."
+      },
+      "StaffJobEventOut": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "from_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "by_system": {
+            "type": "boolean",
+            "title": "By System"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "from_status",
+          "to_status",
+          "by_system",
+          "created_at"
+        ],
+        "title": "StaffJobEventOut"
       },
       "StaffProDecisionOut": {
         "properties": {
@@ -15059,7 +16575,7 @@
           "amount_cents": {
             "type": "integer",
             "title": "Amount Cents",
-            "description": "The job's pro payout as frozen at payment, in integer cents."
+            "description": "The job's pro payout as frozen at payment (or the part of it an admin released on a dispute, #76), in integer cents."
           },
           "currency": {
             "type": "string",

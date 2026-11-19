@@ -21,11 +21,18 @@ export const ACCEPTED: CustomerQuote = { ...QUOTE, status: "accepted" };
 export const OTHER = quote(2, { amount_cents: 25_000, pro: { name: "Dan K." } });
 
 // Recognizable values: no log line, toast or screen may ever carry one of them.
-export const SECRETS = ["pi_123_secret_456", "ek_test_789", "pk_test_jack", "cus_jack"];
+export const SECRETS = [
+  "pi_123_secret_456",
+  "cuss_secret_789",
+  "ek_test_789",
+  "pk_test_jack",
+  "cus_jack",
+];
 
 export const SHEET: PaymentSheetOut = {
   payment_intent_client_secret: "pi_123_secret_456",
   customer_id: "cus_jack",
+  customer_session_client_secret: "cuss_secret_789",
   ephemeral_key_secret: "ek_test_789",
   publishable_key: "pk_test_jack",
   amount_cents: 18_050,

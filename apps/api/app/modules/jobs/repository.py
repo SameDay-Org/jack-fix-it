@@ -59,6 +59,44 @@ class JobRepository:
         ).subquery()
 
     @staticmethod
+    def awaiting_transfer(released_disputes: Subquery) -> Subquery:
+        """The columns of `confirmed` for every job waiting for its transfer: confirmed, or
+        disputed with its dispute resolved by a release (`released_disputes`: job_id, #76)."""
+        return (
+            select(
+                Job.id.label("job_id"),
+                Job.pro_id.label("pro_id"),
+                Job.quote_id.label("quote_id"),
+                Job.pro_payout_cents.label("pro_payout_cents"),
+            )
+            .where(
+                or_(
+                    Job.status == JobStatus.CONFIRMED,
+                    (Job.status == JobStatus.DISPUTED)
+                    & Job.id.in_(select(released_disputes.c.job_id)),
+                )
+            )
+            .subquery()
+        )
+
+    @staticmethod
+    def metric_facts() -> Subquery:
+        """Every job's id (`job_id`), request (`request_id`), customer (`customer_id`), its
+        creation, completion and confirmation times (`created_at`, `completed_at`,
+        `confirmed_at`), what the customer was charged (`captured_cents`: the frozen price plus
+        the tax) and the platform's fee (`platform_fee_cents`), for the staff metrics (#84)."""
+        return select(
+            Job.id.label("job_id"),
+            Job.request_id.label("request_id"),
+            Job.customer_id.label("customer_id"),
+            Job.created_at.label("created_at"),
+            Job.completed_at.label("completed_at"),
+            Job.confirmed_at.label("confirmed_at"),
+            (Job.customer_price_cents + Job.tax_cents).label("captured_cents"),
+            Job.platform_fee_cents.label("platform_fee_cents"),
+        ).subquery()
+
+    @staticmethod
     def queue_facts() -> Subquery:
         """Every job's request (`request_id`), id (`job_id`), accepted quote (`quote_id`) and
         status (`job_status`) only, as a subquery for another module's query: one row per
@@ -173,6 +211,20 @@ class JobRepository:
             return None
         job, pro_user_id = row
         return job, pro_user_id
+
+    async def many_with_pro_user(
+        self, job_ids: Collection[uuid.UUID], pros: Subquery
+    ) -> list[tuple[Job, uuid.UUID]]:
+        """The jobs among `job_ids` with their pro's user id (`pros`: `pro_id`, `user_id`), in
+        one statement, unlocked: for staff, who may read any job."""
+        if not job_ids:
+            return []
+        statement = (
+            select(Job, pros.c.user_id)
+            .join(pros, pros.c.pro_id == Job.pro_id)
+            .where(Job.id.in_(job_ids))
+        )
+        return [(job, user_id) for job, user_id in (await self._session.execute(statement)).all()]
 
     async def page_for_pro(
         self,

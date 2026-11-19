@@ -5,13 +5,16 @@
 - Which jobs: those whose work is done (completed, confirmed, paid out, disputed). Refunded and
   cancelled jobs pay nothing and are left out.
 - Amount: what the pro receives ("you'll receive"): the transfer's amount once its row exists,
-  else the job's payout frozen at payment by app.money.split_amount (#246). Never recomputed.
+  else the part of the payout an admin released on a dispute (#76: all of it, or a partial
+  split's), else the job's payout frozen at payment by app.money.split_amount (#246). Never
+  recomputed.
 - Status (repository.py), from our own rows, never a live Stripe call:
   awaiting_confirmation (completed, the customer has not confirmed; `expected_by` is when it
-  confirms itself: completed_at + JOB_AUTO_CONFIRM_AFTER_HOURS); on_the_way (confirmed, the
-  transfer still to be made, held back for the pro's payout setup, or failed and retried);
-  on_hold (a dispute is open, or Stripe reversed the transfer: staff look); paid (the transfer
-  was made; `paid_at` is the job's move to paid_out).
+  confirms itself: completed_at + JOB_AUTO_CONFIRM_AFTER_HOURS); on_the_way (confirmed, or
+  disputed with the dispute released by an admin (#76): the transfer still to be made, held
+  back for the pro's payout setup, or failed and retried); on_hold (a dispute is open, or
+  Stripe reversed the transfer: staff look); paid (the transfer was made; `paid_at` is the
+  job's move to paid_out).
 - Summary: each status's total over all the pro's jobs (pending_cents is on_the_way); the
   items of every page add up to it.
 - Order: newest completion first, then by job id; the cursor carries both, so equal times page

@@ -34,7 +34,7 @@ from typing import Final
 
 from pydantic import JsonValue
 from redis.exceptions import RedisError
-from sqlalchemy import Select
+from sqlalchemy import Select, Subquery
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -463,6 +463,12 @@ def _has_nul(value: JsonValue) -> bool:
     return False
 
 
+def request_metric_facts() -> Subquery:
+    """Each request's `request_id`, `created_at` and `first_contact_at`, as a subquery for the
+    staff metrics' own query (#84)."""
+    return ServiceRequestRepository.metric_facts()
+
+
 class CustomerRequestReader:
     """A customer's own request for other modules (ADR 0003): its status, for the quotes the
     customer compares (#188), its public code, for the job pushes (#65), and where it takes
@@ -494,6 +500,10 @@ class CustomerRequestReader:
     ) -> dict[uuid.UUID, uuid.UUID | None]:
         """Each request's category, for a pro's earnings (#70): nothing about the customer."""
         return await self._requests.category_ids(request_ids)
+
+    async def public_codes(self, request_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """The public code of each request among `request_ids`, for staff lists (#76)."""
+        return await self._requests.public_codes(request_ids)
 
     async def place(self, request_id: uuid.UUID) -> AddressPlace:
         """Where the request takes place, for the route of its job (#351). The caller already

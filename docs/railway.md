@@ -36,10 +36,11 @@ names, so set **Config-as-code file path** in every service's settings.
   no healthcheck. It runs no migrations. A worker task that needs a new table must ship after
   the migration that creates it.
 - **web** uses the repo root as its root directory because the build installs the whole pnpm
-  workspace (`@jack/shared` is a workspace package). Node comes from `.nvmrc`, pnpm from
-  `packageManager`.
+  workspace (`@jack/shared` and `@jack/mascot` are workspace packages). Node comes from `.nvmrc`,
+  pnpm from `packageManager`.
 - Watch patterns (in the config files) stop unrelated changes from redeploying a service:
-  api and worker `/apps/api/**`; web `/apps/web/**`, `/packages/shared/**`, `/pnpm-lock.yaml`.
+  api and worker `/apps/api/**`; web `/apps/web/**`, `/packages/shared/**`, `/packages/mascot/**`,
+  `/pnpm-lock.yaml`.
 
 ## Variables
 
@@ -329,20 +330,28 @@ reads made transfers again for a reversal (read-only, on the same settings). Its
 (`TRANSFER_RELEASE_SWEEP_MINUTES`, `TRANSFER_RELEASE_SWEEP_TIMEOUT_SECONDS`,
 `TRANSFER_RELEASE_BATCH_SIZE`, `TRANSFER_STUCK_PENDING_MINUTES`; `apps/api/.env.example`
 explains each). The Stripe webhook endpoint must also send `transfer.reversed`, beside the
-`payment_intent.*` events: the API marks a reversed transfer for staff.
+`payment_intent.*` events: the API marks a reversed transfer for staff. An admin's dispute
+resolution (#76) refunds through the API with the same key; `REFUND_STUCK_PENDING_MINUTES` is
+optional too. The platform webhook endpoint must also send `refund.updated`, `refund.failed`
+and `charge.refund.updated`: a dispute settles only once Stripe says its refund succeeded, and
+the worker reads each refund event's refund from Stripe with the same key (#433).
 
 `apps/api/tests/test_railway_doc.py` fails when a setting that staging or production requires
 is missing from either table, so this list cannot fall behind `app/config.py`.
 
 ### web
 
-| Variable                    | Value                                                                                                            | Secret | Source      |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------- | ------ | ----------- |
-| `APP_ENV`                   | `staging` or `production` (only production is indexable)                                                         | no     | D3.1 (#22)  |
-| `API_INTERNAL_URL`          | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`                                                           | no     | D3.1 (#22)  |
-| `REFRESH_TOKEN_TTL_SECONDS` | the api's refresh token lifetime (2592000 unless the api sets another); the panel's session cookie lasts as long | no     | D16.1 (#80) |
-| `API_TIMEOUT_MS`            | `5000`: the longest wait on the api for one call, body included                                                  | no     | D16.1 (#80) |
-| `SITE_URL`                  | optional: the site's public origin, e.g. `https://${{RAILWAY_PUBLIC_DOMAIN}}` or the custom domain               | no     | D17 (#403)  |
+| Variable                    | Value                                                                                                                             | Secret | Source      |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------ | ----------- |
+| `APP_ENV`                   | `staging` or `production` (only production is indexable)                                                                          | no     | D3.1 (#22)  |
+| `API_INTERNAL_URL`          | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`                                                                            | no     | D3.1 (#22)  |
+| `REFRESH_TOKEN_TTL_SECONDS` | the api's refresh token lifetime (2592000 unless the api sets another); the panel's session cookie lasts as long                  | no     | D16.1 (#80) |
+| `API_TIMEOUT_MS`            | `5000`: the longest wait on the api for one call, body included                                                                   | no     | D16.1 (#80) |
+| `SITE_URL`                  | optional: the site's public origin, e.g. `https://${{RAILWAY_PUBLIC_DOMAIN}}` or the custom domain                                | no     | D17 (#403)  |
+| `BUSINESS_TIME_ZONE`        | optional, mirrors the api's `BUSINESS_TIME_ZONE` (unset: its default, `America/New_York`): the KPI page's presets end today there | no     | D16.5 (#84) |
+| `METRICS_MAX_RANGE_DAYS`    | optional, mirrors the api's `METRICS_MAX_RANGE_DAYS` (unset: its default, `366`): the longest range the KPI page asks for         | no     | D16.5 (#84) |
+| `DISPUTE_AGE_WARN_HOURS`    | optional: the hours after which an open dispute's age turns amber in the panel (unset: `24`)                                      | no     | #83         |
+| `DISPUTE_AGE_LATE_HOURS`    | optional: the hours after which it turns red (unset: `48`; ignored with the amber one unless it is larger)                        | no     | #83         |
 
 The web server calls the API over the private network; browsers and the mobile app use the
 api's public domain. `SITE_URL` is read when the site is built: it gives the showcase page

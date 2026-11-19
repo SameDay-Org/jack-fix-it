@@ -157,7 +157,7 @@ describe("paying an accepted quote", () => {
       expect.objectContaining({
         merchantDisplayName: "Jack Fix It",
         customerId: "cus_jack",
-        customerEphemeralKeySecret: "ek_test_789",
+        customerSessionClientSecret: "cuss_secret_789",
         paymentIntentClientSecret: "pi_123_secret_456",
         allowsDelayedPaymentMethods: false,
         returnURL: expect.stringMatching(/^jackfixit:\/\/stripe-redirect$/),
@@ -334,6 +334,31 @@ describe("paying an accepted quote", () => {
       expect(screen.queryByTestId(`${payTestId(ACCEPTED)}-failure`)).toBeNull();
     },
   );
+
+  it("an API older than the CustomerSession: the calm failure, no sheet, and no secret logged", async () => {
+    // Its answer has no session secret, only the deprecated ephemeral key (#253c).
+    const { customer_session_client_secret: _, ...older } = SHEET;
+    api.payment = () => Promise.resolve(older as PaymentSheetOut);
+    const spies = LOG_METHODS.map((method) =>
+      jest.spyOn(console, method).mockImplementation(() => undefined),
+    );
+    try {
+      await openUnpaid();
+      await act(async () => fireEvent.press(payButton()));
+
+      const failure = await screen.findByTestId(`${payTestId(ACCEPTED)}-failure`);
+      expect(within(failure).getByText("We couldn't open the payment")).toBeTruthy();
+      expect(within(failure).getByText("Please try again in a moment.")).toBeTruthy();
+      expect(initStripe).not.toHaveBeenCalled();
+      expect(initPaymentSheet).not.toHaveBeenCalled();
+      expect(presentPaymentSheet).not.toHaveBeenCalled();
+      expect(payButton().props.accessibilityState).toMatchObject({ busy: false });
+      const logged = JSON.stringify(spies.flatMap((spy) => spy.mock.calls));
+      for (const secret of SECRETS) expect(logged).not.toContain(secret);
+    } finally {
+      spies.forEach((spy) => spy.mockRestore());
+    }
+  });
 
   it.each([
     [

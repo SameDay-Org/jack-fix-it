@@ -4,7 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Mascot, type MascotProps } from "./react.ts";
+import { LiveMascot } from "./react-live.ts";
+import type { MascotProps } from "./react-svg.ts";
 
 // React's act() expects to be told it runs in a test.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -46,7 +47,7 @@ afterEach(() => {
 });
 
 async function render(props: MascotProps): Promise<void> {
-  await act(async () => root.render(createElement(Mascot, props)));
+  await act(async () => root.render(createElement(LiveMascot, props)));
 }
 
 /** A running mascot: shown, motion allowed, on screen. */
@@ -62,11 +63,11 @@ async function running(props: MascotProps): Promise<void> {
 /** The markup a page would get for these props, parsed by the same document. */
 function drawn(props: MascotProps): string {
   const expected = document.createElement("div");
-  expected.innerHTML = renderToStaticMarkup(createElement(Mascot, props));
+  expected.innerHTML = renderToStaticMarkup(createElement(LiveMascot, props));
   return expected.innerHTML;
 }
 
-describe("<Mascot> mounted in a page", () => {
+describe("<LiveMascot> mounted in a page", () => {
   it("moves to a new pose frame by frame while it runs", async () => {
     await running({ pose: "wave" });
     await render({ pose: "celebrate" });

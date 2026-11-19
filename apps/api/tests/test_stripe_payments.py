@@ -313,6 +313,94 @@ async def test_create_ephemeral_key_sends_the_pinned_api_version() -> None:
     assert form == {"customer": [CUSTOMER]}
 
 
+SESSION_SECRET = "cuss_secret_fixture0123abc"
+# Exactly what the sheet may do with the saved cards (#253c), as the SDK encodes it: Stripe's
+# server refuses removal and the "save this card" box, and the sheet lists every card the wallet
+# lists.
+SESSION_FORM = {
+    "customer": [CUSTOMER],
+    "components[mobile_payment_element][enabled]": ["true"],
+    "components[mobile_payment_element][features][payment_method_remove]": ["disabled"],
+    "components[mobile_payment_element][features][payment_method_redisplay]": ["enabled"],
+    "components[mobile_payment_element][features][payment_method_allow_redisplay_filters][0]": [
+        "always"
+    ],
+    "components[mobile_payment_element][features][payment_method_allow_redisplay_filters][1]": [
+        "limited"
+    ],
+    "components[mobile_payment_element][features][payment_method_allow_redisplay_filters][2]": [
+        "unspecified"
+    ],
+    "components[mobile_payment_element][features][payment_method_save]": ["disabled"],
+}
+
+
+def session_body(**overrides: Any) -> dict[str, Any]:
+    return {
+        "object": "customer_session",
+        "client_secret": SESSION_SECRET,
+        "customer": CUSTOMER,
+        "expires_at": 1_900_000_000,
+        "livemode": False,
+        **overrides,
+    }
+
+
+async def test_create_customer_session_sends_exactly_the_sheet_features() -> None:
+    wrapper, http = client((200, session_body()))
+
+    secret = await wrapper.create_customer_session(CUSTOMER)
+
+    assert secret == SESSION_SECRET
+    [(method, url, _headers, form)] = http.sent
+    assert (method, url) == ("post", "https://api.stripe.com/v1/customer_sessions")
+    assert form == SESSION_FORM
+    # No component but the mobile one: the session grants nothing else.
+    assert not {key for key in form if key.startswith("components[")} - {
+        key for key in SESSION_FORM if key.startswith("components[mobile_payment_element]")
+    }
+
+
+@pytest.mark.parametrize("body", [{"client_secret": None}, {"client_secret": ...}])
+async def test_customer_session_without_secret_is_rejected(body: dict[str, Any]) -> None:
+    answer = session_body(**body)
+    if answer["client_secret"] is ...:
+        del answer["client_secret"]
+    wrapper, _ = client((200, answer))
+
+    with pytest.raises(StripeRejectedError) as caught:
+        await wrapper.create_customer_session(CUSTOMER)
+
+    assert (caught.value.code, caught.value.request_id) == (
+        "customer_session_no_secret",
+        REQUEST_ID,
+    )
+
+
+@pytest.mark.parametrize(
+    ("answer", "kind"),
+    [
+        (NETWORK_ERROR, StripeUnavailableError),
+        ((429, error_body("rate_limit", "Too many requests")), StripeUnavailableError),
+        (
+            (400, error_body("parameter_unknown", f"Unknown parameter for {CUSTOMER}")),
+            StripeRejectedError,
+        ),
+    ],
+)
+async def test_a_customer_session_failure_is_typed_and_carries_no_text(
+    answer: Answer, kind: type[Exception]
+) -> None:
+    wrapper, _ = client(answer)
+
+    with pytest.raises(kind) as caught:
+        await wrapper.create_customer_session(CUSTOMER)
+
+    assert str(caught.value) == kind.__name__
+    assert CUSTOMER not in repr(caught.value)
+    assert caught.value.__cause__ is None
+
+
 @pytest.mark.parametrize("body", [{"secret": None}, {}])
 async def test_ephemeral_key_without_secret_is_rejected(body: dict[str, Any]) -> None:
     wrapper, _ = client((200, {"id": "ephkey_fixture", "object": "ephemeral_key", **body}))

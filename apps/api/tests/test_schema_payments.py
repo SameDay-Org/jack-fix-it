@@ -25,7 +25,10 @@ VERSIONS = Path(__file__).parents[1] / "alembic" / "versions"
 MIGRATION = VERSIONS / "20261106_a7c3e9d14f62_payments.py"
 # Later tables with a foreign key to payments: their migrations go down first and up last,
 # as alembic orders them (transfers, #68).
-DEPENDENTS = (VERSIONS / "20261115_52bb3f92f12b_transfers.py",)
+DEPENDENTS = (
+    VERSIONS / "20261115_52bb3f92f12b_transfers.py",
+    VERSIONS / "20261118_e1bd2d8588e7_refunds.py",
+)
 PAYMENT_CONSTRAINTS = {
     "ck_payments_amount_cents_positive",
     "ck_payments_tax_cents_non_negative",

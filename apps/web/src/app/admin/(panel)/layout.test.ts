@@ -39,7 +39,7 @@ afterEach(() => {
   fetchMock.mockReset();
 });
 
-async function render(role: "agent" | "customer", locale: string): Promise<string> {
+async function render(role: "agent" | "admin" | "customer", locale: string): Promise<string> {
   fetchMock.mockImplementation(routeFetch({ "/v1/auth/me": () => me(role, locale) }));
   return decoded(renderToStaticMarkup(await PanelLayout({ children: "page" })));
 }
@@ -58,7 +58,7 @@ describe("the panel shell", () => {
       expect(classes?.split(" ")).toEqual(
         expect.arrayContaining(["flex", "flex-wrap", "md:flex-col", "md:flex-nowrap"]),
       );
-      expect(links?.match(/<a /g)).toHaveLength(4);
+      expect(links?.match(/<a /g)).toHaveLength(6);
       expect(links).toMatch(/<a aria-current="page" [^>]*href="\/admin\/queue"/);
     },
   );
@@ -77,6 +77,38 @@ describe("the panel shell", () => {
     expect(links).toContain("Inicio");
     expect(links).toContain("Soporte");
     expect(links).toMatch(/<a aria-current="page" [^>]*href="\/admin\/pros"/);
+  });
+
+  it.each([
+    ["agent", "en", "Disputes"],
+    ["admin", "en", "Disputes"],
+    ["agent", "es", "Disputas"],
+    ["admin", "es", "Disputas"],
+  ] as const)(
+    "links the disputes for an %s (%s), marked when open",
+    async (role, locale, label) => {
+      path.current = "/admin/disputes/2a7d0c4e-1111-4222-8333-944455556666";
+      const html = await render(role, locale);
+      const links = /<nav [^>]*>(.*?)<\/nav>/.exec(html)?.[1] ?? "";
+      expect(links).toMatch(
+        new RegExp(`<a aria-current="page" [^>]*href="/admin/disputes"[^>]*>.*?${label}</a>`),
+      );
+    },
+  );
+
+  it.each([
+    ["agent", "en", "KPIs"],
+    ["admin", "en", "KPIs"],
+    ["agent", "es", "Indicadores"],
+  ] as const)("links the KPIs for an %s (%s), marked when open", async (role, locale, name) => {
+    path.current = "/admin/kpis";
+    const html = await render(role, locale);
+
+    const links = /<nav [^>]*>(.*?)<\/nav>/.exec(html)?.[1] ?? "";
+    expect(links).toMatch(
+      new RegExp(`<a aria-current="page" [^>]*href="/admin/kpis"[^>]*>.*?${name}</a>`),
+    );
+    expect(links.match(/aria-current="page"/g)).toHaveLength(1);
   });
 
   it("lets no one without a staff session see the shell", async () => {

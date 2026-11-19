@@ -770,10 +770,12 @@ export interface paths {
         /**
          * Pay for the quote I accepted
          * @description What the Payment Sheet needs to charge the customer for the quote they accepted: the
-         *     PaymentIntent's client secret, the customer and an ephemeral key for it, the publishable
+         *     PaymentIntent's client secret, the customer and a CustomerSession for it (the sheet lists
+         *     the saved cards, never removes one or offers to save one; the ephemeral key is deprecated),
+         *     the publishable
          *     key, and the amount, the tax and the total shown before paying. The amounts are the
          *     accepted quote's, computed on the server; the body takes no field. The first call creates
-         *     the PaymentIntent; later calls return the same one (a new ephemeral key each time), until
+         *     the PaymentIntent; later calls return the same one (a new session each time), until
          *     the payment succeeds (then the job exists: 409). The pro is checked again on every call:
          *     one who can no longer be hired is a 409, and nothing is created.
          */
@@ -821,7 +823,8 @@ export interface paths {
          * Start adding a card to my wallet
          * @description What the Payment Sheet needs, in setup mode, to save a card: a new SetupIntent's client
          *     secret, the caller's Stripe Customer (created on the first call, the same one ever after)
-         *     and a new ephemeral key for it, and the publishable key. The card data goes from the app to
+         *     and the publishable key; ephemeral_key_secret is deprecated and always null (#253c: the
+         *     setup sheet opens without the customer). The card data goes from the app to
          *     Stripe, never through this API. The body takes no field.
          */
         post: operations["create_setup_intent_v1_me_payment_methods_setup_intent_post"];
@@ -1795,6 +1798,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/disputes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List disputes (staff)
+         * @description Disputes for the BDC and admins, oldest first (the longest waiting on top): the
+         *     request's public code, the reason, the money, the parties' first names, when it was
+         *     opened, and how it was resolved. No text, no photo: those are in the audited detail.
+         */
+        get: operations["list_disputes_v1_admin_disputes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/disputes/{dispute_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a dispute (staff)
+         * @description A dispute in full: both sides' text as stored (contact details masked), the photos'
+         *     safe copies (signed URLs), the job's history, its payment, refund and transfer, and the
+         *     resolution with its note. Every read is recorded in the audit log.
+         */
+        get: operations["read_dispute_v1_admin_disputes__dispute_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/disputes/{dispute_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve a dispute (admin)
+         * @description Settles the dispute once. `release`: the pro is paid their payout in full; the job
+         *     moves to paid_out once the transfer is made. `refund`: the customer's total, tax included,
+         *     goes back to their payment method; the job moves to refunded; no transfer. `partial`: the
+         *     pro is paid `pro_release_cents` and the customer gets back the share of their total that
+         *     is not released (rounded half up to the cent); the platform keeps the rest. The amounts
+         *     come from the job's frozen payment, never from the client beyond `pro_release_cents`.
+         *     Sending the same decision again completes what is missing and changes nothing else; a
+         *     different one after the resolution is a 409. Both sides are notified, never with the
+         *     note, which is kept with the dispute and in the audit log.
+         */
+        post: operations["resolve_dispute_v1_admin_disputes__dispute_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The dashboard's metrics (staff)
+         * @description The MVP exit metrics over whole days, both inclusive (default: the last
+         *     METRICS_DEFAULT_RANGE_DAYS days, today included). Ratios come with their numerator and
+         *     denominator (null when the denominator is 0), each figure with its formula's key
+         *     (docs/kpis.md), and a per-day series. Aggregates only: no name, contact, address or id.
+         *     Revenue is gross of refunds until they are recorded (`refunds_netted`).
+         */
+        get: operations["read_metrics_v1_admin_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/me/rating": {
         parameters: {
             query?: never;
@@ -1859,6 +1958,15 @@ export interface components {
             state: string;
             /** Zip Code */
             zip_code: string;
+        };
+        /** AmountMetric */
+        AmountMetric: {
+            formula: components["schemas"]["MetricFormula"];
+            /**
+             * Value
+             * @description Integer cents (USD).
+             */
+            value: number;
         };
         /** ApprovalBlocker */
         ApprovalBlocker: {
@@ -2568,6 +2676,54 @@ export interface components {
          */
         DisputeResolution: "released" | "partial_release" | "refunded";
         /**
+         * DisputeResolutionOut
+         * @description Where the dispute stands after a resolve (#76).
+         */
+        DisputeResolutionOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            status: components["schemas"]["DisputeStatus"];
+            resolution: components["schemas"]["DisputeResolution"] | null;
+            /**
+             * Pro Release Cents
+             * @description What the pro is paid; null while open.
+             */
+            pro_release_cents: number | null;
+            /**
+             * Customer Refund Cents
+             * @description What the customer gets back; null while open.
+             */
+            customer_refund_cents: number | null;
+            /** Resolved At */
+            resolved_at: string | null;
+            /** @description disputed until the money moved: paid_out once the transfer to the pro is made (a release, full or partial), refunded at once for a full refund. */
+            job_status: components["schemas"]["JobStatus"];
+            /** @description The refund, when the decision has one. */
+            refund: components["schemas"]["RefundOut"] | null;
+        };
+        /** DisputeResolveIn */
+        DisputeResolveIn: {
+            decision: components["schemas"]["ResolutionDecision"];
+            /**
+             * Pro Release Cents
+             * @description partial only (required there, refused otherwise): the part of the pro's payout to release, in integer cents, more than 0 and less than the payout. The customer's refund is computed from it on the server.
+             */
+            pro_release_cents?: number | null;
+            /**
+             * Note
+             * @description Why, for the record (staff only: never shown to the customer or the pro, never logged). Kept with the dispute and in the audit log.
+             */
+            note: string;
+        };
+        /**
          * DisputeStatus
          * @enum {string}
          */
@@ -3046,6 +3202,57 @@ export interface components {
              */
             expires_at: string;
         };
+        /**
+         * MetricFormula
+         * @enum {string}
+         */
+        MetricFormula: "first_response_minutes" | "contact_rate" | "lead_to_job" | "completion_rate" | "customer_rating" | "pro_rating" | "dispute_rate" | "repeat_rate" | "gmv" | "revenue_gross_of_refunds";
+        /** Metrics */
+        Metrics: {
+            avg_first_response_minutes: components["schemas"]["ResponseTimeMetric"];
+            contact_rate: components["schemas"]["RatioMetric"];
+            lead_to_job: components["schemas"]["RatioMetric"];
+            completion_rate: components["schemas"]["RatioMetric"];
+            /** @description How pros rate their customers. */
+            customer_rating_avg: components["schemas"]["RatingMetric"];
+            /** @description How customers rate their pros. */
+            pro_rating_avg: components["schemas"]["RatingMetric"];
+            dispute_rate: components["schemas"]["RatioMetric"];
+            repeat_rate: components["schemas"]["RatioMetric"];
+            gmv_cents: components["schemas"]["AmountMetric"];
+            revenue_cents: components["schemas"]["AmountMetric"];
+        };
+        /** MetricsOut */
+        MetricsOut: {
+            /**
+             * From Date
+             * Format: date
+             * @description The first day read, in `time_zone`.
+             */
+            from_date: string;
+            /**
+             * To Date
+             * Format: date
+             * @description The last day read, in `time_zone` (inclusive).
+             */
+            to_date: string;
+            /**
+             * Time Zone
+             * @example America/New_York
+             */
+            time_zone: string;
+            /**
+             * Refunds Netted
+             * @description Whether revenue_cents is net of refunds. False until #76's refunds land: revenue is then the platform's fee as charged.
+             */
+            refunds_netted: boolean;
+            metrics: components["schemas"]["Metrics"];
+            /**
+             * Series
+             * @description One point per day of the range, in order.
+             */
+            series: components["schemas"]["SeriesPoint"][];
+        };
         /** MultiChoiceQuestion */
         MultiChoiceQuestion: {
             /**
@@ -3439,8 +3646,14 @@ export interface components {
              */
             customer_id: string;
             /**
+             * Customer Session Client Secret
+             * @description A CustomerSession's client secret, new on each call: the sheet lists the customer's saved cards with it, and Stripe lets it neither remove one nor offer to save a new one (cards are added in the wallet). Shown once per call, never logged.
+             */
+            customer_session_client_secret: string;
+            /**
              * Ephemeral Key Secret
-             * @description A short-lived key that lets the sheet act for the customer; new on each call.
+             * @deprecated
+             * @description Deprecated (#253c): app builds before the CustomerSession pass it to the sheet, which then has full rights over the customer's cards. Use customer_session_client_secret; this field is removed in a later release.
              */
             ephemeral_key_secret: string;
             /**
@@ -3469,6 +3682,37 @@ export interface components {
              * @example usd
              */
             currency: string;
+        };
+        /**
+         * PaymentStatus
+         * @description Where a payment stands (internal; the customer sees the request's status). Created
+         *     `requires_payment`; the payment webhooks (#61) move it on from the PaymentIntent's events.
+         * @enum {string}
+         */
+        PaymentStatus: "requires_payment" | "processing" | "succeeded" | "failed" | "canceled";
+        /**
+         * PaymentSummaryOut
+         * @description A job's payment as staff see it (#76): its amounts, frozen when it was made.
+         */
+        PaymentSummaryOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Amount Cents */
+            amount_cents: number;
+            /** Tax Cents */
+            tax_cents: number;
+            /** Customer Total Cents */
+            customer_total_cents: number;
+            /** Platform Fee Cents */
+            platform_fee_cents: number;
+            /** Pro Payout Cents */
+            pro_payout_cents: number;
+            /** Currency */
+            currency: string;
+            status: components["schemas"]["PaymentStatus"];
         };
         /**
          * PayoutStatus
@@ -4141,6 +4385,20 @@ export interface components {
          * @enum {string}
          */
         QuoteStatus: "pending" | "accepted" | "rejected" | "expired" | "withdrawn";
+        /** RatingMetric */
+        RatingMetric: {
+            formula: components["schemas"]["MetricFormula"];
+            /**
+             * Value
+             * @description The mean overall rating (1 to 5), to 2 decimals; null with no review.
+             */
+            value: number | null;
+            /**
+             * Denominator
+             * @description Reviews counted.
+             */
+            denominator: number;
+        };
         /** RatingOut */
         RatingOut: {
             /**
@@ -4153,6 +4411,22 @@ export interface components {
              * @description How many published reviews the caller received. A review the caller has not answered yet is not counted until it is published.
              */
             count: number;
+        };
+        /**
+         * RatioMetric
+         * @description `numerator` of `denominator`, so the panel can show "12 of 40".
+         */
+        RatioMetric: {
+            formula: components["schemas"]["MetricFormula"];
+            /**
+             * Value
+             * @description numerator / denominator, to 4 decimals; null when the denominator is 0.
+             */
+            value: number | null;
+            /** Numerator */
+            numerator: number;
+            /** Denominator */
+            denominator: number;
         };
         /** ReadinessResponse */
         ReadinessResponse: {
@@ -4179,6 +4453,57 @@ export interface components {
              */
             refresh_token: string;
         };
+        /**
+         * RefundOut
+         * @description A refund to the customer as staff see it (#76): the row, without the idempotency key.
+         */
+        RefundOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Amount Cents
+             * @description What is refunded, in integer cents.
+             */
+            amount_cents: number;
+            /**
+             * Currency
+             * @example usd
+             */
+            currency: string;
+            /** @description pending: Stripe holds no refund of ours yet, an attempt may be under way. created: Stripe holds the refund; stripe_status says whether the money is back. failed: the last attempt's call failed. A retry sends the same idempotency key, and Stripe answers a refusal it already gave under that key (for 24 h) with the same refusal: a retry helps when the call never reached Stripe, or once the key expired. */
+            status: components["schemas"]["RefundStatus"];
+            /**
+             * Stripe Refund Id
+             * @description Stripe's id of the refund, once made.
+             */
+            stripe_refund_id: string | null;
+            /**
+             * Stripe Status
+             * @description Stripe's status of the refund as last read, as Stripe says it: succeeded (the money is back: only then is the dispute settled), pending or requires_action (not finished: the dispute stays open), failed or canceled (it never will be: staff repair it). Null until Stripe answered with the refund.
+             */
+            stripe_status: string | null;
+            /** Attempts */
+            attempts: number;
+            /**
+             * Last Error Code
+             * @description Why the last attempt did not make the refund: a Stripe error code, an error class or `refund_needs_review`. Never a message.
+             */
+            last_error_code: string | null;
+            /**
+             * Requested At
+             * @description When the latest attempt started.
+             */
+            requested_at: string | null;
+        };
+        /**
+         * RefundStatus
+         * @description Where a refund to the customer stands (#76; internal: staff read the row).
+         * @enum {string}
+         */
+        RefundStatus: "pending" | "created" | "failed";
         /** RegionOut */
         RegionOut: {
             /** Region */
@@ -4437,6 +4762,32 @@ export interface components {
             created_at: string;
             /** Media Count */
             media_count: number;
+        };
+        /**
+         * ResolutionDecision
+         * @description What the admin decides (#76): the pro paid in full, the customer refunded in full, or a
+         *     split of the two.
+         * @enum {string}
+         */
+        ResolutionDecision: "release" | "partial" | "refund";
+        /** ResponseTimeMetric */
+        ResponseTimeMetric: {
+            formula: components["schemas"]["MetricFormula"];
+            /**
+             * Value
+             * @description The mean, in minutes to 1 decimal; null when no request had a contact.
+             */
+            value: number | null;
+            /**
+             * Median
+             * @description The median, in minutes to 1 decimal.
+             */
+            median: number | null;
+            /**
+             * Denominator
+             * @description Requests of the range with a first contact.
+             */
+            denominator: number;
         };
         /**
          * ReverseAddressOut
@@ -4706,6 +5057,21 @@ export interface components {
             /** @description contact_details_hidden when something in the text was masked (redacted is true): the app tells the sender that contact details are not shared in the chat. Null otherwise. */
             warning: components["schemas"]["ChatWarning"] | null;
         };
+        /** SeriesPoint */
+        SeriesPoint: {
+            /**
+             * Day
+             * Format: date
+             * @description A day in `time_zone`.
+             */
+            day: string;
+            /** Requests Created */
+            requests_created: number;
+            /** Jobs Completed */
+            jobs_completed: number;
+            /** Gmv Cents */
+            gmv_cents: number;
+        };
         /** ServedCheckOut */
         ServedCheckOut: {
             /**
@@ -4744,9 +5110,10 @@ export interface components {
             client_secret: string;
             /**
              * Ephemeral Key Secret
-             * @description A short-lived key that lets the sheet act for the customer; new on each call.
+             * @deprecated
+             * @description Deprecated (#253c): always null. The setup sheet opens without the customer (with a key, Stripe would let it list, remove and reuse saved cards behind the API), so no key is minted; the field stays for one release and is then removed.
              */
-            ephemeral_key_secret: string;
+            ephemeral_key_secret?: string | null;
             /**
              * Customer Id
              * @description The customer's Stripe Customer id, for the sheet.
@@ -4828,6 +5195,166 @@ export interface components {
              */
             next_cursor: string | null;
         };
+        /** StaffDisputeList */
+        StaffDisputeList: {
+            /**
+             * Disputes
+             * @description Oldest first.
+             */
+            disputes: components["schemas"]["StaffDisputeSummary"][];
+        };
+        /**
+         * StaffDisputeOut
+         * @description A dispute in full for staff (#76). Reading it is recorded in the audit log.
+         */
+        StaffDisputeOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /**
+             * Public Code
+             * @description The request's public code.
+             * @example JFX-7Q2K
+             */
+            public_code: string;
+            status: components["schemas"]["DisputeStatus"];
+            reason_code: components["schemas"]["DisputeReason"];
+            resolution: components["schemas"]["DisputeResolution"] | null;
+            job_status: components["schemas"]["JobStatus"];
+            /** Customer First Name */
+            customer_first_name: string | null;
+            /** Pro First Name */
+            pro_first_name: string | null;
+            /**
+             * Customer Total Cents
+             * @description What the customer paid, tax included; null when the job's payment is missing (a dispute that needs review).
+             */
+            customer_total_cents: number | null;
+            /**
+             * Pro Payout Cents
+             * @description The pro's payout frozen at payment.
+             */
+            pro_payout_cents: number;
+            /** Pro Release Cents */
+            pro_release_cents: number | null;
+            /** Customer Refund Cents */
+            customer_refund_cents: number | null;
+            /** Currency */
+            currency: string | null;
+            /**
+             * Opened At
+             * Format: date-time
+             * @description When the customer reported it: its age.
+             */
+            opened_at: string;
+            /** Resolved At */
+            resolved_at: string | null;
+            /**
+             * Refund Failed
+             * @description Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it.
+             */
+            refund_failed: boolean;
+            /**
+             * Description
+             * @description The customer's text, as stored (masked).
+             */
+            description: string;
+            /**
+             * Pro Reply
+             * @description The pro's one answer, as stored (masked).
+             */
+            pro_reply: string | null;
+            /** Pro Replied At */
+            pro_replied_at: string | null;
+            /**
+             * Resolution Note
+             * @description The resolving admin's note (staff only).
+             */
+            resolution_note: string | null;
+            /** Resolved By */
+            resolved_by: string | null;
+            /**
+             * Photos
+             * @description The safe copies, once ready.
+             */
+            photos: components["schemas"]["DisputePhotoOut"][];
+            /** Photos Pending */
+            photos_pending: number;
+            /**
+             * Events
+             * @description The job's history, oldest first.
+             */
+            events: components["schemas"]["StaffJobEventOut"][];
+            payment: components["schemas"]["PaymentSummaryOut"] | null;
+            refund: components["schemas"]["RefundOut"] | null;
+            transfer: components["schemas"]["TransferOut"] | null;
+        };
+        /**
+         * StaffDisputeSummary
+         * @description One line of the staff list.
+         */
+        StaffDisputeSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /**
+             * Public Code
+             * @description The request's public code.
+             * @example JFX-7Q2K
+             */
+            public_code: string;
+            status: components["schemas"]["DisputeStatus"];
+            reason_code: components["schemas"]["DisputeReason"];
+            resolution: components["schemas"]["DisputeResolution"] | null;
+            job_status: components["schemas"]["JobStatus"];
+            /** Customer First Name */
+            customer_first_name: string | null;
+            /** Pro First Name */
+            pro_first_name: string | null;
+            /**
+             * Customer Total Cents
+             * @description What the customer paid, tax included; null when the job's payment is missing (a dispute that needs review).
+             */
+            customer_total_cents: number | null;
+            /**
+             * Pro Payout Cents
+             * @description The pro's payout frozen at payment.
+             */
+            pro_payout_cents: number;
+            /** Pro Release Cents */
+            pro_release_cents: number | null;
+            /** Customer Refund Cents */
+            customer_refund_cents: number | null;
+            /** Currency */
+            currency: string | null;
+            /**
+             * Opened At
+             * Format: date-time
+             * @description When the customer reported it: its age.
+             */
+            opened_at: string;
+            /** Resolved At */
+            resolved_at: string | null;
+            /**
+             * Refund Failed
+             * @description Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it.
+             */
+            refund_failed: boolean;
+        };
         /**
          * StaffDocumentCounts
          * @description A pro's documents by status, superseded ones left out.
@@ -4895,6 +5422,20 @@ export interface components {
             created_at: string;
             /** Reviewed At */
             reviewed_at: string | null;
+        };
+        /** StaffJobEventOut */
+        StaffJobEventOut: {
+            /** Type */
+            type: string;
+            from_status: components["schemas"]["JobStatus"] | null;
+            to_status: components["schemas"]["JobStatus"] | null;
+            /** By System */
+            by_system: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * StaffProDecisionOut
@@ -5268,7 +5809,7 @@ export interface components {
             pro_id: string;
             /**
              * Amount Cents
-             * @description The job's pro payout as frozen at payment, in integer cents.
+             * @description The job's pro payout as frozen at payment (or the part of it an admin released on a dispute, #76), in integer cents.
              */
             amount_cents: number;
             /**
@@ -10867,6 +11408,268 @@ export interface operations {
                 };
             };
             /** @description rate_limited: more than EARNINGS_READ_LIMIT reads in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_disputes_v1_admin_disputes_get: {
+        parameters: {
+            query?: {
+                /** @description open or resolved; every dispute when absent. */
+                status?: components["schemas"]["DisputeStatus"] | null;
+                /** @description At most this many (capped at REQUEST_LIST_MAX_LIMIT). */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffDisputeList"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a bad status or limit. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_dispute_v1_admin_disputes__dispute_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dispute_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffDisputeOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no dispute with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a malformed id. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    resolve_dispute_v1_admin_disputes__dispute_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dispute_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisputeResolveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisputeResolutionOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only admins resolve disputes. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no dispute with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description dispute_already_resolved: resolved with another decision or split (the same one again answers 200). refund_already_attempted: a refund of another amount was tried and the dispute is still open; only the same decision may be retried. resolution_in_progress: another resolve is calling Stripe; retry in a few minutes. dispute_needs_review: the job's payment cannot be refunded as is, or Stripe holds refunds that cannot be matched; nothing is created in Stripe. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a malformed id, an unknown decision, pro_release_cents on a release or a refund (or missing on a partial), or a blank note (at most 1000 characters). invalid_split: pro_release_cents is not more than 0 and less than the pro's payout. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payments_error: Stripe refused the refund; the dispute stays open and the job disputed. The same decision can be sent again, but Stripe answers it with the same refusal for 24 h (one idempotency key per refund). */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_configured: refunds are not configured. payments_unavailable: Stripe is not reachable; the dispute stays open, the same decision can be sent again. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_metrics_v1_admin_metrics_get: {
+        parameters: {
+            query?: {
+                /** @description The first day, YYYY-MM-DD. */
+                from?: string | null;
+                /** @description The last day, YYYY-MM-DD, inclusive (default: today). */
+                to?: string | null;
+                /** @description An IANA time zone the days are read in (default: BUSINESS_TIME_ZONE). */
+                tz?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricsOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a date that is not YYYY-MM-DD. invalid_range: `from` after `to`, a range longer than METRICS_MAX_RANGE_DAYS days, or `tz` not an IANA time zone. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than METRICS_READ_LIMIT reads in the window; Retry-After says when to try again. */
             429: {
                 headers: {
                     [name: string]: unknown;
