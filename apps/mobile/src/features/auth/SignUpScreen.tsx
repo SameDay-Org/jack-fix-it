@@ -125,10 +125,17 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
   );
   const { stage, finish } = finishMoment;
 
-  const slide = useCallback((towards: 1 | -1) => {
-    setDirection(towards);
-    setMoving(true);
-  }, []);
+  // Every step arrives at the top of the page, the card in full: the step that left may have been
+  // scrolled down (its keyboard, a long form at a large font). The arriving step's first field is
+  // then kept above the keyboard by useFocusedFieldInView (#471).
+  const slide = useCallback(
+    (towards: 1 | -1) => {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+      setDirection(towards);
+      setMoving(true);
+    },
+    [scrollRef],
+  );
 
   const advanceFrom = useCallback(
     (answered: SignUpStep) => {

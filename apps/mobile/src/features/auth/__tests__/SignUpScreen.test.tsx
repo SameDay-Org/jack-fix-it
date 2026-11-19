@@ -3,7 +3,7 @@ import "@/i18n";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { Redirect, router, useLocalSearchParams } from "expo-router";
-import { AccessibilityInfo } from "react-native";
+import { AccessibilityInfo, ScrollView } from "react-native";
 
 import {
   ApiError,
@@ -481,6 +481,24 @@ describe("SignUpScreen: the home step", () => {
     expect(apiPatch).not.toHaveBeenCalled();
     expect(field("City").props.value).toBe("Miami ");
     expect(endOnboarding).not.toHaveBeenCalled();
+  });
+
+  it("each step arrives at the top of the page, the card in full, forward and back (#471)", async () => {
+    const scrollTo = jest.spyOn(ScrollView.prototype, "scrollTo");
+    await reachHome("customer");
+    jest.mocked(apiPost).mockResolvedValue({} as never);
+    scrollTo.mockClear();
+
+    await typeAddress();
+    await fireEvent.press(button("Continue"));
+    await arrive("Let's see that face!");
+    expect(scrollTo).toHaveBeenCalledWith({ y: 0, animated: true });
+
+    scrollTo.mockClear();
+    await fireEvent.press(button("Back"));
+    await arrive("Where do you live?");
+    expect(scrollTo).toHaveBeenCalledWith({ y: 0, animated: true });
+    scrollTo.mockRestore();
   });
 
   it("Back (the button or the system's) returns to the name, kept as typed", async () => {
