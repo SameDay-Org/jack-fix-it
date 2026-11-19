@@ -10,6 +10,21 @@ export const DEFAULT_POLL_SECONDS = 15;
 export const DEFAULT_ETA_CLOSE_MINUTES = 60;
 const MS_PER_SECOND = 1000;
 
+/** No poll setting waits longer than an hour: anything above is a typo, not a choice. */
+export const MAX_POLL_SECONDS = 3600;
+
+/**
+ * A poll interval in milliseconds from a setting in whole seconds. A poll is optional tuning, so a
+ * bad value never stops the app at startup: empty, non-numeric, fractional, zero, negative or over
+ * `MAX_POLL_SECONDS` falls back to `fallbackSeconds`.
+ */
+export function pollIntervalMs(raw: string | undefined, fallbackSeconds: number): number {
+  const text = raw?.trim() ?? "";
+  const seconds = /^\d+$/.test(text) ? Number(text) : Number.NaN;
+  const valid = Number.isInteger(seconds) && seconds > 0 && seconds <= MAX_POLL_SECONDS;
+  return (valid ? seconds : fallbackSeconds) * MS_PER_SECOND;
+}
+
 export function positiveWhole(raw: string | undefined, fallback: number, name: string): number {
   const value = raw ? Number(raw) : fallback;
   if (!Number.isInteger(value) || value <= 0) {
@@ -23,17 +38,12 @@ export function readJobsConfig(raw: {
   pollSeconds: string | undefined;
   etaCloseMinutes: string | undefined;
 }): JobsConfig {
-  const pollSeconds = positiveWhole(
-    raw.pollSeconds,
-    DEFAULT_POLL_SECONDS,
-    "EXPO_PUBLIC_JOB_POLL_SECONDS",
-  );
   const etaCloseMinutes = positiveWhole(
     raw.etaCloseMinutes,
     DEFAULT_ETA_CLOSE_MINUTES,
     "EXPO_PUBLIC_JOB_ETA_CLOSE_MINUTES",
   );
-  return { pollMs: pollSeconds * MS_PER_SECOND, etaCloseMinutes };
+  return { pollMs: pollIntervalMs(raw.pollSeconds, DEFAULT_POLL_SECONDS), etaCloseMinutes };
 }
 
 // Literal `process.env.EXPO_PUBLIC_*` reads: Metro inlines them at build time.

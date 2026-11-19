@@ -7,6 +7,7 @@ import { TabIcon } from "@/components/icons";
 import { Button, ICON_TILE, ICON_TILE_TINT, Screen, useTabBarInset } from "@/components/ui";
 import { tokens } from "@/theme";
 
+import { ProJobList } from "./ProJobList";
 import { RequestList } from "./RequestList";
 
 // The receipt mark in a circle (docs/design "Iconography": status icons sit in circles), at the
@@ -17,7 +18,8 @@ type Copy = "customer" | "pro";
 
 /**
  * The History tab. A customer sees their requests (#47), and the empty state until they send
- * one. A pro (and staff) still see the empty state alone: their jobs come with jobs and payment.
+ * one. A pro sees every job they were hired for (#467), each opening its job screen. Staff see the
+ * empty state alone: they have no jobs of their own.
  * The empty state is the whole screen, not a card: one record type, one line of copy, one action.
  */
 export function HistoryScreen() {
@@ -39,6 +41,17 @@ export function HistoryScreen() {
               </View>
             }
             empty={<HistoryEmpty copy={copy} className="px-4" />}
+          />
+        </View>
+      ) : user.role === "pro" ? (
+        <View className="flex-1" style={{ paddingBottom: inset }}>
+          <ProJobList
+            header={
+              <View className="pb-3 pt-6">
+                <HistoryTitle copy={copy} />
+              </View>
+            }
+            empty={<HistoryEmpty copy={copy} />}
           />
         </View>
       ) : (

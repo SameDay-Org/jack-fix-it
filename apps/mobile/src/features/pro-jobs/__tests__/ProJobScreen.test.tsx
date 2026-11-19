@@ -9,7 +9,9 @@ import {
   Dimensions,
   Linking,
   Platform,
+  RefreshControl,
   type AppStateStatus,
+  type RefreshControlProps,
 } from "react-native";
 
 import { ApiError, apiGet, apiPost, NetworkError, SessionExpiredError, useSession } from "@/api";
@@ -18,7 +20,9 @@ import { dismissToast, toastStore } from "@/components/ui/toast";
 import { deferred, settle } from "../../../api/__tests__/helpers";
 import type { ProDisputeView } from "../../disputes/api";
 import { formatTimeOfDay } from "../../opportunities/format";
+import { jobsConfig } from "../../jobs/config";
 import { formatLocale } from "../../quotes/format";
+import { fakeClock } from "../../quotes/__tests__/helpers";
 import { proJobQueryKey } from "../api";
 import type { ProJob } from "../phase";
 import { ProJobScreen } from "../ProJobScreen";
@@ -697,6 +701,11 @@ describe("the chat with the customer (#74)", () => {
 
 describe("the customer's report on the job (#75)", () => {
   const DISPUTE = "/v1/pros/me/jobs/{job_id}/dispute";
+  const JOB = "/v1/pros/me/jobs/{job_id}";
+  const pull = () => {
+    const mock = RefreshControl as unknown as { latestRef: { props: RefreshControlProps } | null };
+    mock.latestRef?.props.onRefresh?.();
+  };
   const report: ProDisputeView = {
     dispute: {
       id: "0f8fad5b-d9cb-469f-a165-70867728950e",
@@ -725,9 +734,54 @@ describe("the customer's report on the job (#75)", () => {
 
   it("shows the report and its reply box on a disputed job", async () => {
     await openWithReport(proJob({ status: "disputed" }));
-    expect(await screen.findByText("The customer reported a problem")).toBeTruthy();
+    // The section's header shows at once, over a skeleton; the report and its reply box only once
+    // the report's own read answers, which under load lands after the header (#448): wait for it.
+    expect(await screen.findByTestId("pro-job-report-description")).toHaveTextContent(
+      "Nobody came.",
+    );
+    expect(screen.queryByTestId("pro-job-report-loading")).toBeNull();
+    expect(screen.getByText("The customer reported a problem")).toBeTruthy();
     expect(screen.getByTestId("pro-job-report-reply-input")).toBeTruthy();
     expect(jest.mocked(apiGet).mock.calls.map(([path]) => path)).toContain(DISPUTE);
+  });
+
+  it("reads 'Under review' on a reported job, and a pull asks for the job and its report again (#469)", async () => {
+    await openWithReport(proJob({ status: "disputed" }));
+    await screen.findByText("The customer reported a problem");
+    expect(screen.getByTestId("pro-job-status")).toHaveTextContent("Under review");
+
+    const before = jest.mocked(apiGet).mock.calls.length;
+    await act(async () => pull());
+    const asked = jest
+      .mocked(apiGet)
+      .mock.calls.slice(before)
+      .map(([path]) => path);
+    expect(asked).toEqual(expect.arrayContaining([JOB, DISPUTE]));
+  });
+
+  it("keeps a reported job and its open report fresh while it shows, until staff resolve it (#469)", async () => {
+    fakeClock();
+    let answer = report;
+    jest
+      .mocked(apiGet)
+      .mockImplementation(async (path: string) =>
+        path === DISPUTE ? answer : proJob({ status: "disputed" }),
+      );
+    await renderWithQuery(<ProJobScreen />);
+    await screen.findByText("The customer reported a problem");
+    const reads = (path: string) =>
+      jest.mocked(apiGet).mock.calls.filter(([called]) => called === path).length;
+    const [job0, report0] = [reads(JOB), reads(DISPUTE)];
+
+    answer = { ...report, dispute: { ...report.dispute!, status: "resolved" } };
+    await act(async () => jest.advanceTimersByTime(jobsConfig.pollMs));
+    await waitFor(() => expect(reads(DISPUTE)).toBe(report0 + 1));
+    expect(reads(JOB)).toBe(job0 + 1);
+
+    // Resolved: the report is not asked again on its own; the job (still disputed here) is.
+    await act(async () => jest.advanceTimersByTime(jobsConfig.pollMs));
+    await waitFor(() => expect(reads(JOB)).toBe(job0 + 2));
+    expect(reads(DISPUTE)).toBe(report0 + 1);
   });
 
   it("asks for no report on a job that is not disputed", async () => {

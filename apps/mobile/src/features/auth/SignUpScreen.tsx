@@ -18,7 +18,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import Animated from "react-native-reanimated";
+import Animated, { useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { endOnboarding, isCurrentGeneration, register, sessionGeneration, useSession } from "@/api";
@@ -124,11 +124,20 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
     useCallback(() => moveAccessibilityFocus(finishHeading.current), []),
   );
   const { stage, finish } = finishMoment;
+  const reduceMotion = useReducedMotion();
 
-  const slide = useCallback((towards: 1 | -1) => {
-    setDirection(towards);
-    setMoving(true);
-  }, []);
+  // Every step arrives at the top of the page, the card in full: the step that left may have been
+  // scrolled down (its keyboard, a long form at a large font). The arriving step's first field is
+  // then kept above the keyboard by useFocusedFieldInView (#471). Under Reduce Motion the page
+  // jumps there, as the slider crossfades instead of sliding.
+  const slide = useCallback(
+    (towards: 1 | -1) => {
+      scrollRef.current?.scrollTo({ y: 0, animated: !reduceMotion });
+      setDirection(towards);
+      setMoving(true);
+    },
+    [reduceMotion, scrollRef],
+  );
 
   const advanceFrom = useCallback(
     (answered: SignUpStep) => {

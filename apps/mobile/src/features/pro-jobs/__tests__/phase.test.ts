@@ -1,4 +1,12 @@
-import { isActiveJob, jobStep, soonestFirst, STEP_TONE, type JobStep, type ProJob } from "../phase";
+import {
+  isActiveJob,
+  jobChip,
+  jobStep,
+  soonestFirst,
+  STEP_TONE,
+  type JobStep,
+  type ProJob,
+} from "../phase";
 import { arrived, hoursFromNow, jobN, minutesFromNow, onTheWay, proJob, working } from "./helpers";
 
 type JobStatus = ProJob["status"];
@@ -119,5 +127,18 @@ describe("STEP_TONE", () => {
 
   it("marks a locked check-in as danger", () => {
     expect(STEP_TONE.locked).toBe("danger");
+  });
+});
+
+describe("jobChip (#469)", () => {
+  it("reads a reported job as under review, in a warning tone, though its step stays done", () => {
+    const reported = proJob({ status: "disputed" });
+    expect(jobStep(reported)).toBe("done");
+    expect(jobChip(reported)).toEqual({ label: "underReview", tone: "warning" });
+  });
+
+  it("reads every other job by its step", () => {
+    expect(jobChip(proJob({ status: "confirmed" }))).toEqual({ label: "done", tone: "success" });
+    expect(jobChip(onTheWay())).toEqual({ label: "onTheWay", tone: STEP_TONE.onTheWay });
   });
 });

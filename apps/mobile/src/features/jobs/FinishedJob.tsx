@@ -74,7 +74,7 @@ export function FinishedJob({
       ) : (
         <JobMap phase="finished" travel={1} />
       )}
-      <MapBack />
+      <MapBack overLight={photos.length > 0} />
       <Sheet docked testID="job-sheet">
         <View className="gap-2">
           <Text accessibilityRole="header" className="text-title-1 text-navy-900">
