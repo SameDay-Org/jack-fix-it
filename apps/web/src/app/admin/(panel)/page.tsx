@@ -17,12 +17,12 @@ export default async function PanelHome() {
   const user = await requireStaff();
   if (user.role === "agent") redirect(QUEUE_PATH);
   const t = await getT(toLocale(user.locale));
+  // Staff accounts are created with a first name; the email only stands in when it is missing.
+  const name = user.first_name?.trim() || user.email;
 
   return (
     <Card className="flex max-w-2xl flex-col items-start gap-4">
-      <CardTitle className="break-words">
-        {t("admin.home.welcome", { email: user.email })}
-      </CardTitle>
+      <CardTitle className="break-words">{t("admin.home.welcome", { name })}</CardTitle>
       <Link
         href={QUEUE_PATH}
         className="inline-flex h-11 items-center rounded-pill bg-green-500 px-6 text-sm font-semibold text-navy-900 outline-none hover:bg-green-700 hover:text-white focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2"

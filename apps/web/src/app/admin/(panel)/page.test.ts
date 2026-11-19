@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FakeCookieJar, RedirectSignal, routeFetch } from "@/lib/test-helpers";
+import { FakeCookieJar, RedirectSignal, routeFetch, user } from "@/lib/test-helpers";
 
 const { jar } = vi.hoisted(() => ({ jar: { current: null as unknown } }));
 
@@ -49,5 +49,40 @@ describe("panel home", () => {
 
     expect(page).toContain("Welcome");
     expect(page).toMatch(/<a[^>]*href="\/admin\/queue"[^>]*>Open the operations queue/);
+  });
+
+  it("greets an admin by first name, not by email", async () => {
+    fetchMock.mockImplementation(
+      routeFetch({ "/v1/auth/me": () => Response.json(user("admin", { first_name: " Sam " })) }),
+    );
+
+    const page = decoded(renderToStaticMarkup(await PanelHome()));
+
+    expect(page).toContain("Welcome, Sam<");
+    expect(page).not.toContain("staff.probe@example.com");
+  });
+
+  it("falls back to the email when the first name is missing or blank", async () => {
+    for (const first_name of [null, "   "]) {
+      fetchMock.mockImplementation(
+        routeFetch({ "/v1/auth/me": () => Response.json(user("admin", { first_name })) }),
+      );
+
+      const page = decoded(renderToStaticMarkup(await PanelHome()));
+
+      expect(page).toContain("Welcome, staff.probe@example.com<");
+    }
+  });
+
+  it("greets in Spanish by first name", async () => {
+    fetchMock.mockImplementation(
+      routeFetch({
+        "/v1/auth/me": () => Response.json(user("admin", { first_name: "Sam", locale: "es" })),
+      }),
+    );
+
+    const page = decoded(renderToStaticMarkup(await PanelHome()));
+
+    expect(page).toContain("Te damos la bienvenida, Sam<");
   });
 });
