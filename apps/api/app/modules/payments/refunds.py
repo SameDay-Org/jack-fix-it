@@ -34,6 +34,7 @@ from typing import Final
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.integrations.stripe_errors import StripeRejectedError
 from app.integrations.stripe_refunds import RefundFacts, StripeRefunds
 from app.modules.payments.models import (
     REFUND_ERROR_CODE_LENGTH,
@@ -289,6 +290,18 @@ class RefundLedger:
         """The disputes among these whose refund Stripe failed or canceled, in one statement."""
         return await self._refunds.dead_of_disputes(dispute_ids)
 
+    async def hold_for_reconciliation(self, dispute_id: uuid.UUID, now: datetime) -> int:
+        """Stripe made, or still holds, a refund for the dispute that its abandoned or failed
+        rows do not show (#450 round 2): those rows hold the job's payout from now on, until
+        staff reconcile it. Returns how many rows hold it. The caller holds the job's and the
+        dispute's locks, and commits it before the event is acknowledged."""
+        return await self._refunds.hold_for_reconciliation(dispute_id, now)
+
+    async def held_for_reconciliation(self, dispute_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """The disputes among these whose payout is held for staff to reconcile, in one
+        statement."""
+        return await self._refunds.held_for_reconciliation(dispute_ids)
+
     async def start_attempt(
         self,
         *,
@@ -421,6 +434,13 @@ def _dispute_refund(refund: Refund) -> DisputeRefund:
     )
 
 
+class RefundCreateRejectedError(StripeRejectedError):
+    """Stripe's 4xx answer to the refund CREATE itself (make_refund), not to the retry's lookup
+    or to a read (#450 round 2): with Stripe's code, only this answer says that the create under
+    the row's key can never make a refund (last_error_definitive). A lookup that fails says
+    nothing about an earlier create, whose outcome stays uncertain."""
+
+
 class RefundNeedsReviewError(Exception):
     """Stripe's refunds for the dispute cannot be matched with its row: nothing is created or
     stored. `reason` is a fixed word for the log."""
@@ -432,8 +452,8 @@ class RefundNeedsReviewError(Exception):
 
 async def make_refund(stripe: StripeRefunds, attempt: RefundAttempt) -> RefundFacts:
     """The refund in Stripe, found (a retry) or created (see the module doc), whatever its
-    status. StripeCallError for Stripe's own failures; RefundNeedsReviewError when nothing may
-    be created."""
+    status. StripeCallError for Stripe's own failures (RefundCreateRejectedError when it is the
+    create that Stripe refused); RefundNeedsReviewError when nothing may be created."""
     if attempt.number > 1:
         found = await stripe.list_refunds(attempt.payment_intent_id)
         if not found.complete:
@@ -453,17 +473,21 @@ async def make_refund(stripe: StripeRefunds, attempt: RefundAttempt) -> RefundFa
                 attempt.amount_cents,
                 attempt.currency,
             )
-    made = await stripe.create_refund(
-        payment_intent_id=attempt.payment_intent_id,
-        # From the row committed before the call, never from a request.
-        amount_cents=attempt.amount_cents,
-        metadata={
-            "dispute_id": str(attempt.dispute_id),
-            "job_id": str(attempt.job_id),
-            "refund_key": attempt.idempotency_key,
-        },
-        idempotency_key=attempt.idempotency_key,
-    )
+    try:
+        made = await stripe.create_refund(
+            payment_intent_id=attempt.payment_intent_id,
+            # From the row committed before the call, never from a request.
+            amount_cents=attempt.amount_cents,
+            metadata={
+                "dispute_id": str(attempt.dispute_id),
+                "job_id": str(attempt.job_id),
+                "refund_key": attempt.idempotency_key,
+            },
+            idempotency_key=attempt.idempotency_key,
+        )
+    except StripeRejectedError as error:
+        # The create's own refusal, told apart from the lookup's above (round 2).
+        raise RefundCreateRejectedError(request_id=error.request_id, code=error.code) from None
     return _fitting(
         made, attempt.dispute_id, attempt.idempotency_key, attempt.amount_cents, attempt.currency
     )

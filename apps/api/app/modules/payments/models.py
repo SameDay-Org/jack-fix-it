@@ -314,3 +314,9 @@ class Refund(IdTimestampsMixin, Base):
     # The deciding admin's note (staff only, never logged): the dispute's resolution_note once
     # the refund settles it.
     resolution_note: Mapped[str | None] = mapped_column(Text)
+    # When a signed refund event, read again from Stripe, showed a refund Stripe made or still
+    # holds for the dispute while this row was abandoned or failed (#450 round 2): money our
+    # rows do not show may have moved. The job's payout stays held (payments.transfers) until
+    # staff reconcile it in Stripe and clear this by hand (docs/stripe-money.md); no code ever
+    # clears it.
+    late_refund_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

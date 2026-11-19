@@ -50,6 +50,12 @@ def upgrade() -> None:
         TABLE,
         sa.Column("last_error_definitive", sa.Boolean(), server_default=sa.false(), nullable=False),
     )
+    # When a signed refund event showed a refund Stripe made, or still holds, for the dispute
+    # while this row was abandoned or failed (#450 round 2): the job's payout stays held until
+    # staff reconcile it. NULL for every existing row; the previous code never reads or writes it.
+    op.add_column(
+        TABLE, sa.Column("late_refund_seen_at", sa.DateTime(timezone=True), nullable=True)
+    )
     # One refund per dispute that is not abandoned: the one the dispute's decision carries out.
     op.create_index(
         op.f(CURRENT_INDEX),
@@ -72,7 +78,17 @@ def downgrade() -> None:
             f"{abandoned} abandoned refund rows exist: the previous schema cannot hold them. "
             "Take a backup and settle them by hand before downgrading."
         )
+    # Dropping a reconciliation hold would release the payout it holds.
+    held = bind.execute(
+        sa.text("SELECT count(*) FROM refunds WHERE late_refund_seen_at IS NOT NULL")
+    ).scalar_one()
+    if held:
+        raise RuntimeError(
+            f"{held} refund rows hold a payout for reconciliation: reconcile and clear them "
+            "(docs/stripe-money.md) before downgrading."
+        )
     op.drop_index(op.f(CURRENT_INDEX), table_name=TABLE)
+    op.drop_column(TABLE, "late_refund_seen_at")
     op.drop_column(TABLE, "last_error_definitive")
     op.drop_constraint(op.f(STRIPE_STATUS_CHECK), TABLE, type_="check")
     op.create_check_constraint(

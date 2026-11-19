@@ -5263,6 +5263,11 @@ export interface components {
              */
             refund_failed: boolean;
             /**
+             * Refund Needs Reconciliation
+             * @description Stripe shows a refund made (or still under way) for this dispute that its abandoned or failed refund records do not hold (#450 round 2): money may have gone back outside the records, so any payout of the job stays held until staff reconcile it in Stripe and clear the hold (docs/stripe-money.md). Never cleared on its own.
+             */
+            refund_needs_reconciliation: boolean;
+            /**
              * Description
              * @description The customer's text, as stored (masked).
              */
@@ -5355,6 +5360,11 @@ export interface components {
              * @description Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it.
              */
             refund_failed: boolean;
+            /**
+             * Refund Needs Reconciliation
+             * @description Stripe shows a refund made (or still under way) for this dispute that its abandoned or failed refund records do not hold (#450 round 2): money may have gone back outside the records, so any payout of the job stays held until staff reconcile it in Stripe and clear the hold (docs/stripe-money.md). Never cleared on its own.
+             */
+            refund_needs_reconciliation: boolean;
         };
         /**
          * StaffDocumentCounts

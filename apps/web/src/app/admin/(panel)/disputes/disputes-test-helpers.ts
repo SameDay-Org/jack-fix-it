@@ -40,6 +40,7 @@ export function summary(extra: Partial<DisputeItem> = {}): DisputeItem {
     opened_at: hoursAgo(3),
     resolved_at: null,
     refund_failed: false,
+    refund_needs_reconciliation: false,
     ...extra,
   };
 }

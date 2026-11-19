@@ -112,10 +112,13 @@ class AuditService:
     ) -> None:
         """Adds the row of what came of a money action an active admin already took, and that
         `record` audited when they took it (#433 round 1: a dispute's refund, which Stripe
-        finishes later), to the caller's transaction and flushes it. `actor_id` is that admin
-        (or the admin acting on it now), taken from the row that holds the action, never from a
-        request. No role check: the outcome happened whatever the admin's role is now, and
-        refusing to record it would leave money moved with no row."""
+        finishes later), or that a staff script checked them for when it started (#450 round 2:
+        a refund repair the operator confirmed and that was refused, the loss of their admin
+        role included), to the caller's transaction and flushes it. `actor_id` is that admin
+        (or the admin acting on it now), taken from the row that holds the action or the
+        script's checked operator, never from a request. No role check: the outcome happened
+        whatever the admin's role is now, and refusing to record it would leave money moved, or
+        a refused attempt, with no row. It authorizes nothing."""
         await self._audit.add(
             actor_user_id=actor_id,
             action=action.value,
