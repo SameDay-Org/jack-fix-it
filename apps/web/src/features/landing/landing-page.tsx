@@ -176,7 +176,8 @@ export function RequestEntry({ t }: { t: TFunction }) {
   );
 }
 
-function HowItWorks({ t }: { t: TFunction }) {
+/** The four steps from what happened to done; a service's page (#87) shows them too. */
+export function HowItWorks({ t }: { t: TFunction }) {
   return (
     <section id={LANDING_ANCHORS.how} aria-labelledby="how-title" className="py-20">
       <div className={CONTAINER}>
