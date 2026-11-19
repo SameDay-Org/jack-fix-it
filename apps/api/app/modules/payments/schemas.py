@@ -85,6 +85,11 @@ class TransferOut(BaseModel):
         "seen at the last check before the create) or `transfer_needs_review`. Never a message."
     )
     requested_at: datetime | None = Field(description="When the latest attempt started.")
+    create_may_have_been_issued_at: datetime | None = Field(
+        description="When an attempt first went past the last check before the create (#450 "
+        "round 5): from then on Stripe may hold a transfer of the job, even while a later "
+        "attempt retries. Kept for good; null when no attempt ever got that far."
+    )
     needs_reversal_at: datetime | None = Field(
         description="When a refund made late for the job's dispute found this transfer made, or "
         "possibly made (#450 round 4): the hold came too late to stop it. Staff reverse it in "

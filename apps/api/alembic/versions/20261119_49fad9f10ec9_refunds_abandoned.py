@@ -77,6 +77,12 @@ def upgrade() -> None:
     op.add_column(
         TRANSFERS, sa.Column("needs_reversal_at", sa.DateTime(timezone=True), nullable=True)
     )
+    # When an attempt first crossed that boundary (#450 round 5): Stripe may hold a transfer of
+    # the job from then on, whatever later attempts do. Never cleared by the code.
+    op.add_column(
+        TRANSFERS,
+        sa.Column("create_may_have_been_issued_at", sa.DateTime(timezone=True), nullable=True),
+    )
 
 
 def downgrade() -> None:
@@ -100,15 +106,21 @@ def downgrade() -> None:
             f"{held} refund rows hold a payout for reconciliation: reconcile and clear them "
             "(docs/stripe-money.md) before downgrading."
         )
-    # Dropping the marker would lose the record of a payout staff must reverse.
+    # Dropping the marker, or the evidence that a create may have been issued, would lose the
+    # record a late refund needs to tell staff a payout may have to be reversed.
     flagged = bind.execute(
-        sa.text("SELECT count(*) FROM transfers WHERE needs_reversal_at IS NOT NULL")
+        sa.text(
+            "SELECT count(*) FROM transfers WHERE needs_reversal_at IS NOT NULL"
+            " OR create_may_have_been_issued_at IS NOT NULL"
+        )
     ).scalar_one()
     if flagged:
         raise RuntimeError(
-            f"{flagged} transfers are flagged for reversal: reverse them in Stripe and clear the "
-            "flag (docs/stripe-money.md) before downgrading."
+            f"{flagged} transfers hold a reversal flag or the evidence of a create that may have "
+            "been issued: the previous schema cannot hold them. Take a backup and settle them by "
+            "hand (docs/stripe-money.md) before downgrading."
         )
+    op.drop_column(TRANSFERS, "create_may_have_been_issued_at")
     op.drop_column(TRANSFERS, "needs_reversal_at")
     op.drop_column(TRANSFERS, "create_started_at")
     op.drop_index(op.f(CURRENT_INDEX), table_name=TABLE)

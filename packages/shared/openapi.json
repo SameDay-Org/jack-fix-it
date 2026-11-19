@@ -16689,6 +16689,19 @@
             "title": "Requested At",
             "description": "When the latest attempt started."
           },
+          "create_may_have_been_issued_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Create May Have Been Issued At",
+            "description": "When an attempt first went past the last check before the create (#450 round 5): from then on Stripe may hold a transfer of the job, even while a later attempt retries. Kept for good; null when no attempt ever got that far."
+          },
           "needs_reversal_at": {
             "anyOf": [
               {
@@ -16727,6 +16740,7 @@
           "attempts",
           "last_error_code",
           "requested_at",
+          "create_may_have_been_issued_at",
           "needs_reversal_at",
           "created_at",
           "updated_at"

@@ -265,17 +265,24 @@ class TransferRepository:
                 Transfer.status == TransferStatus.PENDING,
                 Transfer.last_error_code.is_(None),
             )
-            .values(create_started_at=now)
+            .values(
+                create_started_at=now,
+                # The durable evidence (#450 round 5): the first crossing is kept for good.
+                create_may_have_been_issued_at=func.coalesce(
+                    Transfer.create_may_have_been_issued_at, now
+                ),
+            )
             .returning(Transfer.id)
         )
         return (await self._session.scalar(statement)) is not None
 
     async def flag_needs_reversal(self, job_id: uuid.UUID, now: datetime) -> uuid.UUID | None:
-        """Flags the job's transfer if it may already be issued (#450 round 4): made, or its
-        current attempt past the initiation boundary (an answer not stored yet, or lost). The
-        first time is kept. Returns the row's id, or None when no transfer of the job may be
-        issued (none, or one never past the boundary, or reversed already). The caller holds
-        the job's lock."""
+        """Flags the job's transfer if it may already be issued (#450 rounds 4 and 5): made, or
+        any attempt ever past the initiation boundary (create_may_have_been_issued_at: an
+        answer not stored yet, lost, or a retry under way since). The first time is kept.
+        Returns the row's id, or None when no transfer of the job may be issued (none, one no
+        attempt ever took past the boundary, or reversed already). The caller holds the job's
+        lock."""
         statement = (
             update(Transfer)
             .where(
@@ -283,7 +290,7 @@ class TransferRepository:
                 Transfer.status != TransferStatus.REVERSED,
                 or_(
                     Transfer.status == TransferStatus.CREATED,
-                    Transfer.create_started_at.is_not(None),
+                    Transfer.create_may_have_been_issued_at.is_not(None),
                 ),
             )
             .values(needs_reversal_at=func.coalesce(Transfer.needs_reversal_at, now))

@@ -239,6 +239,15 @@ class _Attempt:
         }
 
 
+@dataclass(frozen=True)
+class _Made:
+    """The job's transfer as Stripe holds it, and whether this attempt found it (a retry's
+    lookup) rather than creating it."""
+
+    facts: TransferFacts
+    adopted: bool
+
+
 class _NeedsReviewError(Exception):
     """Stripe's transfers for the job cannot be matched with its row: nothing is created.
     `reason` is a fixed word for the log."""
@@ -455,9 +464,7 @@ class TransferService:
         logger.warning("transfer_job_paid_out_late", extra=ids)
         return ReleaseOutcome.ALREADY_CREATED
 
-    async def _transfer(
-        self, stripe: StripeTransfers, attempt: _Attempt
-    ) -> TransferFacts | ReleaseOutcome:
+    async def _transfer(self, stripe: StripeTransfers, attempt: _Attempt) -> _Made | ReleaseOutcome:
         """Step 2: the job's transfer in Stripe, found (a retry) or created. No transaction
         is open during a Stripe call. Before the create, the initiation boundary
         (_cross_boundary): an outcome when it stops the create."""
@@ -471,7 +478,7 @@ class TransferService:
             if len(live) > 1:
                 raise _NeedsReviewError("several_transfers")
             if live:
-                return _fitting(live[0], attempt)
+                return _Made(_fitting(live[0], attempt), adopted=True)
             if ours:
                 # The job's only transfers were reversed: paying again is staff's call.
                 raise _NeedsReviewError("transfer_reversed")
@@ -489,7 +496,7 @@ class TransferService:
             metadata={"job_id": str(attempt.job_id)},
             idempotency_key=transfer_idempotency_key(attempt.job_id),
         )
-        return _fitting(created, attempt)
+        return _Made(_fitting(created, attempt), adopted=False)
 
     async def _cross_boundary(self, attempt: _Attempt) -> ReleaseOutcome | None:
         """The transfer's initiation boundary (#450 round 4), in a short transaction right
@@ -522,25 +529,41 @@ class TransferService:
         return None
 
     async def _settle(
-        self, stripe: StripeTransfers, attempt: _Attempt, made: TransferFacts
+        self, stripe: StripeTransfers, attempt: _Attempt, made: _Made
     ) -> ReleaseOutcome:
         """Step 3: the transfer's id stored and the job paid_out, in one transaction; then
-        step 4."""
+        step 4. A hold present as it is stored (#450 round 5: a late refund committed while a
+        retry looked the transfer up, or while a first create was still answering) cannot stop
+        a transfer Stripe already made: it is flagged for staff in the same transaction
+        (needs_reversal_at), whether this attempt adopted it or created it."""
         job = await self._jobs.locked(attempt.job_id)
         stored = await self._transfers.mark_created(
-            attempt.transfer_id, made.transfer_id, self._clock()
+            attempt.transfer_id, made.facts.transfer_id, self._clock()
         )
         if not stored:
             # Another attempt of this job stored it first: the same transfer (one key).
             return await self._leave(ReleaseOutcome.ALREADY_CREATED)
+        held = job is not None and await has_open_hold(self._session, job)
+        if held and made.adopted:
+            await self._flag_stored_under_hold(attempt, "adopted")
+        if held and not made.adopted:
+            await self._flag_stored_under_hold(attempt, "created")
         if job is not None and (job.confirmed or job.disputed):
             await self._paid_out(job, attempt.decided_by)
         else:  # pragma: no cover - only release moves a confirmed job, under this lock
             logger.error("transfer_created_job_not_confirmed", extra=attempt.ids)
         await self._session.commit()
-        logger.info("transfer_created", extra={**attempt.ids, "stripe_request_id": made.request_id})
-        await self._read_reversal(stripe, attempt.transfer_id, made.transfer_id, attempt.ids)
+        logger.info(
+            "transfer_created", extra={**attempt.ids, "stripe_request_id": made.facts.request_id}
+        )
+        await self._read_reversal(stripe, attempt.transfer_id, made.facts.transfer_id, attempt.ids)
         return ReleaseOutcome.CREATED
+
+    async def _flag_stored_under_hold(self, attempt: _Attempt, how: str) -> None:
+        """The transfer just stored, under a hold: flagged for staff, never reversed here. `how`:
+        adopted (a retry's lookup found it) or created (this attempt's create answered)."""
+        await self._transfers.flag_needs_reversal(attempt.job_id, self._clock())
+        logger.error("transfer_needs_reversal", extra={**attempt.ids, "stored_under_hold": how})
 
     async def _read_reversal(
         self,

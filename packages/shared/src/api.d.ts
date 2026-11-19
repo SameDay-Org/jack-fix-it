@@ -5866,6 +5866,11 @@ export interface components {
              */
             requested_at: string | null;
             /**
+             * Create May Have Been Issued At
+             * @description When an attempt first went past the last check before the create (#450 round 5): from then on Stripe may hold a transfer of the job, even while a later attempt retries. Kept for good; null when no attempt ever got that far.
+             */
+            create_may_have_been_issued_at: string | null;
+            /**
              * Needs Reversal At
              * @description When a refund made late for the job's dispute found this transfer made, or possibly made (#450 round 4): the hold came too late to stop it. Staff reverse it in Stripe by hand and clear the flag (docs/stripe-money.md); nothing reverses or clears it automatically. null otherwise.
              */

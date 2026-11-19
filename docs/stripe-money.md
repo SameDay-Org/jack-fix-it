@@ -154,7 +154,10 @@ A release checks the hold under the job's lock first, then calls Stripe without 
 looks up the charge, and then creates the transfer. A late refund's hold can commit in between.
 So the release checks once more right before the create, in a short transaction under the
 job's lock (the lock the late refund's hold takes too), and stamps the attempt
-`transfers.create_started_at`. That is the boundary. The two cases:
+`transfers.create_started_at`. That is the boundary. The first time any attempt crosses it, it
+also stamps `transfers.create_may_have_been_issued_at` (#450 round 5): from then on Stripe may
+hold a transfer of the job, whatever later attempts do. A retry starts a new attempt and
+clears `create_started_at`, but never that evidence. Nothing clears it. The two cases:
 
 - **The hold commits before the boundary.** The boundary sees it and creates nothing. The
   transfer row stays `pending` with `last_error_code = held_before_create`: no failure, and the
@@ -165,8 +168,16 @@ job's lock (the lock the late refund's hold takes too), and stamps the attempt
   `transfers.needs_reversal_at`, an ERROR `transfer_needs_reversal` with the dispute, job and
   transfer row ids, and `needs_reversal_at` on the transfer in the staff reads
   (`GET /v1/admin/jobs/{id}/transfer`, the dispute's detail). It flags the transfer whether
-  Stripe made it, or it may have (an answer not stored yet, or lost). Nothing reverses a
-  transfer on its own, and nothing clears the flag.
+  Stripe made it, or it may have: an answer not stored yet, an answer lost, or a retry under
+  way since (the flag reads the evidence above, not the current attempt's stamp). Nothing
+  reverses a transfer on its own, and nothing clears the flag.
+- **A lost answer, then a retry.** The retry first looks the job's transfer up in Stripe; the
+  evidence still says a create may have been issued, so a late refund's hold during that
+  lookup flags the transfer, and so does a hold after a failed lookup. When the lookup finds
+  the transfer and stores it while a hold exists, or when a first create that was still
+  answering comes back and is stored while a hold exists, storing it flags it too, in the same
+  transaction (an ERROR `transfer_needs_reversal` with `stored_under_hold` = `adopted` or
+  `created`).
 
 When a transfer is flagged, an admin:
 
