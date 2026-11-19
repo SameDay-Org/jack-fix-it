@@ -227,6 +227,8 @@ beforeEach(() => {
         if (!found) throw new ApiError(404, "not_found");
         return found;
       }
+      // A pro's History lists their jobs (#467): none here.
+      if (path === "/v1/pros/me/jobs") return { items: [], next_cursor: null };
       return CATEGORIES;
     }) as unknown as typeof apiGet);
 });
