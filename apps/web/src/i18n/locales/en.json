@@ -22,6 +22,7 @@
       "label": "Sections",
       "services": "Services",
       "how": "How it works",
+      "forPros": "For professionals",
       "getApp": "Get the app",
       "menu": "Menu"
     },
@@ -116,14 +117,134 @@
         "leads": "No paying for leads.",
         "paid": "You're paid when the job happens."
       },
-      "link": "See the app for pros"
+      "link": "See the app for pros",
+      "more": "How it works for pros"
     },
     "footer": {
       "label": "Legal and contact",
+      "forPros": "For professionals",
       "terms": "Terms",
       "privacy": "Privacy",
       "contact": "Contact",
       "rights": "© {{year}} Jack Fix It. All rights reserved."
+    }
+  },
+  "forPros": {
+    "meta": {
+      "title": "For professionals | Jack Fix It",
+      "description": "Get requests from homeowners near you, send your quotes and run your jobs from the Jack Fix It app. No lead fees.",
+      "ogAlt": "Jack Fix It for professionals: work that comes to you.",
+      "ogLine": "Work that comes to you."
+    },
+    "nav": {
+      "how": "How it works",
+      "faq": "Questions"
+    },
+    "hero": {
+      "eyebrow": "For professionals",
+      "title": "Work that comes to you.",
+      "body": "Get requests from homeowners near you, send your quotes and run your jobs from the app.",
+      "getApp": "Get the app",
+      "how": "How it works",
+      "badgesLabel": "Working with Jack",
+      "badges": {
+        "leadFees": "No lead fees",
+        "paid": "Get paid when the job happens",
+        "records": "Clear service records"
+      }
+    },
+    "how": {
+      "eyebrow": "How you get work",
+      "title": "From your profile to your first job.",
+      "steps": {
+        "profile": {
+          "title": "Create your profile",
+          "body": "Sign up in the app, choose the services you offer and the area you work in, and add your documents."
+        },
+        "review": {
+          "title": "Our team reviews your documents",
+          "body": "A person on our team looks at each document before your profile is approved."
+        },
+        "payouts": {
+          "title": "Set up payouts",
+          "body": "Connect a payout account with Stripe, from the app."
+        },
+        "requests": {
+          "title": "Get requests that match you",
+          "body": "Requests come for the services and the area you chose. You decide which ones to quote."
+        },
+        "job": {
+          "title": "Quote, do the job, get paid",
+          "body": "Send your quote. On the day, tell the customer you're on the way, check in with the arrival code and add before and after photos. You're paid after the customer confirms the job."
+        }
+      }
+    },
+    "why": {
+      "eyebrow": "Why Jack",
+      "title": "Built around your work.",
+      "items": {
+        "leads": {
+          "title": "No lead fees",
+          "body": "You don't pay to see requests."
+        },
+        "paid": {
+          "title": "Paid when the job happens",
+          "body": "The customer pays in the app and you're paid through it: a secure payment experience."
+        },
+        "records": {
+          "title": "Clear service records",
+          "body": "Every quote, message and photo of each job stays saved in the app."
+        },
+        "support": {
+          "title": "Support when you need it",
+          "body": "Real people on our team help when something goes wrong with a job."
+        }
+      }
+    },
+    "ask": {
+      "eyebrow": "What we ask of you",
+      "title": "A few things before your first request.",
+      "items": {
+        "documents": "Your ID and the documents your trade calls for, where applicable, reviewed by our team.",
+        "payouts": "A payout account with Stripe.",
+        "profile": "An approved profile, with your services and your area."
+      },
+      "note": "Only approved pros receive requests."
+    },
+    "faq": {
+      "eyebrow": "Questions",
+      "title": "What pros ask us",
+      "items": {
+        "fees": {
+          "question": "Do I pay to get requests?",
+          "answer": "No. There are no lead fees: you don't pay to see requests."
+        },
+        "paid": {
+          "question": "When do I get paid?",
+          "answer": "When the job happens: the customer pays in the app, and you're paid after the customer confirms the job."
+        },
+        "documents": {
+          "question": "What documents do I need?",
+          "answer": "Your ID and the documents your trade calls for, where applicable. You add them in the app, and our team reviews each one before your profile is approved."
+        },
+        "choose": {
+          "question": "Can I choose my jobs?",
+          "answer": "Yes. You get requests for your services and your area, and you choose which ones to quote."
+        },
+        "problem": {
+          "question": "What if there's a problem with a job?",
+          "answer": "Our team can help. Contact us from the app and we'll get back to you."
+        },
+        "areas": {
+          "question": "Which areas do you serve?",
+          "answer": "South Florida today. When you sign up, the app tells you whether your ZIP code is in our area."
+        }
+      }
+    },
+    "final": {
+      "title": "Ready when you are.",
+      "body": "Pros sign up in the app.",
+      "getApp": "Get the app"
     }
   },
   "showcase": {

@@ -38,10 +38,16 @@ describe("the sitemap", () => {
     vi.stubEnv("SITE_URL", SITE);
     const entries = sitemap();
     expect(entries.map((entry) => entry.url)).toEqual(
-      ["/", "/es", "/app", "/es/app"].map((path) => new URL(path, SITE).href),
+      ["/", "/es", "/app", "/es/app", "/for-pros", "/es/for-pros"].map(
+        (path) => new URL(path, SITE).href,
+      ),
     );
     expect(entries[1]?.alternates?.languages).toEqual({ en: `${SITE}/`, es: `${SITE}/es` });
     expect(entries[2]?.alternates?.languages).toEqual({ en: `${SITE}/app`, es: `${SITE}/es/app` });
+    expect(entries[5]?.alternates?.languages).toEqual({
+      en: `${SITE}/for-pros`,
+      es: `${SITE}/es/for-pros`,
+    });
   });
 
   it("leaves out the legal pages while they are noindex placeholders", async () => {

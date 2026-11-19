@@ -21,13 +21,14 @@ import Link from "next/link";
 
 import { HtmlLang } from "@/features/site/html-lang";
 import { MascotImage } from "@/features/site/mascot-image";
-import { SHOWCASE_PATHS } from "@/features/site/routes";
+import { FOR_PROS_PATHS, LANDING_PATHS, SHOWCASE_PATHS } from "@/features/site/routes";
 import {
   CONTAINER,
   EYEBROW,
   FOCUS_ON_LIGHT,
   FOCUS_ON_NAVY,
   PRIMARY_ACTION,
+  SECONDARY_ACTION_ON_NAVY,
   SECTION_TITLE,
 } from "@/features/site/ui";
 import type { Locale } from "@/i18n/config";
@@ -50,11 +51,6 @@ const MAIN_ID = "content";
 
 /** Where the request flow (#86) will start: shown only once it ships (`requestFlowEnabled`). */
 export const REQUEST_FLOW_ANCHOR = "tell";
-
-const SECONDARY_ACTION = cn(
-  "inline-flex h-12 items-center justify-center rounded-pill border-2 border-white/40 px-7 text-base font-bold text-white transition-colors hover:border-white",
-  FOCUS_ON_NAVY,
-);
 
 const BADGES = [
   ["verified", BadgeCheck],
@@ -140,7 +136,7 @@ function Hero({ t, locale }: { t: TFunction; locale: Locale }) {
                 {t("landing.hero.getApp")}
               </Link>
             )}
-            <a href={`#${LANDING_ANCHORS.services}`} className={SECONDARY_ACTION}>
+            <a href={`#${LANDING_ANCHORS.services}`} className={SECONDARY_ACTION_ON_NAVY}>
               {t("landing.hero.explore")}
             </a>
           </div>
@@ -273,13 +269,22 @@ function ForPros({ t, locale }: { t: TFunction; locale: Locale }) {
           <li>{t("landing.pros.points.leads")}</li>
           <li>{t("landing.pros.points.paid")}</li>
         </ul>
-        <Link
-          href={`${SHOWCASE_PATHS[locale]}#pros`}
-          prefetch={false}
-          className={cn(PRIMARY_ACTION, FOCUS_ON_NAVY)}
-        >
-          {t("landing.pros.link")}
-        </Link>
+        <div className="flex flex-wrap gap-3">
+          <Link
+            href={FOR_PROS_PATHS[locale]}
+            prefetch={false}
+            className={cn(PRIMARY_ACTION, FOCUS_ON_NAVY)}
+          >
+            {t("landing.pros.more")}
+          </Link>
+          <Link
+            href={`${SHOWCASE_PATHS[locale]}#pros`}
+            prefetch={false}
+            className={SECONDARY_ACTION_ON_NAVY}
+          >
+            {t("landing.pros.link")}
+          </Link>
+        </div>
       </div>
     </section>
   );
@@ -326,6 +331,7 @@ export async function LandingPage({ locale }: { locale: Locale }) {
         locale={locale}
         contact={contactEmail()}
         year={new Date().getFullYear()}
+        paths={LANDING_PATHS}
       />
     </div>
   );
