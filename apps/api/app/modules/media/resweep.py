@@ -12,19 +12,20 @@ through each module's own task:
   dispute photos one photo at a time, under a job id per row, so a repeated sweep's task dedupes
   against its own (#491 round 1);
 - a row another run holds now (its claim in app.modules.media.copy_store) is left to it;
-- fair progress (#491 rounds 1 and 2): it reads up to SCAN_FACTOR times
+- fair progress (#491 rounds 1 to 3): it reads up to SCAN_FACTOR times
   MEDIA_SANITIZE_RESWEEP_BATCH_SIZE of the oldest rows per kind, skips the units (a request, a
   photo) it queued within the wait window, and queues up to the batch size of the rest, never
   queued first, then least recently queued, then oldest. When each unit was last queued is kept
-  in the queue's Redis (a sorted set per kind, trimmed to HISTORY_WINDOWS windows), so rows
-  that keep being postponed take turns with the others however the window expires: every unit
-  within the scan is queued within as many runs as there are units ahead of it.
+  in the queue's Redis (a sorted set per kind, trimmed by time to history_keep(), which outlasts
+  any rotation of the scan at any valid wait and cadence), so rows that keep being postponed take
+  turns with the others however the window expires: every unit within the scan is queued within
+  as many runs as there are units ahead of it.
 
 A copy is claimed per row (media_copies), so a sweep's copy never runs at once with another copy
 of the same row. Rows that failed for good (a file that can never be made safe) are never queued
-again. A batch that cannot be read, or a store that does not answer, ends the run; one queue
-failure is logged and never stops the next. Nothing raises out of it. Logs carry ids and counts
-only.
+again. A batch that cannot be read, or a store that does not answer (its claims or its history,
+read or written), ends the run before any further batch; one queue failure is logged and never
+stops the next. Nothing raises out of it. Logs carry ids and counts only.
 """
 
 import logging
@@ -60,13 +61,34 @@ SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 # How many of the oldest pending rows a run reads per unit it may queue: the reach behind
 # units that are recent or held.
 SCAN_FACTOR: Final = 10
-# How many wait windows a unit's last queueing is remembered (a week at the default 60 min):
-# a count of windows, so the keep follows MEDIA_SANITIZE_RESWEEP_AFTER_MINUTES.
+# The history's keep, in its two floors (history_keep): wait windows or cron runs, whichever is
+# longer, and rotations of the scan.
 HISTORY_WINDOWS: Final = 168
+HISTORY_ROTATIONS: Final = 24
 
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def history_keep(settings: Settings) -> timedelta:
+    """How long the history remembers when a unit was queued (#491 round 3).
+
+    A unit the history forgot counts as never queued, so it goes first again: forgotten within
+    a rotation, units ahead of the rest take every turn (A, B, C, D, A... and E never). So the
+    keep outlasts any rotation of the scan, at any valid wait (MEDIA_SANITIZE_RESWEEP_AFTER_
+    MINUTES) and cadence (MEDIA_SANITIZE_RESWEEP_MINUTES), which are independent. The scan holds
+    at most SCAN_FACTOR batches and a run queues one, so every unit of it has its turn within
+    SCAN_FACTOR runs once due, and a unit waits a window between turns: a rotation lasts at most
+    SCAN_FACTOR * max(window, cadence). The keep is the longer of HISTORY_WINDOWS (168) times
+    max(window, cadence) and HISTORY_ROTATIONS (24) rotations of SCAN_FACTOR runs at the
+    cadence: a week at the defaults, ten days at an hourly cadence. Still bounded: it is trimmed
+    by time on every write (never by count) and the set expires after it.
+    """
+    window = settings.media_sanitize_resweep_after_minutes
+    cadence = settings.media_sanitize_resweep_minutes
+    by_window = max(window, cadence) * HISTORY_WINDOWS
+    return timedelta(minutes=max(by_window, cadence * SCAN_FACTOR * HISTORY_ROTATIONS))
 
 
 @dataclass(frozen=True)
@@ -113,26 +135,21 @@ async def requeue_stale_media_copies(
     window = timedelta(minutes=settings.media_sanitize_resweep_after_minutes)
     limit = settings.media_sanitize_resweep_batch_size
     timeout = settings.job_enqueue_timeout_seconds
+    keep = int(history_keep(settings).total_seconds())
     counts = {"requests": 0, "jobs": 0, "disputes": 0, "failed": 0}
     try:
-        try:
-            async with sessions() as session:
-                scan = limit * SCAN_FACTOR
-                rows = {
-                    _REQUESTS: await stale_pending_request_media(session, now - window, scan),
-                    _JOBS: await stale_job_photos(session, now - window, scan),
-                    _DISPUTES: await stale_dispute_photos(session, now - window, scan),
-                }
-            store = store_of(ctx, settings)
-            chosen = {
-                kind: await _choose(store, kind, found, limit, now=now, window=window)
-                for kind, found in rows.items()
+        async with sessions() as session:
+            scan = limit * SCAN_FACTOR
+            rows = {
+                _REQUESTS: await stale_pending_request_media(session, now - window, scan),
+                _JOBS: await stale_job_photos(session, now - window, scan),
+                _DISPUTES: await stale_dispute_photos(session, now - window, scan),
             }
-        # A batch that cannot be read, or a store that does not answer, ends the run; the next
-        # run reads it again. By class only: a database error's text can hold SQL literals.
-        except Exception as error:  # noqa: BLE001
-            logger.error("media_resweep_unavailable", extra={"error": type(error).__name__})
-            return
+        store = store_of(ctx, settings)
+        chosen = {
+            kind: await _choose(store, kind, found, limit, now=now, window=window)
+            for kind, found in rows.items()
+        }
         for kind, units in chosen.items():
             queued: list[str] = []
             for unit in units:
@@ -140,7 +157,13 @@ async def requeue_stale_media_copies(
                     counts, kind.name, unit.parent_id, _enqueue(queue, kind, unit, timeout)
                 ):
                     queued.append(unit.mark)
-            await _record(store, kind, queued, now, window)
+            # Unrecorded, these units would go first again on every run: a history that cannot
+            # be written ends the run before the next kind's batch (#491 round 3).
+            await store.record_queued(kind.field, queued, now.timestamp(), keep)
+    # A batch that cannot be read, or a store that does not answer, ends the run; the next run
+    # reads it again. By class only: a database error's text can hold SQL literals.
+    except Exception as error:  # noqa: BLE001
+        logger.error("media_resweep_unavailable", extra={"error": type(error).__name__})
     finally:
         logger.info("media_copies_requeued", extra={"queued": counts})
 
@@ -200,15 +223,3 @@ async def _queue(
         return False
     counts[kind] += 1
     return True
-
-
-async def _record(
-    store: MediaCopyStore, kind: _Kind, marks: Sequence[str], now: datetime, window: timedelta
-) -> None:
-    """The units queued, recorded at `now`. A store that fails is logged: the next runs may then
-    queue them again sooner, which only repeats work."""
-    keep = int(window.total_seconds()) * HISTORY_WINDOWS
-    try:
-        await store.record_queued(kind.field, marks, now.timestamp(), keep)
-    except (RedisError, OSError) as error:
-        logger.warning("media_resweep_record_failed", extra={"error": type(error).__name__})

@@ -27,8 +27,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.modules.disputes.models import Dispute, DisputePhoto, DisputeReason
 from app.modules.jobs.models import JobPhoto, JobPhotoKind, JobStatus
+from app.modules.media import resweep
 from app.modules.media.copy_store import RedisMediaCopyStore, row_key
-from app.modules.media.resweep import requeue_stale_media_copies
+from app.modules.media.resweep import (
+    HISTORY_ROTATIONS,
+    HISTORY_WINDOWS,
+    SCAN_FACTOR,
+    history_keep,
+    requeue_stale_media_copies,
+)
 from app.modules.requests.media_copies import (
     REQUEST_MEDIA_ROWS,
     MediaCopier,
@@ -92,7 +99,8 @@ class MemoryStore:
         history = self.queued.setdefault(kind, {})
         for key in keys:
             history[key] = at + self.skew
-        for key in [key for key, when in history.items() if when < at - keep_seconds]:
+        # By time only, inclusive, as ZREMRANGEBYSCORE -inf (at - keep).
+        for key in [key for key, when in history.items() if when <= at - keep_seconds]:
             del history[key]
 
 
@@ -109,11 +117,10 @@ def store() -> MemoryStore:
 def sweep_ctx(
     session: AsyncSession, queue: Any, store: MemoryStore, **settings: object
 ) -> dict[str, Any]:
+    settings.setdefault("media_sanitize_resweep_after_minutes", int(AFTER.total_seconds() // 60))
     return {
         "session_factory": sessions_of(session),
-        "settings": make_settings(
-            media_sanitize_resweep_after_minutes=int(AFTER.total_seconds() // 60), **settings
-        ),
+        "settings": make_settings(**settings),
         "redis": queue,
         "media_copy_store": store,
     }
@@ -621,30 +628,133 @@ async def five_units(
 
 @pytest.mark.parametrize("skew", [0.0, 1.0], ids=["recorded_at_once", "recorded_1s_late"])
 @pytest.mark.parametrize("kind", ["requests", "jobs", "disputes"])
+@pytest.mark.parametrize(
+    ("after", "cadence"),
+    [(60, 30), (1, 60), (120, 1)],
+    ids=["defaults_wait_60_every_30", "wait_1_every_60", "wait_120_every_1"],
+)
 async def test_a_healthy_unit_behind_four_postponed_ones_is_reached_across_the_window(
-    db_session: AsyncSession, storage: MemoryStorage, kind: str, skew: float
+    db_session: AsyncSession,
+    storage: MemoryStorage,
+    kind: str,
+    skew: float,
+    after: int,
+    cadence: int,
 ) -> None:
-    """Batch 1, a sweep every 30 minutes, a 60-minute window, an expiring history: four units
-    that are never copied (an outage that lasts) sit ahead of a healthy one. Oldest-first after
-    the window expires would serve A, B, A, B... forever; least recently queued first reaches
-    the healthy one within five runs, and every run queues exactly one unit."""
+    """Batch 1, an expiring history (trimmed by the sweep's keep, on the sweep's clock), a run
+    every `cadence` minutes for 12 runs, at valid settings: the defaults, a wait far shorter
+    than the cadence (#491 round 3: a keep of 168 windows forgot A before E's turn, so A, B, C,
+    D, A... and E never), and far longer. Four units that are never copied (an outage that
+    lasts) sit ahead of a healthy one. Oldest-first after the window expires would serve A, B,
+    A, B... forever; least recently queued first reaches the healthy one within five runs, never
+    queues more than the batch, and every unit takes its turn."""
     store = MemoryStore(skew=skew)
     postponed, healthy = await five_units(db_session, storage, kind)
-    start = later()
+    start = datetime.now(UTC) + timedelta(minutes=after + 5)
     picked: list[list[str]] = []
     for run in range(12):
         queue = RecordingQueue()
         await requeue_stale_media_copies(
-            sweep_ctx(db_session, queue, store, media_sanitize_resweep_batch_size=1),
-            clock=fixed(start + timedelta(minutes=30 * run)),
+            sweep_ctx(
+                db_session,
+                queue,
+                store,
+                media_sanitize_resweep_batch_size=1,
+                media_sanitize_resweep_after_minutes=after,
+                media_sanitize_resweep_minutes=cadence,
+            ),
+            clock=fixed(start + timedelta(minutes=cadence * run)),
         )
         picked.append(list(queue.jobs))
 
-    assert all(len(ids) == 1 for ids in picked), picked
-    first_healthy = next(run for run, ids in enumerate(picked) if healthy in ids)
+    assert all(len(ids) <= 1 for ids in picked), picked
+    first_healthy = next((run for run, ids in enumerate(picked) if healthy in ids), None)
+    assert first_healthy is not None, picked
     assert first_healthy < 5, picked
     # Every unit takes its turn: none of the five is starved.
     assert {job_id for ids in picked for job_id in ids} == {*postponed, healthy}
+
+
+@pytest.mark.parametrize("cadence", [1, 7, 30, 45, 60])
+@pytest.mark.parametrize("after", [1, 15, 60, 120, 1440, 10080])
+def test_the_history_outlasts_a_rotation_at_every_valid_wait_and_cadence(
+    after: int, cadence: int
+) -> None:
+    """A rotation of the scan (SCAN_FACTOR runs, a window between a unit's turns) ends long
+    before the history forgets its first unit; the keep stays bounded (trimmed by time)."""
+    settings = make_settings(
+        media_sanitize_resweep_after_minutes=after, media_sanitize_resweep_minutes=cadence
+    )
+    keep = history_keep(settings)
+
+    rotation = timedelta(minutes=SCAN_FACTOR * max(after, cadence))
+    assert keep >= HISTORY_ROTATIONS * timedelta(minutes=SCAN_FACTOR * cadence)
+    assert keep >= 10 * (rotation + timedelta(minutes=after + cadence))
+    assert keep == max(
+        timedelta(minutes=HISTORY_WINDOWS * max(after, cadence)),
+        timedelta(minutes=HISTORY_ROTATIONS * SCAN_FACTOR * cadence),
+    )
+
+
+def test_the_history_keeps_a_week_at_the_defaults() -> None:
+    assert history_keep(make_settings()) == timedelta(days=7)
+
+
+class FailingHistory(MemoryStore):
+    """The history's first write fails (`write`), or its every read (`read`)."""
+
+    def __init__(self, failing: str) -> None:
+        super().__init__()
+        self.failing = failing
+        self.writes = 0
+
+    async def last_queued(self, kind: str, keys: Any) -> dict[str, float]:
+        if self.failing == "read":
+            raise RedisError("down")
+        return await super().last_queued(kind, keys)
+
+    async def record_queued(self, kind: str, keys: Any, at: float, keep_seconds: int) -> None:
+        self.writes += 1
+        if self.failing == "write" and self.writes == 1:
+            raise RedisError("down")
+        await super().record_queued(kind, keys, at, keep_seconds)
+
+
+@pytest.mark.parametrize("failing", ["write", "read"])
+async def test_a_history_that_cannot_be_written_or_read_ends_the_run(
+    db_session: AsyncSession,
+    storage: MemoryStorage,
+    caplog: pytest.LogCaptureFixture,
+    failing: str,
+) -> None:
+    """#491 round 3: one pending unit of each kind. The first write fails (after the request
+    media's batch was queued): no later kind is queued, and the run logs one ERROR, by class.
+    Unrecorded, those units would go first on every run. Control: a history that cannot be read
+    ends the run before any batch."""
+    media = await make_media(db_session, storage, gps_jpeg())
+    await photos_of_a_job_and_a_dispute(db_session)
+    store = FailingHistory(failing)
+    queue = RecordingQueue()
+
+    with caplog.at_level(logging.INFO):
+        await requeue_stale_media_copies(sweep_ctx(db_session, queue, store), clock=later)
+
+    expected = [sanitize_job_id(media.request_id)] if failing == "write" else []
+    assert list(queue.jobs) == expected
+    assert store.writes == (1 if failing == "write" else 0)
+    [error] = [
+        r for r in caplog.records if r.name == resweep.__name__ and r.levelno >= logging.WARNING
+    ]
+    assert (error.getMessage(), error.levelno) == ("media_resweep_unavailable", logging.ERROR)
+    # By class only: never the error's text.
+    assert (error.__dict__["error"], error.exc_info) == ("RedisError", None)
+    [summary] = [r for r in caplog.records if r.getMessage() == "media_copies_requeued"]
+    assert summary.__dict__["queued"] == {
+        "requests": len(expected),
+        "jobs": 0,
+        "disputes": 0,
+        "failed": 0,
+    }
 
 
 async def test_a_healthy_image_behind_videos_ffmpeg_cannot_copy_is_copied(
