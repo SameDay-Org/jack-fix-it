@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useId, useState } from "react";
+import { useActionState, useEffect, useId, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/input";
@@ -21,6 +21,8 @@ export type DecisionControlText = {
   reasonHint: string;
   saving: string;
   saved: string;
+  /** Announced with `saved` once a decision went through: what was decided. */
+  decided: Record<Decision, string>;
   errors: Record<ReviewError, string>;
 };
 
@@ -34,21 +36,39 @@ const initialState: ReviewState = { error: null, saved: false };
  * one too when `confirmApproval` is set (the profile's), and goes straight through otherwise
  * (a document's). No button is ever `disabled`, so the keyboard focus never lands on a dead
  * control: a click while a decision is being saved is ignored, and the outcome is announced
- * (saving, saved, or the error).
+ * (saving, then what was decided and saved, or the error).
+ *
+ * A decision that goes through takes its buttons away (it is no longer offered), and with them
+ * the keyboard focus: `focusAfter` names the element that takes it instead (the document's or
+ * the pro's heading, #463). The page keeps this control mounted when nothing is left to offer,
+ * so its announcement stays.
  */
 export function DecisionControl({
   action,
   offered,
   confirmApproval = false,
+  focusAfter,
   text,
 }: {
   action: (previous: ReviewState, form: FormData) => Promise<ReviewState>;
   /** The decisions that can still be taken: the current one is left out by the page. */
   offered: readonly Decision[];
   confirmApproval?: boolean;
+  /** The id of the element that takes the focus once a decision went through. */
+  focusAfter?: string;
   text: DecisionControlText;
 }) {
   const [state, submit, pending] = useActionState(action, initialState);
+  // The decision being sent: the announcement names it once it is saved.
+  const [sent, setSent] = useState<Decision | null>(null);
+  const send = (form: FormData) => {
+    const decision = form.get("decision");
+    setSent(decision === "approved" || decision === "rejected" ? decision : null);
+    submit(form);
+  };
+  useEffect(() => {
+    if (state.saved && focusAfter) document.getElementById(focusAfter)?.focus();
+  }, [state, focusAfter]);
   const [chosen, setChosen] = useState<Decision | null>(null);
   // The button that opened a step the user cancelled: it takes the focus back.
   const [returnTo, setReturnTo] = useState<Decision | null>(null);
@@ -72,29 +92,31 @@ export function DecisionControl({
   };
 
   return (
-    <form action={submit} className="flex flex-col">
+    <form action={send} className="flex flex-col">
       {step === null ? (
-        <div role="group" aria-label={text.label} className="flex flex-wrap gap-2">
-          {offered.map((decision) => {
-            const asks = decision === "rejected" || confirmApproval;
-            return (
-              <Button
-                key={decision}
-                type={asks ? "button" : "submit"}
-                name={asks ? undefined : "decision"}
-                value={asks ? undefined : decision}
-                size="sm"
-                variant={decision === "approved" ? "primary" : "secondary"}
-                autoFocus={decision === returnTo}
-                aria-disabled={pending ? true : undefined}
-                onClick={asks ? () => choose(decision) : ignoreWhilePending}
-                className={waiting}
-              >
-                {decision === "approved" ? text.approve : text.reject}
-              </Button>
-            );
-          })}
-        </div>
+        offered.length > 0 ? (
+          <div role="group" aria-label={text.label} className="flex flex-wrap gap-2">
+            {offered.map((decision) => {
+              const asks = decision === "rejected" || confirmApproval;
+              return (
+                <Button
+                  key={decision}
+                  type={asks ? "button" : "submit"}
+                  name={asks ? undefined : "decision"}
+                  value={asks ? undefined : decision}
+                  size="sm"
+                  variant={decision === "approved" ? "primary" : "secondary"}
+                  autoFocus={decision === returnTo}
+                  aria-disabled={pending ? true : undefined}
+                  onClick={asks ? () => choose(decision) : ignoreWhilePending}
+                  className={waiting}
+                >
+                  {decision === "approved" ? text.approve : text.reject}
+                </Button>
+              );
+            })}
+          </div>
+        ) : null
       ) : (
         <div className="flex flex-col gap-3 rounded-md bg-gray-50 p-4">
           <input type="hidden" name="decision" value={step} />
@@ -136,7 +158,11 @@ export function DecisionControl({
         </div>
       )}
       <p role="status" className="mt-3 text-sm text-gray-500 empty:mt-0">
-        {pending ? text.saving : state.saved ? text.saved : ""}
+        {pending
+          ? text.saving
+          : state.saved
+            ? `${sent ? `${text.decided[sent]} ` : ""}${text.saved}`
+            : ""}
       </p>
       {error ? (
         <p role="alert" className="mt-3 text-sm font-semibold text-danger">

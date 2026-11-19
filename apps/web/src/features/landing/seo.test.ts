@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as englishImage from "@/app/(marketing)/opengraph-image";
 import * as spanishImage from "@/app/(marketing)/es/opengraph-image";
+import * as showcaseImage from "@/app/(showcase)/app/opengraph-image";
+import * as spanishShowcaseImage from "@/app/(showcase)/es/app/opengraph-image";
 import robots from "@/app/robots";
 import sitemap from "@/app/sitemap";
-import { legalMetadata } from "@/features/showcase/metadata";
+import { legalMetadata, showcaseMetadata } from "@/features/showcase/metadata";
 import { PRIVACY_PATHS, TERMS_PATHS } from "@/features/site/routes";
 import en from "@/i18n/locales/en.json";
 import es from "@/i18n/locales/es.json";
@@ -114,6 +116,9 @@ describe("the link cards", () => {
   it.each([
     ["en", englishImage, en.landing.meta.ogAlt],
     ["es", spanishImage, es.landing.meta.ogAlt],
+    // The app's page (/app, /es/app) has its own card too (#461).
+    ["en", showcaseImage, en.showcase.meta.ogAlt],
+    ["es", spanishShowcaseImage, es.showcase.meta.ogAlt],
   ] as const)("in %s is a 1200 x 630 PNG described in its language", (_, image, alt) => {
     expect(image.alt).toBe(alt);
     expect(image.size).toEqual({ width: 1200, height: 630 });
@@ -121,7 +126,22 @@ describe("the link cards", () => {
   });
 
   it.each(["en", "es"] as const)("in %s asks X for a large card", async (locale) => {
-    const metadata = await landingMetadata(locale);
-    expect(metadata.twitter).toMatchObject({ card: "summary_large_image", title: metadata.title });
+    for (const metadata of [await landingMetadata(locale), await showcaseMetadata(locale)]) {
+      expect(metadata.twitter).toMatchObject({
+        card: "summary_large_image",
+        title: metadata.title,
+      });
+    }
   });
+
+  it.each([
+    ["en", showcaseImage, en.showcase.hero.lead],
+    ["es", spanishShowcaseImage, es.showcase.hero.lead],
+  ] as const)(
+    "in %s draws the app page's card with the page's own line (#461)",
+    (_, image, line) => {
+      expect(image.alt).toContain(line);
+      expect(typeof image.default).toBe("function");
+    },
+  );
 });

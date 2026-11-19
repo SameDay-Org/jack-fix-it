@@ -235,6 +235,18 @@ function DisputeView({
 
       <Card className="flex flex-col gap-4">
         <CardTitle>{t("admin.disputes.detail.money.title")}</CardTitle>
+        {/* A refund made late found the pro's payout made (#450): only staff can reverse it, in
+            Stripe, by hand; the API never clears this by itself. */}
+        {dispute.transfer?.needs_reversal_at ? (
+          <p
+            role="alert"
+            data-reversal
+            className="flex items-start gap-3 rounded-lg bg-danger p-4 font-semibold text-white"
+          >
+            <AlertTriangle aria-hidden className="mt-0.5 size-5 shrink-0" />
+            {t("admin.disputes.detail.money.needsReversal")}
+          </p>
+        ) : null}
         {dispute.payment ? null : (
           <p className="text-sm font-semibold">{t("admin.disputes.detail.money.noPayment")}</p>
         )}

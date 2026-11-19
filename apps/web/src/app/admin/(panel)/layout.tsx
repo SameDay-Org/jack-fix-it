@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ErrorCopyProvider } from "@/features/site/error-copy";
+import { panelErrorCopy } from "@/features/site/error-copy-server";
 import { toLocale } from "@/i18n/locale";
 import { getT } from "@/i18n/server";
 import { requireStaff } from "@/lib/session";
@@ -75,7 +77,10 @@ export default async function PanelLayout({ children }: { children: ReactNode })
             </Button>
           </form>
         </header>
-        <main className="flex-1 px-4 py-6 md:px-8 md:py-8">{children}</main>
+        <main className="flex-1 px-4 py-6 md:px-8 md:py-8">
+          {/* A page that fails keeps the frame and speaks the staff member's language (#462). */}
+          <ErrorCopyProvider copy={panelErrorCopy(t)}>{children}</ErrorCopyProvider>
+        </main>
       </div>
     </div>
   );

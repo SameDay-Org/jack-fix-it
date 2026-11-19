@@ -9,6 +9,18 @@
       "footerLabel": "Language (footer)",
       "en": "English",
       "es": "Español"
+    },
+    "error": {
+      "title": "This page didn't load",
+      "body": "Something went wrong on our side. Please try again in a moment.",
+      "retry": "Try again",
+      "home": "Go to the home page"
+    },
+    "notFound": {
+      "metaTitle": "Page not found | Jack Fix It",
+      "title": "We can't find this page",
+      "body": "The link may be old or have a typo.",
+      "home": "Go to the home page"
     }
   },
   "landing": {
@@ -293,7 +305,8 @@
   "showcase": {
     "meta": {
       "title": "Jack Fix It: the app for whatever happens at home",
-      "description": "Tell Jack what happened, compare fixed-price quotes from verified pros and pay in the app. You confirm when the job is done. Coming soon to iPhone and Android."
+      "description": "Tell Jack what happened, compare fixed-price quotes from verified pros and pay in the app. You confirm when the job is done. Coming soon to iPhone and Android.",
+      "ogAlt": "The Jack Fix It name and its line “Tell Jack. We'll take care of the rest.” on navy."
     },
     "skipToContent": "Skip to content",
     "homeLabel": "Jack Fix It, back to the top",
@@ -843,7 +856,11 @@
           "reasonLabel": "Reason",
           "reasonHint": "The pro can read this. Up to {{max}} characters.",
           "saving": "Saving…",
-          "saved": "Saved."
+          "saved": "Saved.",
+          "decided": {
+            "approved": "Approved.",
+            "rejected": "Rejected."
+          }
         },
         "errors": {
           "reason_required": "Write a reason of up to {{max}} characters.",
@@ -1052,6 +1069,7 @@
           "proRelease": "Released to the pro",
           "customerRefund": "Refunded to the customer",
           "noPayment": "No payment on record for this job: it needs a review before it can be resolved.",
+          "needsReversal": "A payout may need to be reversed: ask an engineer.",
           "none": "None",
           "stripeCode": "Stripe code: {{code}}",
           "paymentStatus": {
@@ -1169,6 +1187,12 @@
           "unavailable": "Something went wrong. Check the dispute before trying again."
         }
       }
+    },
+    "error": {
+      "title": "The panel can't reach the server right now",
+      "body": "Please try again in a moment. If it keeps happening, tell an engineer.",
+      "retry": "Try again",
+      "home": "Back to the panel"
     }
   },
   "request": {
