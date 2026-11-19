@@ -33,9 +33,10 @@ export const ID_CARD_BASE = {
   columnGap: 14,
   /** A 4:5 portrait plate: a ring, a mat in the card's own color, then the photo. */
   photo: { width: 88, height: 110, radius: 10, ring: 1.5, mat: 2 },
-  proBadge: { height: 16, paddingX: 9 },
+  /** PRO's pill: its height, and its width as a fraction of the photo plate's. */
+  proBadge: { height: 16, width: 0.5 },
   /** The microtext rule's top, and the footer row's height and bottom margin. */
-  rule: { top: 160, height: 4 },
+  rule: { top: 160 },
   footer: { height: 26, bottom: 10 },
   /** The back: the magnetic-stripe band, and the code panel under it. */
   stripe: { top: 16, height: 30 },
@@ -228,6 +229,15 @@ export function parallaxOffset(
   return { x: depth * Math.tan(tiltY * RADIANS), y: -depth * Math.tan(tiltX * RADIANS) };
 }
 
+/** How much the card grows at the middle of a flip, on top of its lift. */
+const FLIP_LIFT = 0.05;
+
+/** The card's scale: its lift (1 at rest, 1.03 under a finger) and a little more mid-flip. */
+export function cardScale(lift: number, turn: number): number {
+  "worklet";
+  return lift + Math.sin(Math.abs(turn) * RADIANS) * FLIP_LIFT;
+}
+
 /** The ground shadow, in design dp (scaled by `unit` on screen). */
 const SHADOW = {
   /** Its drop under the card at rest, and how far it slides at the full lean. */
@@ -253,7 +263,8 @@ export type GroundShadow = {
  * The shadow the card casts on the page: it moves against the lean (the light is above the
  * phone), foreshortens with the card, sinks, widens and softens as the card lifts, and narrows as
  * the card turns edge-on.
- * `lift` is the card's scale (1 at rest), `turn` its flip angle in degrees, `unit` its scale.
+ * `lift` is the card's scale (`cardScale`: 1 at rest, up to 1.08 mid-flip), `turn` its flip angle
+ * in degrees, `unit` its design scale.
  */
 export function groundShadow(
   tiltX: number,

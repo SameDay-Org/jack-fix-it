@@ -348,7 +348,7 @@ const SHEEN_FRAME: ViewStyle = {
 };
 
 /** The specular band: a hot core in a soft halo, with a faint pearl fringe on its trailing side. */
-export function Sheen({
+function Sheen({
   palette,
   gradientId,
   style,
@@ -382,14 +382,14 @@ export function Sheen({
               stopColor={palette.sheen}
               stopOpacity={palette.sheenOpacity * 0.4}
             />
-            <Stop offset="0.56" stopColor={palette.sheen} stopOpacity={0} />
-            <Stop offset="0.53" stopColor={palette.fringe.color} stopOpacity={0} />
+            {/* Offsets only grow: react-native-svg sorts stops, one out of order cuts the falloff. */}
+            <Stop offset="0.56" stopColor={palette.fringe.color} stopOpacity={0} />
             <Stop
-              offset="0.58"
+              offset="0.6"
               stopColor={palette.fringe.color}
               stopOpacity={palette.fringe.opacity}
             />
-            <Stop offset="0.66" stopColor={palette.fringe.color} stopOpacity={0} />
+            <Stop offset="0.68" stopColor={palette.fringe.color} stopOpacity={0} />
           </LinearGradient>
         </Defs>
         <Rect width="100%" height="100%" fill={`url(#${id})`} />
@@ -859,7 +859,7 @@ function ProBadge({
   const { photo, paddingX, bodyTop, proBadge } = ID_CARD_BASE;
   const height = proBadge.height * unit;
   // Wide enough for "PRO" in any language this card speaks; centered under the plate.
-  const width = photo.width * unit * 0.5;
+  const width = photo.width * unit * proBadge.width;
   return (
     <View
       style={[
@@ -922,7 +922,7 @@ function ProBadge({
   );
 }
 
-export type FrontProps = {
+type FrontProps = {
   variant: IdCardVariant;
   palette: Palette;
   unit: number;
@@ -1091,7 +1091,7 @@ export function Front({
   );
 }
 
-export type BackProps = {
+type BackProps = {
   palette: Palette;
   unit: number;
   gradientId: string;

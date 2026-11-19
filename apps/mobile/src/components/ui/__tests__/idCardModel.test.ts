@@ -1,4 +1,5 @@
 import {
+  cardScale,
   clampTilt,
   decorativeBars,
   formatPublicCode,
@@ -73,7 +74,7 @@ describe("parallaxOffset", () => {
     expect(raised.x).toBeCloseTo(4 * Math.tan((20 * Math.PI) / 180), 6);
     expect(sunk.x).toBeCloseTo(-raised.x, 6);
     expect(parallaxOffset(0, 20, 8).x).toBeCloseTo(raised.x * 2, 6);
-    // A lean around X (top edge toward you) moves a raised part up.
+    // A lean around X that tips the top edge away moves a raised part up.
     expect(parallaxOffset(10, 0, 4).y).toBeLessThan(0);
   });
 
@@ -81,6 +82,15 @@ describe("parallaxOffset", () => {
     const rest = parallaxOffset(0, 0, 8);
     expect(rest.x).toBeCloseTo(0, 10);
     expect(rest.y).toBeCloseTo(0, 10);
+  });
+});
+
+describe("cardScale", () => {
+  it("is the lift at rest and on either face, and grows a little edge-on", () => {
+    expect(cardScale(1, 0)).toBe(1);
+    expect(cardScale(1.03, 180)).toBeCloseTo(1.03, 10);
+    expect(cardScale(1, 90)).toBeCloseTo(1.05, 10);
+    expect(cardScale(1, -90)).toBeCloseTo(1.05, 10);
   });
 });
 

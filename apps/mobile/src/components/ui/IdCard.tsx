@@ -42,6 +42,7 @@ import {
   type Palette,
 } from "./IdCardFaces";
 import {
+  cardScale,
   clampTilt,
   formatPublicCode,
   groundShadow,
@@ -96,7 +97,8 @@ export type IdCardProps = {
 const HALF_TURN = 180;
 /** Within this many degrees of its own rest a hidden face is parked: turned away, not tracked. */
 const PARKED = 0.5;
-/** The lean of a drag across the whole card: the limit comes before the flip threshold. */
+/** The lean of a drag across the whole card: it reaches `MAX_TILT` at about half the width, a
+ * little past the swipe that turns the card over (`FLIP_FRACTION`). */
 const DRAG_TILT = 48;
 /** A horizontal drag this long activates the pan; a vertical one this long leaves it to the list. */
 const PAN_ACTIVATE_DP = 8;
@@ -104,9 +106,8 @@ const PAN_FAIL_DP = 12;
 /** A release faster than this, or past this fraction of the width, turns the card over. */
 const FLING_VELOCITY = 600;
 const FLIP_FRACTION = 0.35;
-/** The card rises to the finger, and a little more at the middle of a flip. */
+/** The card rises to the finger (and a little more mid-flip: `cardScale`). */
 const LIFT_SCALE = 1.03;
-const FLIP_LIFT = 0.05;
 /** The gyroscope nudges the card like a thing with inertia: a steady turn of 1 rad/s leans it to the
  * cap, and it settles back in about half a second once the phone holds still. */
 const GYRO_INTERVAL_MS = 33;
@@ -129,8 +130,6 @@ const FADE = { duration: tokens.motion.transitionMs, reduceMotion: ReduceMotion.
 const DEPTH = { print: -5, ink: 4.5 } as const;
 /** How far the foil's bright streak travels at the full lean, as a fraction of its band. */
 const FOIL_TRAVEL = 0.8;
-/** The PRO badge's width, as a fraction of the photo plate's (IdCardFaces draws it so). */
-const BADGE_WIDTH = 0.5;
 /** The plastic's edge shows a little at rest too, as from a camera slightly above the card. */
 const EDGE_REST_DROP = 0.5;
 /** Room around the card for its shadow, in design dp. */
@@ -152,21 +151,29 @@ type Tilt = { x: SharedValue<number>; y: SharedValue<number> };
 type Side = "front" | "back";
 
 /**
- * Whether `side` looks out at this turn. Every animated view costs a shadow-tree commit per frame
- * on Android (Reanimated's synchronous UI-props path is off in this build), so the layers of the
- * face that looks away hold still: they snap to the lean while the card passes edge-on, unseen.
+ * Whether `side` looks out when the card is turned `angle` degrees around Y (the flip plus the
+ * lean). Every animated view costs a shadow-tree commit per frame on Android (Reanimated's
+ * synchronous UI-props path is off in this build), so the layers of the face that looks away hold
+ * still: they snap to the lean as the card passes edge-on, unseen.
  */
-function looksOut(turn: number, side: Side): boolean {
+function looksOut(angle: number, side: Side): boolean {
   "worklet";
-  return Math.abs(turn) < HALF_TURN / 2 === (side === "front");
+  return Math.cos((angle * Math.PI) / HALF_TURN) > 0 === (side === "front");
 }
+
+/**
+ * What a held-still layer returns: always the same objects, because Reanimated skips a view's
+ * update only when every value is the very same reference (a new `[]` each frame still commits).
+ */
+const STILL_LAYER = { transform: [] };
+const STILL_SHEEN = { opacity: SHEEN_REST, transform: [] };
 
 type Layer = { tilt: Tilt; turn: SharedValue<number>; side: Side; still: boolean };
 
 /** One layer's parallax at `depth` design dp; still under Reduce Motion and while turned away. */
 function useLayerStyle({ tilt, turn, side, still }: Layer, depth: number, unit: number) {
   return useAnimatedStyle(() => {
-    if (still || !looksOut(turn.value, side)) return { transform: [] };
+    if (still || !looksOut(turn.value + tilt.y.value, side)) return STILL_LAYER;
     const offset = parallaxOffset(tilt.x.value, tilt.y.value, depth * unit);
     return { transform: [{ translateX: offset.x }, { translateY: offset.y }] };
   });
@@ -175,7 +182,7 @@ function useLayerStyle({ tilt, turn, side, still }: Layer, depth: number, unit: 
 /** The foil's streak, sliding across its band of `band` dp as the card leans. */
 function useFoilStyle({ tilt, turn, side, still }: Layer, band: number) {
   return useAnimatedStyle(() => {
-    if (still || !looksOut(turn.value, side)) return { transform: [] };
+    if (still || !looksOut(turn.value + tilt.y.value, side)) return STILL_LAYER;
     const sweep = clampTilt(tilt.y.value - tilt.x.value * 0.5) / MAX_TILT;
     return { transform: [{ translateX: sweep * band * FOIL_TRAVEL }] };
   });
@@ -184,7 +191,7 @@ function useFoilStyle({ tilt, turn, side, still }: Layer, band: number) {
 /** The band of light follows the lean, and brightens with it; under Reduce Motion it holds still. */
 function useSheenStyle({ tilt, turn, side, still }: Layer, width: number, height: number) {
   return useAnimatedStyle(() => {
-    if (still || !looksOut(turn.value, side)) return { opacity: SHEEN_REST, transform: [] };
+    if (still || !looksOut(turn.value + tilt.y.value, side)) return STILL_SHEEN;
     const pose = sheenPose(tilt.x.value, tilt.y.value, width, height);
     return {
       opacity: pose.strength,
@@ -206,7 +213,7 @@ function useFrontMotion(layer: Omit<Layer, "side">, { width, height, unit }: Geo
     print: useLayerStyle(front, DEPTH.print, unit),
     ink: useLayerStyle(front, DEPTH.ink, unit),
     foil: useFoilStyle(front, width),
-    badgeFoil: useFoilStyle(front, ID_CARD_BASE.photo.width * unit * BADGE_WIDTH),
+    badgeFoil: useFoilStyle(front, ID_CARD_BASE.photo.width * unit * ID_CARD_BASE.proBadge.width),
     sheen: useSheenStyle(front, width, height),
   };
 }
@@ -302,9 +309,9 @@ function clipStyle(unit: number): ViewStyle[] {
  * for a pro: two materials, not two fills.
  *
  * It is a physical object: a slab of plastic with an edge, standing over its own shadow. It leans
- * toward a drag and with the phone's motion (`expo-sensors` gyroscope); its layers (the print, the
- * photo, the ink, the badge) slide against each other, a band of light and the foil's streak move
- * across it, and the shadow moves the other way. A tap or a swipe turns it over (each face is its
+ * toward a drag and with the phone's motion (`expo-sensors` gyroscope); the print under the laminate
+ * and the ink on it (photo plate, text, PRO badge) slide against each other, a band of light and
+ * the foil's streak move across it, and the shadow moves the other way. A tap or a swipe turns it over (each face is its
  * own view, so Android's backface rule and iOS's double-sided layers hide the face that looks
  * away), with a haptic tick as it passes edge-on. Under Reduce Motion nothing leans, slides or
  * spins: the flip is a crossfade. Every face is one accessible element, and the flip is its action.
@@ -355,8 +362,12 @@ export function IdCard({
   const turn = useSharedValue(0);
   /** The Reduce Motion flip: 0 front, 1 back. */
   const fade = useSharedValue(0);
-  /** A person's flip ticks once as the card passes edge-on; a card set back at rest never does. */
+  /**
+   * A person's flip ticks once: as the card passes edge-on, or at the tap that reverses it before
+   * then. A card set back at rest never ticks. `tickDone`: this flip has ticked.
+   */
   const tickArmed = useSharedValue(false);
+  const tickDone = useSharedValue(false);
   const tiltX = useDerivedValue(() => clampTilt(dragX.value + gyroX.value));
   const tiltY = useDerivedValue(() => clampTilt(dragY.value + gyroY.value));
   const tilt: Tilt = { x: tiltX, y: tiltY };
@@ -383,7 +394,10 @@ export function IdCard({
       // A crossfade has no edge-on moment: the tick comes with the tap.
       tick();
     } else {
+      // Reversed before it passed edge-on: the flip it cuts short ticks now.
+      if (tickArmed.value && !tickDone.value) tick();
       tickArmed.value = true;
+      tickDone.value = false;
       turn.value = withSpring(next === "back" ? HALF_TURN * direction : 0, FLIP_SPRING);
     }
     onFlip?.(next);
@@ -482,19 +496,26 @@ export function IdCard({
   useAnimatedReaction(
     () => Math.abs(turn.value) >= HALF_TURN / 2,
     (past, before) => {
-      // A flip crosses the half turn once (its overshoot stays past it), so an armed card ticks
-      // once per flip; a card set back at rest is disarmed first.
-      if (before === null || past === before || !tickArmed.value) return;
+      // A flip crosses the half turn once (its overshoot stays past it); a card set back at rest
+      // is disarmed first.
+      if (before === null || past === before || !tickArmed.value || tickDone.value) return;
+      tickDone.value = true;
       runOnJS(tick)();
     },
   );
 
+  // Poses that hold still return the same objects every frame, so Reanimated skips their update.
+  const parked = parkedPose(perspective);
+  const flat = { opacity: 1, transform: [{ perspective }] };
+
   /** The card's pose: its lift (and the extra lift mid-flip) and its lean. */
   const frontStyle = useAnimatedStyle(() => {
-    if (reduceMotion) return { opacity: 1 - fade.value, transform: [{ perspective }] };
+    // Under Reduce Motion the front stays opaque and the back fades in over it: the slab behind
+    // never shows through a half-faded pair.
+    if (reduceMotion) return flat;
     // Resting on its back, the front waits turned away: no commit per frame for a hidden face.
-    if (Math.abs(turn.value) >= HALF_TURN - PARKED) return parkedPose(perspective);
-    const scale = lift.value + Math.sin((Math.abs(turn.value) * Math.PI) / HALF_TURN) * FLIP_LIFT;
+    if (Math.abs(turn.value) >= HALF_TURN - PARKED) return parked;
+    const scale = cardScale(lift.value, turn.value);
     return {
       opacity: 1,
       transform: [
@@ -507,9 +528,9 @@ export function IdCard({
   });
 
   const backStyle = useAnimatedStyle(() => {
-    if (reduceMotion) return { opacity: fade.value, transform: [{ perspective }] };
-    if (Math.abs(turn.value) <= PARKED) return parkedPose(perspective);
-    const scale = lift.value + Math.sin((Math.abs(turn.value) * Math.PI) / HALF_TURN) * FLIP_LIFT;
+    if (reduceMotion) return { opacity: fade.value, transform: flat.transform };
+    if (Math.abs(turn.value) <= PARKED) return parked;
+    const scale = cardScale(lift.value, turn.value);
     return {
       opacity: 1,
       transform: [
@@ -530,9 +551,9 @@ export function IdCard({
     const thickness = ID_CARD_BASE.thickness * unit;
     const rest = thickness * EDGE_REST_DROP;
     if (reduceMotion) return { transform: [{ perspective }, { translateY: rest }] };
-    const scale = lift.value + Math.sin((Math.abs(turn.value) * Math.PI) / HALF_TURN) * FLIP_LIFT;
+    const scale = cardScale(lift.value, turn.value);
     const offset = parallaxOffset(tilt.x.value, tilt.y.value, -thickness);
-    const facing = Math.abs(turn.value) < HALF_TURN / 2 ? 1 : -1;
+    const facing = Math.cos(((turn.value + tilt.y.value) * Math.PI) / HALF_TURN) > 0 ? 1 : -1;
     return {
       transform: [
         { perspective },
@@ -548,7 +569,7 @@ export function IdCard({
   const shadowStyle = useAnimatedStyle(() => {
     if (reduceMotion) return groundShadowStyle(groundShadow(0, 0, 1, 0, unit));
     return groundShadowStyle(
-      groundShadow(tilt.x.value, tilt.y.value, lift.value, turn.value, unit),
+      groundShadow(tilt.x.value, tilt.y.value, cardScale(lift.value, turn.value), turn.value, unit),
     );
   });
 

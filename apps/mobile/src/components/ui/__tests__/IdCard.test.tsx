@@ -84,6 +84,15 @@ const settle = () =>
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   });
 
+/** Long enough for a flip's spring to pass edge-on and settle (it takes about 0.7 s). */
+const SETTLE_MS = 1200;
+
+/** Lets the card's animations run for `ms` of real time. */
+const frames = (ms: number) =>
+  act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, ms));
+  });
+
 beforeEach(() => {
   jest.mocked(useReducedMotion).mockReturnValue(false);
   jest.mocked(withSpring).mockClear();
@@ -371,6 +380,9 @@ describe("IdCard", () => {
     const view = await renderCard(props);
     await act(async () => flipByAssistiveTech("card-front"));
     expect(screen.getByRole("button", { name: BACK_LABEL })).toBeOnTheScreen();
+    // The person's flip ticks, then settles on its back.
+    await waitFor(() => expect(Haptics.impactAsync).toHaveBeenCalledTimes(1));
+    await frames(SETTLE_MS);
     jest.mocked(withSpring).mockClear();
     jest.mocked(withTiming).mockClear();
     jest.mocked(Haptics.impactAsync).mockClear();
@@ -385,7 +397,8 @@ describe("IdCard", () => {
       expect(withSpring).toHaveBeenCalledWith(0, expect.any(Object));
     }
     expect(onFlip).toHaveBeenLastCalledWith("front");
-    // Set down, not flipped by the person: no tap feedback.
+    // Set down, not flipped by the person: no tick, even once the turn back has passed edge-on.
+    await frames(SETTLE_MS);
     expect(Haptics.impactAsync).not.toHaveBeenCalled();
 
     // Already on its front, a card set at rest stays as it is.
@@ -609,5 +622,46 @@ describe("IdCard", () => {
         name: "ID card, PRO, Alex Morgan, verified, Fort Lauderdale, FL, member since March 2026",
       }),
     ).toBeOnTheScreen();
+  });
+
+  it("ticks once per flip: as it passes edge-on, or at the tap that reverses it before then", async () => {
+    await renderCard({ variant: "pro", width: 320, ...ALEX, testID: "card" });
+    await settle();
+
+    await act(async () => flipByAssistiveTech("card-front"));
+    await waitFor(() => expect(Haptics.impactAsync).toHaveBeenCalledTimes(1));
+    // Its overshoot stays past the half turn: no second tick as it settles.
+    await frames(SETTLE_MS);
+    expect(Haptics.impactAsync).toHaveBeenCalledTimes(1);
+
+    // Two taps at once: the second reverses the first before it is edge-on.
+    jest.mocked(Haptics.impactAsync).mockClear();
+    await act(async () => {
+      flipByAssistiveTech("card-back");
+      flipByAssistiveTech("card-front");
+    });
+    expect(Haptics.impactAsync).toHaveBeenCalledTimes(1);
+    await frames(SETTLE_MS);
+    expect(Haptics.impactAsync).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: BACK_LABEL })).toBeOnTheScreen();
+  });
+
+  it("never ticks for a card set at rest mid-flip, and its next flip ticks once", async () => {
+    const props: IdCardProps = { variant: "pro", width: 320, ...ALEX, testID: "card" };
+    const view = await renderCard(props);
+    await settle();
+
+    // Set at rest before the flip it was given passes edge-on: it turns back, silently.
+    await act(async () => {
+      flipByAssistiveTech("card-front");
+      await view.rerender(card({ ...props, interactive: false }));
+    });
+    await frames(SETTLE_MS);
+    expect(Haptics.impactAsync).not.toHaveBeenCalled();
+
+    await view.rerender(card({ ...props, interactive: true }));
+    await act(async () => flipByAssistiveTech("card-front"));
+    await frames(SETTLE_MS);
+    expect(Haptics.impactAsync).toHaveBeenCalledTimes(1);
   });
 });
