@@ -20,6 +20,7 @@ from typing import Any
 
 import pytest
 from redis.asyncio import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import RedisError
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -799,3 +800,89 @@ async def test_a_healthy_image_behind_videos_ffmpeg_cannot_copy_is_copied(
         pytest.fail("the healthy image was never copied")
     for video in videos:
         assert (await row(db_session, video.media_id)).safe_status == MediaSafeStatus.PENDING
+
+
+# --- #491 Vault round 1: a history write is one transaction, and every run keeps an expiry ----
+
+
+class PartialPipeline:
+    """The queue's Redis pipeline with a delivery that ends after `sent` commands, then fails
+    as a dropped connection would. A non-transactional pipeline has run those commands on the
+    real Redis; a MULTI/EXEC one has run none (Redis discards a transaction whose EXEC never
+    came)."""
+
+    def __init__(self, redis: Redis, transaction: bool, sent: int) -> None:
+        self._redis = redis
+        self._transaction = transaction
+        self._sent = sent
+        self._commands: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    async def __aenter__(self) -> "PartialPipeline":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    def __getattr__(self, name: str) -> Any:
+        def queued(*args: Any, **kwargs: Any) -> "PartialPipeline":
+            self._commands.append((name, args, kwargs))
+            return self
+
+        return queued
+
+    async def execute(self) -> None:
+        if not self._transaction:
+            for name, args, kwargs in self._commands[: self._sent]:
+                await getattr(self._redis, name)(*args, **kwargs)
+        raise RedisConnectionError("connection lost mid-delivery")
+
+
+@pytest.mark.parametrize("sent", [1, 2], ids=["after_zadd", "after_trim"])
+async def test_a_history_write_cut_short_never_leaves_a_set_without_an_expiry(
+    monkeypatch: pytest.MonkeyPatch, sent: int
+) -> None:
+    """A delivery that ends after the ZADD, or after the trim: the write fails (the sweep's
+    handler ends the run, as before), and the set is either absent or expiring, never one
+    that lives forever (TTL -1)."""
+    redis = Redis.from_url(Settings().redis_url)
+    prefix = f"media-copy-test-{uuid.uuid4().hex}"
+    store = RedisMediaCopyStore(redis, claim_seconds=30, prefix=prefix)
+    name = f"{prefix}:queued:{KIND}"
+    try:
+        monkeypatch.setattr(
+            redis,
+            "pipeline",
+            lambda transaction=True, shard_hint=None: PartialPipeline(redis, transaction, sent),
+        )
+        with pytest.raises(RedisConnectionError):
+            await store.record_queued(KIND, ["unit"], 1_000.0, 60)
+        monkeypatch.undo()
+
+        ttl = await redis.ttl(name)
+        assert ttl == -2 or ttl > 0, ttl
+    finally:
+        await redis.delete(name)
+        await redis.aclose()
+
+
+async def test_a_run_with_nothing_to_record_repairs_a_set_without_an_expiry() -> None:
+    """No remaining work (nothing queued) still trims the set and refreshes its expiry, so a set
+    an earlier write left without one is repaired by the next run; a kind with no set gets
+    none."""
+    redis = Redis.from_url(Settings().redis_url)
+    prefix = f"media-copy-test-{uuid.uuid4().hex}"
+    store = RedisMediaCopyStore(redis, claim_seconds=30, prefix=prefix)
+    name = f"{prefix}:queued:{KIND}"
+    try:
+        await redis.zadd(name, {"kept": 1_000.0, "old": 900.0})
+        assert await redis.ttl(name) == -1  # what a write cut short used to leave
+
+        await store.record_queued(KIND, [], 1_010.0, 60)
+
+        assert 0 < await redis.ttl(name) <= 60
+        assert await store.last_queued(KIND, ["kept", "old"]) == {"kept": 1_000.0}
+        await store.record_queued("other", [], 1_010.0, 60)
+        assert await redis.exists(f"{prefix}:queued:other") == 0
+    finally:
+        await redis.delete(name)
+        await redis.aclose()

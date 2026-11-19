@@ -13,6 +13,8 @@ Redis: no schema change.
   outage that lasts) take their turn, and the rows behind them are reached within as many runs
   as there are units in the scan, however the window expires. The set expires with its kind's
   sweeps, and entries older than its keep are trimmed on every write: it never grows unbounded.
+  Each write (new entries, trim, expiry) is one MULTI/EXEC transaction, made on every run even
+  with nothing new, so no set is ever left without an expiry (#491 Vault round 1).
 
 Keys carry ids only.
 """
@@ -96,11 +98,16 @@ class RedisMediaCopyStore:
     async def record_queued(
         self, kind: str, keys: Sequence[str], at: float, keep_seconds: int
     ) -> None:
-        if not keys:
-            return
+        """One MULTI/EXEC transaction (#491 Vault round 1): Redis applies the new entries, the
+        trim and the expiry together, or none of them when the delivery ends before EXEC (it
+        discards a transaction whose EXEC never came). So no write can leave a set without an
+        expiry. A run with nothing to record still trims the set and refreshes its expiry,
+        which also repairs a set an earlier write left without one (EXPIRE on a missing key does
+        nothing)."""
         name = self._queued_key(kind)
-        async with self._redis.pipeline(transaction=False) as pipe:
-            pipe.zadd(name, dict.fromkeys(keys, at))
+        async with self._redis.pipeline(transaction=True) as pipe:
+            if keys:
+                pipe.zadd(name, dict.fromkeys(keys, at))
             pipe.zremrangebyscore(name, "-inf", at - keep_seconds)
             pipe.expire(name, keep_seconds)
             await pipe.execute()
