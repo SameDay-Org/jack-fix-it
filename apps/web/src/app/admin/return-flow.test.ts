@@ -192,12 +192,7 @@ describe("the return address through sign-in (#464)", () => {
     expect(response.headers.get(`x-middleware-request-${PATH_HEADER}`)).toBe(
       "/admin/queue?tab=urgent",
     );
-    // Pages only: Next's own files and files with an extension are left alone.
-    // The matcher's pattern is a regular expression for the path (one group, no named parts).
-    const matcher = new RegExp(`^${config.matcher[0]}$`);
-    for (const path of ["/admin", "/admin/queue", "/es/painting", "/"])
-      expect(matcher.test(path), path).toBe(true);
-    for (const path of ["/_next/static/x.js", "/mascot/wave.svg", "/sitemap.xml", "/api/health"])
-      expect(matcher.test(path), path).toBe(false);
+    // The panel only: the public pages stay static and untouched.
+    expect(config.matcher).toEqual(["/admin", "/admin/:path*"]);
   });
 });

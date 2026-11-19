@@ -11,7 +11,7 @@
 export const RETURN_PARAM = "next";
 
 /**
- * The request header the proxy (src/proxy.ts) sets on every page request: the requested path
+ * The request header the proxy (src/proxy.ts) sets on every panel request: the requested path
  * and query. The proxy always overwrites it, so a client cannot choose it; it is validated
  * here all the same.
  */

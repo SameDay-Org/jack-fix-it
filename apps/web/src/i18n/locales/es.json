@@ -1148,12 +1148,6 @@
       "body": "Vuelve a intentarlo en un momento. Si sigue pasando, avisa a un ingeniero.",
       "retry": "Volver a intentar",
       "home": "Volver al panel"
-    },
-    "notFound": {
-      "metaTitle": "Página no encontrada",
-      "title": "Esta página del panel no existe",
-      "body": "Puede que el enlace sea antiguo o tenga un error.",
-      "home": "Volver al panel"
     }
   }
 }
