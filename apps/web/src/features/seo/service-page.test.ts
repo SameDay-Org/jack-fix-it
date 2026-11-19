@@ -9,8 +9,8 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-import * as enRoute from "@/app/(marketing)/[service]/page";
-import * as esRoute from "@/app/(marketing)/es/[service]/page";
+import * as enRoute from "@/app/(marketing)/[slug]/page";
+import * as esRoute from "@/app/(marketing)/es/[slug]/page";
 
 import {
   CATALOG_REVALIDATE_SECONDS,
@@ -235,7 +235,7 @@ describe("the service routes", () => {
   });
 
   it("render their own language", async () => {
-    const params = Promise.resolve({ service: "painting" });
+    const params = Promise.resolve({ slug: "painting" });
 
     expect((await enRoute.default({ params })).props).toEqual({ locale: "en", slug: "painting" });
     expect((await esRoute.default({ params })).props).toEqual({ locale: "es", slug: "painting" });

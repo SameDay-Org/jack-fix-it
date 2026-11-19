@@ -5,6 +5,8 @@ import * as englishImage from "@/app/(marketing)/opengraph-image";
 import * as spanishImage from "@/app/(marketing)/es/opengraph-image";
 import robots from "@/app/robots";
 import sitemap from "@/app/sitemap";
+import { CatalogUnavailableError } from "@/features/seo/catalog";
+import { CLEANING, PAINTING, SOUTH_FLORIDA, catalogFetch } from "@/features/seo/seo-test-helpers";
 import { legalMetadata } from "@/features/showcase/metadata";
 import { PRIVACY_PATHS, TERMS_PATHS } from "@/features/site/routes";
 import en from "@/i18n/locales/en.json";
@@ -30,14 +32,19 @@ afterEach(() => {
 });
 
 describe("the sitemap", () => {
-  it("lists no address without SITE_URL", () => {
-    expect(sitemap()).toEqual([]);
+  /** The API's catalog: two services, two served cities (seo-test-helpers.ts). */
+  const serveCatalog = () =>
+    vi.stubGlobal("fetch", vi.fn(catalogFetch([CLEANING, PAINTING], [SOUTH_FLORIDA])));
+
+  it("lists no address without SITE_URL", async () => {
+    expect(await sitemap()).toEqual([]);
   });
 
-  it("lists the indexable public pages in both languages, each with its twin", () => {
+  it("lists the indexable public pages in both languages, each with its twin", async () => {
     vi.stubEnv("SITE_URL", SITE);
-    const entries = sitemap();
-    expect(entries.map((entry) => entry.url)).toEqual(
+    serveCatalog();
+    const entries = await sitemap();
+    expect(entries.slice(0, 6).map((entry) => entry.url)).toEqual(
       ["/", "/es", "/app", "/es/app", "/for-pros", "/es/for-pros"].map(
         (path) => new URL(path, SITE).href,
       ),
@@ -50,9 +57,41 @@ describe("the sitemap", () => {
     });
   });
 
+  it("lists every active service, and every active service in each served city (#87)", async () => {
+    vi.stubEnv("SITE_URL", SITE);
+    serveCatalog();
+    const entries = await sitemap();
+    const paths = entries.slice(6).map((entry) => new URL(entry.url).pathname);
+
+    expect(paths).toEqual([
+      "/house-cleaning",
+      "/es/house-cleaning",
+      "/painting",
+      "/es/painting",
+      "/fort-lauderdale/house-cleaning",
+      "/es/fort-lauderdale/house-cleaning",
+      "/fort-lauderdale/painting",
+      "/es/fort-lauderdale/painting",
+      "/hollywood/house-cleaning",
+      "/es/hollywood/house-cleaning",
+      "/hollywood/painting",
+      "/es/hollywood/painting",
+    ]);
+    expect(entries.find((e) => e.url === `${SITE}/es/hollywood/painting`)?.alternates).toEqual({
+      languages: { en: `${SITE}/hollywood/painting`, es: `${SITE}/es/hollywood/painting` },
+    });
+  });
+
+  it("throws, as the pages do, when the catalog cannot be read", async () => {
+    vi.stubEnv("SITE_URL", SITE);
+
+    await expect(sitemap()).rejects.toBeInstanceOf(CatalogUnavailableError);
+  });
+
   it("leaves out the legal pages while they are noindex placeholders", async () => {
     vi.stubEnv("SITE_URL", SITE);
-    const urls = sitemap().map((entry) => entry.url);
+    serveCatalog();
+    const urls = (await sitemap()).map((entry) => entry.url);
     for (const locale of ["en", "es"] as const) {
       for (const document of ["terms", "privacy"] as const) {
         expect((await legalMetadata(locale, document)).robots).toMatchObject({ index: false });

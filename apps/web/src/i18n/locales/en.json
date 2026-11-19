@@ -287,6 +287,24 @@
         "body": "Get the app and tell Jack what you need.",
         "getApp": "Get the app"
       }
+    },
+    "city": {
+      "meta": {
+        "title": "{{name}} in {{city}} | Jack Fix It",
+        "description": "{{name}} in {{city}}: tell Jack about the job, compare fixed-price quotes from pros near you and follow it in the app."
+      },
+      "hero": {
+        "title": "{{name}} in {{city}}"
+      },
+      "areas": {
+        "title": "Where Jack works in {{city}}",
+        "body": "Jack serves these ZIP codes in {{city}}. The app checks yours when you ask for a job.",
+        "zipsLabel": "ZIP codes served",
+        "others": "{{name}} in other cities"
+      },
+      "more": {
+        "title": "More from Jack in {{city}}"
+      }
     }
   },
   "showcase": {
