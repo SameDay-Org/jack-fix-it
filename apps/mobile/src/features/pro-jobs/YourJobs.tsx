@@ -152,8 +152,12 @@ export function YourJobs({ testID = "your-jobs" }: { testID?: string }) {
       <Text accessibilityRole="header" className="text-headline text-navy-900">
         {t("proJobs.yourJobs.title")}
       </Text>
+      {/* A key per state: the placeholder and the empty card are both accessible Views in this
+          slot, and Android keeps a removed contentDescription on a reused view, so without the
+          keys the empty card would still be announced as "Loading your jobs" (#470). */}
       {data === undefined && shownError === null ? (
         <View
+          key="loading"
           accessible
           accessibilityRole="progressbar"
           accessibilityLabel={t("proJobs.yourJobs.loading")}
@@ -173,6 +177,7 @@ export function YourJobs({ testID = "your-jobs" }: { testID?: string }) {
         />
       ) : data.length === 0 ? (
         <View
+          key="empty"
           accessible
           style={continuousCorners}
           className="gap-1 rounded-lg bg-navy-900/5 p-4"
