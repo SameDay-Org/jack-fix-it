@@ -29,6 +29,7 @@ import {
   refund,
   REPLY,
   SIGNED_URL,
+  transfer,
 } from "../disputes-test-helpers";
 import DisputeLoading from "./loading";
 import DisputePage from "./page";
@@ -211,6 +212,33 @@ describe("dispute page", () => {
     const page = await render();
     expect(page).not.toContain("refund-banner");
     expect(page).toContain("$132.50</span> · Refunded");
+  });
+
+  it("puts a red banner in the money block when a payout may need to be reversed", async () => {
+    api(() => Response.json(dispute({ transfer: transfer({ needs_reversal_at: hoursAgo(1) }) })));
+    const page = await render();
+    const money = page.slice(page.indexOf(">Money<"), page.indexOf(">Job history<"));
+    expect(money).toMatch(
+      /<p role="alert" data-reversal="true" class="[^"]*bg-danger[^"]*">.*A payout may need to be reversed: ask an engineer\.<\/p>/,
+    );
+  });
+
+  it("puts no reversal banner when the payout is fine, or when there is none", async () => {
+    for (const payout of [transfer(), null]) {
+      api(() => Response.json(dispute({ transfer: payout })));
+      const page = await render();
+      expect(page).not.toContain("data-reversal");
+      expect(page).not.toContain('role="alert"');
+    }
+  });
+
+  it("says it in Spanish", async () => {
+    api(() => Response.json(dispute({ transfer: transfer({ needs_reversal_at: hoursAgo(1) }) })), {
+      locale: "es",
+    });
+    expect(await render()).toMatch(
+      /<p role="alert" data-reversal="true" class="[^"]*bg-danger[^"]*">.*Puede que haya que revertir un pago al profesional: pide ayuda a un ingeniero\.<\/p>/,
+    );
   });
 
   it("lists the job's history", async () => {

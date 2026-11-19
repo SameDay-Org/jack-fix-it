@@ -1052,6 +1052,7 @@
           "proRelease": "Released to the pro",
           "customerRefund": "Refunded to the customer",
           "noPayment": "No payment on record for this job: it needs a review before it can be resolved.",
+          "needsReversal": "A payout may need to be reversed: ask an engineer.",
           "none": "None",
           "stripeCode": "Stripe code: {{code}}",
           "paymentStatus": {
