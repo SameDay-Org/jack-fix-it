@@ -85,6 +85,13 @@ class CustomerDisputeOut(_DisputeOut):
     """The customer's own report, its description as stored (masked). Their photos show as
     soon as attached: their original until the safe copy is ready."""
 
+    customer_refund_cents: int | None = Field(
+        default=None,
+        description="What the resolution gives back to the customer (#472): 0 for a release, "
+        "part of the payment for a partial, the whole payment for a refund; null while open. "
+        "Always sent; optional in the schema so clients built before #472 keep compiling.",
+    )
+
 
 class ProDisputeOut(_DisputeOut):
     """The report on the pro's job: the photos' safe copies only, once ready."""

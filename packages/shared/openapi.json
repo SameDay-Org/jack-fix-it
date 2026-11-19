@@ -9237,6 +9237,18 @@
             "type": "integer",
             "title": "Photos Pending",
             "description": "Photos whose copy is still being prepared."
+          },
+          "customer_refund_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Refund Cents",
+            "description": "What the resolution gives back to the customer (#472): 0 for a release, part of the payment for a partial, the whole payment for a refund; null while open. Always sent; optional in the schema so clients built before #472 keep compiling."
           }
         },
         "additionalProperties": false,
@@ -9389,6 +9401,28 @@
             "type": "integer",
             "title": "Customer Total Cents",
             "description": "What the customer paid: amount plus tax."
+          },
+          "dispute_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DisputeStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The job's reported problem, if any (#472): open, or resolved. null when none was reported. Optional in the schema so older clients keep compiling."
+          },
+          "dispute_resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DisputeResolution"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How an admin resolved it (released, partial_release, refunded); null while open or without a report."
           },
           "unread_messages": {
             "type": "integer",
@@ -12227,6 +12261,18 @@
             "type": "integer",
             "title": "Pro Payout Cents",
             "description": "What the pro receives for the job."
+          },
+          "pro_receives_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Receives Cents",
+            "description": "What the pro will actually receive for this job (#488): the full payout normally and while a reported problem is open (under review); once an admin resolved it, the full payout for a release, the released part for a partial, 0 for a refund; 0 for a cancelled or refunded job. pro_payout_cents stays the quote's frozen payout. Always sent; optional in the schema so older clients keep compiling."
           },
           "payout": {
             "anyOf": [

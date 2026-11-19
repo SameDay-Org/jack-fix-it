@@ -259,6 +259,48 @@
       "getApp": "Obtén la app"
     }
   },
+  "seo": {
+    "service": {
+      "meta": {
+        "title": "{{name}} en {{place}} | Jack Fix It",
+        "titleAnywhere": "{{name}} | Jack Fix It",
+        "description": "{{name}} en {{place}}: cuéntale a Jack sobre el trabajo, compara presupuestos de precio fijo de profesionales cercanos y síguelo en la app.",
+        "descriptionAnywhere": "{{name}}: cuéntale a Jack sobre el trabajo, compara presupuestos de precio fijo de profesionales cercanos y síguelo en la app.",
+        "ogAlt": "El nombre Jack Fix It y el nombre de un servicio para el hogar sobre azul marino."
+      },
+      "nav": {
+        "ask": "Qué pregunta Jack",
+        "areas": "Dónde trabajamos"
+      },
+      "hero": {
+        "eyebrow": "Servicios para el hogar",
+        "title": "{{name}} en {{place}}",
+        "titleAnywhere": "{{name}}",
+        "body": "Cuéntale a Jack sobre el trabajo en la app. Profesionales cercanos que hacen este trabajo te envían presupuestos de precio fijo, tú eliges uno y sigues el trabajo de principio a fin.",
+        "getApp": "Obtén la app",
+        "ask": "Qué pregunta Jack"
+      },
+      "ask": {
+        "eyebrow": "En la app",
+        "title": "Qué pregunta Jack sobre el trabajo",
+        "body": "Unas pocas preguntas para que los profesionales cercanos puedan enviarte un presupuesto. Las respondes en la app.",
+        "none": "Cuéntale a Jack qué necesitas, con tus propias palabras."
+      },
+      "areas": {
+        "eyebrow": "Dónde trabajamos",
+        "title": "Dónde trabaja Jack",
+        "body": "Jack atiende estas ciudades. La app revisa tu código postal cuando pides un trabajo."
+      },
+      "more": {
+        "title": "Más de Jack"
+      },
+      "final": {
+        "title": "Cuéntale a Jack qué pasa.",
+        "body": "Obtén la app y dile a Jack qué necesitas.",
+        "getApp": "Obtén la app"
+      }
+    }
+  },
   "showcase": {
     "meta": {
       "title": "Jack Fix It: la app para lo que pase en casa",

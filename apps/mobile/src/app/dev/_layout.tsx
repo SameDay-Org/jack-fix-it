@@ -11,6 +11,7 @@ export default function DevLayout() {
       <Stack.Screen name="components" />
       <Stack.Screen name="media" />
       <Stack.Screen name="id-card-libs" />
+      <Stack.Screen name="id-card" />
       <Stack.Screen name="push" />
       <Stack.Screen name="sheet" options={sheetOptions([0.6, 0.95])} />
       <Stack.Screen name="sheet-fit" options={sheetOptions("fitToContents")} />
