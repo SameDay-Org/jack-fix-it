@@ -22,9 +22,19 @@ export type SkeletonProps = {
   radius?: Radius;
   /** Round placeholder: `height` is the diameter; `width` and `radius` are ignored. */
   circle?: boolean;
+  /** The surface it sits on: `dark` on navy (a light fill), `light` everywhere else. */
+  tone?: SkeletonTone;
   /** Extra classes for the placeholder (margins). */
   className?: string;
   testID?: string;
+};
+
+export type SkeletonTone = "light" | "dark";
+
+/** The fill on each surface: a gray tint on light ones, a white tint on navy. */
+const SKELETON_FILL: Record<SkeletonTone, string> = {
+  light: "bg-gray-500/15",
+  dark: "bg-white/15",
 };
 
 const RADIUS: Record<Radius, string> = {
@@ -67,6 +77,7 @@ export function Skeleton({
   height = 16,
   radius = "sm",
   circle = false,
+  tone = "light",
   className,
   testID,
 }: SkeletonProps) {
@@ -83,7 +94,7 @@ export function Skeleton({
       style={animatedStyle}
     >
       <View
-        className={cx("bg-gray-500/15", circle ? RADIUS.pill : RADIUS[radius], className)}
+        className={cx(SKELETON_FILL[tone], circle ? RADIUS.pill : RADIUS[radius], className)}
         style={shape}
       />
     </Animated.View>

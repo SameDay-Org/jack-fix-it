@@ -40,6 +40,16 @@ jest.mock("@/features/pro-jobs", () => {
 jest.mock("@/features/notifications/NotificationsPrompt", () => ({
   NotificationsPrompt: () => null,
 }));
+// The wallet (#70) has its own suite (features/earnings).
+jest.mock("@/features/earnings", () => {
+  const { View } = jest.requireActual<typeof import("react-native")>("react-native");
+  const { createElement } = jest.requireActual<typeof import("react")>("react");
+  return {
+    // A mark where the wallet goes: a pro whose payouts are off still reaches their earnings.
+    EarningsCard: () => createElement(View, { testID: "earnings-card-stub" }),
+    useRefreshEarningsTotals: () => () => Promise.resolve(),
+  };
+});
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
 jest.mock(
   "react-native-safe-area-context",
@@ -231,6 +241,7 @@ describe("the pro's home until the pro is approved (#38)", () => {
     expect(router.push).toHaveBeenCalledTimes(1);
     expect(router.push).toHaveBeenCalledWith("/pro/payouts");
     expect(screen.getByTestId("your-jobs-stub")).toBeTruthy();
+    expect(screen.getByTestId("earnings-card-stub")).toBeTruthy();
 
     // The API sends this pro no request: an empty list would mislead, so none is asked for.
     expect(screen.queryByText("New opportunities")).toBeNull();
