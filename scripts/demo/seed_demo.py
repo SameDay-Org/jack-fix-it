@@ -25,21 +25,19 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
-from urllib.parse import urlsplit
 
 DEMO_DIR: Final = Path(__file__).resolve().parent
 API_DIR: Final = DEMO_DIR.parents[1] / "apps" / "api"
 # The API's own packages (`app`, `scripts`), and the settings' .env, live in apps/api.
 sys.path.insert(0, str(API_DIR))
 
-import boto3  # noqa: E402
-from botocore.exceptions import BotoCoreError, ClientError  # noqa: E402
 from pydantic import JsonValue  # noqa: E402
 
 from app.config import Settings, get_settings  # noqa: E402
 from app.integrations.storage import S3Storage, Storage, StorageNotConfiguredError  # noqa: E402
 from app.integrations.stripe_connect import StripeExpressConnect  # noqa: E402
 from demo_seed import cast, flows, guard, scenes, stripe_test  # noqa: E402
+from demo_seed.bucket import BucketState, ensure_local_bucket  # noqa: E402
 from demo_seed.stripe_standins import (  # noqa: E402
     StandInAccounts,
     StandInPayments,
@@ -122,30 +120,6 @@ def demo_password(path: Path, minimum_length: int) -> tuple[str, bool]:
     password += "x" * max(0, minimum_length - len(password))
     path.write_text(password + "\n", encoding="utf-8")
     return password, True
-
-
-def ensure_local_bucket(settings: Settings) -> None:
-    """Creates the uploads bucket when it is missing, on a local S3 endpoint only (a dev
-    MinIO or RustFS starts empty). Anything else is left as it is."""
-    endpoint, bucket = settings.s3_endpoint_url, settings.s3_bucket
-    key, secret = settings.s3_access_key_id, settings.s3_secret_access_key
-    if endpoint is None or bucket is None or key is None or secret is None:
-        return
-    if urlsplit(endpoint).hostname not in guard.LOCAL_HOSTS:
-        return
-    client = boto3.client(
-        "s3",
-        endpoint_url=endpoint,
-        aws_access_key_id=key.get_secret_value(),
-        aws_secret_access_key=secret.get_secret_value(),
-        region_name=settings.s3_region,
-    )
-    try:
-        client.head_bucket(Bucket=bucket)
-    except ClientError:
-        client.create_bucket(Bucket=bucket)
-    except BotoCoreError:
-        raise SeedError("the local storage (S3_ENDPOINT_URL) is not reachable") from None
 
 
 def stripe_for(
@@ -246,13 +220,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if asyncio.run(guard.recreate_database(url, drop=args.reset)):
             print(f"Database {url.database}: created.")
         guard.migrate(url)
-        ensure_local_bucket(settings)
         try:
             storage = S3Storage.from_settings(settings)
         except StorageNotConfiguredError:
             raise SeedError(
                 "S3_* settings are missing: the demo needs a storage (documents, photos)"
             ) from None
+        bucket = ensure_local_bucket(settings)
+        if bucket is not BucketState.READY:
+            raise SeedError(f"the storage's bucket is {bucket.value.replace('_', ' ')}")
         pro_account = os.environ.get(PRO_ACCOUNT_ENV) or None
         run = Run(
             seed=args.seed,
