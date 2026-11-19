@@ -21,7 +21,7 @@ from app.modules.addresses.models import Address
 from app.modules.audit.models import AuditLog
 from app.modules.audit.types import AuditAction
 from app.modules.categories.models import Category
-from app.modules.dispatch.tasks import redispatch_for_pro, redispatch_stalled_requests
+from app.modules.dispatch.tasks import redispatch_for_pro, sweep_stalled
 from app.modules.jobs.models import JobStatus
 from app.modules.ops.models import RequestFollowup, RequestNote
 from app.modules.ops.router import get_ops_clock
@@ -45,7 +45,7 @@ from tests.test_ops_queue_api import racers as racers
 from tests.test_ops_queue_api import storage as storage
 from tests.test_ops_queue_api import world as world
 from tests.test_pros_profile_api import FakeStorage
-from tests.test_redispatch import sweep_ctx
+from tests.test_redispatch import memory_history, sweep_ctx
 from tests.test_requests_api import RecordingQueue
 
 # 10:00 EST, 9 March 2031: New York moves to EDT at 02:00 that day (the day is 23 hours).
@@ -812,7 +812,8 @@ async def test_a_held_request_is_never_swept_or_kicked_and_a_resumed_one_is(
 
     async def swept_and_kicked() -> tuple[bool, bool]:
         sweep, kick = RecordingQueue(), RecordingQueue()
-        await redispatch_stalled_requests(sweep_ctx(sessions_of(db_session), sweep))
+        # A fresh history each time: the hold, not the sweep's retry window, decides here.
+        await sweep_stalled(sweep_ctx(sessions_of(db_session), sweep), memory_history())
         await redispatch_for_pro(
             sweep_ctx(sessions_of(db_session), kick), str(world.pro.profile_id)
         )
