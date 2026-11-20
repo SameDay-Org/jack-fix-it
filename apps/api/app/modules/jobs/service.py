@@ -305,9 +305,11 @@ class JobScheduler:
 class JobParties:
     """Who takes part in a job, for the chat (#71) and the reviews (#77): the customer's and
     the pro's user ids, whether the job still accepts messages (CHAT_OPEN) and whether its
-    two sides may review each other (is_reviewable)."""
+    two sides may review each other (is_reviewable). The request is the job's, for the chat's
+    push to the customer (#73), which opens the job of their request."""
 
     job_id: uuid.UUID
+    request_id: uuid.UUID
     customer_id: uuid.UUID
     pro_user_id: uuid.UUID
     chat_open: bool
@@ -434,6 +436,7 @@ class JobPartiesReader:
         job, pro_user_id = found
         return JobParties(
             job_id=job.id,
+            request_id=job.request_id,
             customer_id=job.customer_id,
             pro_user_id=pro_user_id,
             chat_open=job.status in CHAT_OPEN,
