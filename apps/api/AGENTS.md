@@ -113,10 +113,14 @@ rules apply.
 - **Offers read the pro under locks (#511).** The request's row lock does not cover a pro's
   eligibility, so every offer (by hand or automatic) reads the pro again in the writing
   transaction, FOR SHARE until the commit, in this order: the request (FOR UPDATE), the ZIP's
-  active service areas, the pro's profile, its category and area rows, its account. The
-  profile goes first among the pro's rows because every profile writer locks it FOR UPDATE
-  first. A revocation committed before that read refuses the pro; one after waits for the
-  offer's commit. A new writer of these rows keeps that order.
+  active service areas, the pro's account, its profile, its category and area rows. The
+  account goes first because the one writer of both takes them in that order (a pro's new ID
+  photo: PATCH /v1/auth/me locks the account, then writes the profile's photo, #250); every
+  other profile writer locks the profile FOR UPDATE first and writes no account, and the
+  account writers write the account alone (#511 round 2: the other order deadlocked). A
+  revocation committed before that read refuses the pro; one after waits for the offer's
+  commit. A new writer of these rows keeps that order; `tests/test_dispatch_locks.py` runs
+  the real photo write against both offers.
 
 ## Live position (#350)
 

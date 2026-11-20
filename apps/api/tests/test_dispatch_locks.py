@@ -44,11 +44,13 @@ from app.modules.requests.models import RequestOrigin, RequestStatus, ServiceReq
 from app.modules.service_areas.models import ServiceArea
 from app.modules.service_areas.service import ServiceAreaService
 from app.modules.users.models import User
+from app.modules.users.service import UserService
 from app.modules.users.types import UserRole, UserStatus
 from tests.conftest import Committed, make_settings
 from tests.helpers import as_status_writer, letter_tag
 from tests.job_world import headers_for, record_pushes
 from tests.test_job_state_concurrency import backend_pid
+from tests.test_me_card_fields import FakeStorage
 from tests.test_requests_api import RecordingQueue
 
 BASE: Final = "/v1/admin/requests"
@@ -406,9 +408,11 @@ async def test_the_automatic_dispatch_skips_a_pro_revoked_before_its_locked_read
 ) -> None:
     """The worker ranked the pro without locks; the revocation commits before the worker reads
     the pro again under locks: the pro is skipped, so no offer, no push, no move. (An area
-    switched off then waits instead: the worker locked the ZIP's areas first; next test.)"""
+    switched off then waits instead: the worker locked the ZIP's areas first; next test.)
+    Paused where the locked read starts: the profile's account, read without a lock to lock
+    the account first (#511 round 2)."""
     await set_status(scene, RequestStatus.REVIEWING)
-    pause = pause_at(monkeypatch, ProService, "assign_candidate")
+    pause = pause_at(monkeypatch, ProService, "user_id_of")
     sent = RecordingQueue()
     running = asyncio.create_task(dispatch_request(worker(scene, sent), str(scene.request_id)))
     try:
@@ -449,3 +453,91 @@ async def test_a_revocation_after_the_worker_s_locked_read_waits_for_its_offer(
     assert outcome == "sent"
     assert await request_row(scene) == (RequestStatus.FINDING_PRO, False, 1)
     assert len(pushes(sent)) == 1
+
+
+# --- One order for the pro's account and profile (#511 round 2, Gatekeeper B1) -----------------
+
+# Any backend of this database that `holder` blocks.
+BLOCKED_BY: Final = text(
+    "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+    "AND CAST(:holder AS integer) = ANY(pg_blocking_pids(pid))"
+)
+
+
+def pause_after_the_first_pro_lock(monkeypatch: pytest.MonkeyPatch) -> tuple[Pause, dict[str, int]]:
+    """Stops an offer right after its first lock on the pro's rows, whichever it takes first
+    (the account or the profile), with the backend holding it."""
+    pause = Pause()
+    held: dict[str, int] = {}
+    for owner, name in ((UserService, "active_ids_with_role"), (ProService, "assign_candidate")):
+        original: Callable[..., Awaitable[Any]] = getattr(owner, name)
+
+        async def paused(
+            self: Any,
+            *args: Any,
+            _original: Callable[..., Awaitable[Any]] = original,
+            **kwargs: Any,
+        ) -> Any:
+            result = await _original(self, *args, **kwargs)
+            if kwargs.get("lock") and pause.calls == 0:
+                pause.calls += 1
+                # Read inside the offer's transaction: it keeps its connection to the commit.
+                held["offer"] = await backend_pid(self._session)
+                pause.inside.set()
+                await pause.go.wait()
+            return result
+
+        monkeypatch.setattr(owner, name, paused)
+    return pause, held
+
+
+@pytest.mark.parametrize("offer", ["by_hand", "automatic"])
+async def test_a_pros_new_id_photo_and_an_offer_to_them_take_one_order(
+    app: FastAPI, scene: Scene, monkeypatch: pytest.MonkeyPatch, offer: str
+) -> None:
+    """The real PATCH /v1/auth/me with a first ID photo (#250) locks the pro's account, then
+    writes their profile's photo. Against an offer holding its first lock on the pro, the two
+    queue when the offer takes the same order (the account first), and deadlock (40P01, a 500
+    for one of them) when it takes the profile first: the order is pinned here, not by the doc."""
+    record_pushes(app)
+    app.state.storage = FakeStorage()
+    pause, held = pause_after_the_first_pro_lock(monkeypatch)
+    if offer == "by_hand":
+        offering = asyncio.create_task(post(scene, "assign", {"pro_id": str(scene.pro_id)}))
+    else:
+        await set_status(scene, RequestStatus.REVIEWING)
+        offering = asyncio.create_task(
+            dispatch_request(worker(scene, RecordingQueue()), str(scene.request_id))
+        )
+    key = f"u/{scene.pro_user_id}/profile_photo/{uuid.uuid4().hex}.jpg"
+    try:
+        async with asyncio.timeout(LOCK_WAIT_SECONDS):
+            await pause.inside.wait()
+        patching = asyncio.create_task(
+            scene.committed.client.patch(
+                "/v1/auth/me",
+                json={"photo_key": key},
+                headers=headers_for(scene.pro_user_id, UserRole.PRO),
+            )
+        )
+        # The photo write waits behind the offer's first lock, whichever it is.
+        async with scene.sessions() as monitor, asyncio.timeout(LOCK_WAIT_SECONDS):
+            while not await monitor.scalar(BLOCKED_BY, {"holder": held["offer"]}):
+                await monitor.rollback()  # pg_stat_activity is a per-transaction snapshot
+    finally:
+        pause.go.set()
+    offered, patched = await asyncio.wait_for(
+        asyncio.gather(offering, patching, return_exceptions=True), 3 * LOCK_WAIT_SECONDS
+    )
+
+    if offer == "by_hand":
+        assert getattr(offered, "status_code", offered) == 200, offered
+    else:
+        assert offered == "sent", offered
+    assert getattr(patched, "status_code", patched) == 200, patched
+    async with scene.sessions() as session:
+        photo = await session.scalar(
+            select(ProProfile.photo_key).where(ProProfile.id == scene.pro_id)
+        )
+    assert photo == key
+    assert await request_row(scene) == (RequestStatus.FINDING_PRO, False, 1)

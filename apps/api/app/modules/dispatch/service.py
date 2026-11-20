@@ -27,13 +27,21 @@ profile id, so equal pros share the work and the order is deterministic.
 Locks (#511): the request's row lock serializes the request's runs, not what makes a pro
 eligible. So whoever gets an offer, by hand or by the automatic dispatch, is read again in
 the writing transaction under FOR SHARE locks held to its commit, in this order: the request
-(FOR UPDATE), the ZIP's active service areas, then for each pro its profile, its category and
-area rows, its account. A revocation committed first (an account suspended or no longer a
+(FOR UPDATE), the ZIP's active service areas, then for each pro its account, its profile, its
+category and area rows. A revocation committed first (an account suspended or no longer a
 pro's, a profile not approved or without payouts, a category or area dropped, an area switched
-off) is read and the pro gets nothing; one made after waits until the offer is committed. The
-profile goes before its rows because every profile writer locks it FOR UPDATE first. The
-automatic dispatch ranks without locks, then takes the best ranked that pass the locked read,
-up to `dispatch_max_pros`. The eligible list (`assignable`) is a read and takes no lock.
+off) is read and the pro gets nothing; one made after waits until the offer is committed.
+
+The account goes before the profile because the one writer of both takes them in that order:
+a pro's new ID photo (PATCH /v1/auth/me, #250) locks the account, then writes the profile's
+photo while it has none (#511 round 2: the other order deadlocked with it). Every other profile
+writer locks the profile FOR UPDATE first and writes no account (the pro's own edit, staff's
+review, documents, payouts onboarding, Stripe's account.updated), and the account writers
+write the account alone (login, password reset, phone, role). The profile goes before its rows
+because every profile writer locks it first. tests/test_dispatch_locks.py runs the real photo
+write against both offers. The automatic dispatch ranks without locks, then takes the best
+ranked that pass the locked read, up to `dispatch_max_pros`. The eligible list (`assignable`)
+is a read and takes no lock.
 
 Logs carry ids, statuses and counts only.
 """
@@ -335,15 +343,19 @@ class DispatchService:
         self, pro_id: uuid.UUID, category_id: uuid.UUID, areas: set[uuid.UUID]
     ) -> tuple[AssignCandidate | None, bool]:
         """The profile against the request and whether its account is an active pro's, read
-        FOR SHARE and held to the commit (see the module doc). (None, False): no such profile."""
-        candidate = await ProService(self._session).assign_candidate(
-            pro_id, category_id, areas, lock=True
-        )
-        if candidate is None:
+        FOR SHARE and held to the commit: the account first, then the profile and its rows
+        (see the module doc). (None, False): no such profile."""
+        pros = ProService(self._session)
+        # A profile's account never changes: read without a lock, to lock the account first.
+        user_id = await pros.user_id_of(pro_id)
+        if user_id is None:
             return None, False
         active = await UserService(self._session).active_ids_with_role(
-            [candidate.user_id], UserRole.PRO, lock=True
+            [user_id], UserRole.PRO, lock=True
         )
+        candidate = await pros.assign_candidate(pro_id, category_id, areas, lock=True)
+        if candidate is None:  # pragma: no cover - a profile is never deleted
+            return None, False
         return candidate, candidate.user_id in active
 
     async def _still_fit(
