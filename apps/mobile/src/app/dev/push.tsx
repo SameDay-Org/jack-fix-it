@@ -3,7 +3,7 @@
 // strings are literal on purpose. Remote pushes need the token registration (#334) and the
 // FCM / APNs credentials (#335).
 import * as Notifications from "expo-notifications";
-import { Redirect } from "expo-router";
+import { Redirect, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { ScrollView, Text, View } from "react-native";
 
@@ -37,7 +37,14 @@ const SENTINEL = {
 };
 
 export default function PushDemoScreen() {
-  const [id, setId] = useState("");
+  // An id can come with the link (`/dev/push?id=<uuid>`): typing one through adb is unreliable.
+  const { id: linked } = useLocalSearchParams<{ id?: string }>();
+  const [id, setId] = useState(linked ?? "");
+  const [seenLink, setSeenLink] = useState(linked);
+  if (linked !== seenLink) {
+    setSeenLink(linked);
+    setId(linked ?? "");
+  }
   const [status, setStatus] = useState("");
 
   if (!__DEV__) return <Redirect href="/" />;
