@@ -220,9 +220,29 @@ class Settings(BaseSettings):
     phone_allowed_country_codes: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["+1"]
     )
+    # Number prefixes refused even inside an allowed calling code (CSV, #526). By default the
+    # NANP area codes of the countries other than the US and Canada that share +1: Bahamas,
+    # Barbados, Anguilla, Antigua and Barbuda, British Virgin Islands, Cayman Islands, Bermuda,
+    # Grenada, Turks and Caicos, Jamaica, Montserrat, Sint Maarten, Saint Lucia, Dominica,
+    # Saint Vincent, Dominican Republic, Trinidad and Tobago, Saint Kitts and Nevis. Empty
+    # refuses none.
+    phone_excluded_prefixes: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: [
+            "+1242", "+1246", "+1264", "+1268", "+1284", "+1345", "+1441", "+1473", "+1649",
+            "+1658", "+1664", "+1721", "+1758", "+1767", "+1784", "+1809", "+1829", "+1849",
+            "+1868", "+1869", "+1876",
+        ]
+    )  # fmt: skip
     # Codes sent and codes checked, per user and per phone, per AUTH_RATE_LIMIT_WINDOW_SECONDS.
     phone_otp_send_limit: int = Field(default=3, gt=0)
     phone_otp_check_limit: int = Field(default=5, gt=0)
+    # Codes sent per PHONE_OTP_SEND_DAILY_WINDOW_SECONDS (#526), failing closed: per user and
+    # per number, and per number range, the first PHONE_OTP_PREFIX_LENGTH characters of the
+    # E.164 number (+1, the area code and the exchange by default).
+    phone_otp_send_daily_limit: int = Field(default=5, gt=0)
+    phone_otp_send_daily_prefix_limit: int = Field(default=30, gt=0)
+    phone_otp_prefix_length: int = Field(default=8, ge=3, le=16)
+    phone_otp_send_daily_window_seconds: int = Field(default=86_400, gt=0)
     # Email through Resend (D4.3, #27). Required in staging and production; without them, the
     # reset code is never sent (logged as an error).
     resend_api_key: SecretStr | None = None
@@ -653,6 +673,18 @@ class Settings(BaseSettings):
     def _check_country_codes(cls, value: list[str]) -> list[str]:
         if not value or not all(re.fullmatch(r"\+[1-9]\d{0,3}", code) for code in value):
             raise ValueError("PHONE_ALLOWED_COUNTRY_CODES must list calling codes such as +1")
+        return value
+
+    @field_validator("phone_excluded_prefixes", mode="before")
+    @classmethod
+    def _split_excluded_prefixes(cls, value: object) -> object:
+        return parse_country_codes(value) if isinstance(value, str) else value
+
+    @field_validator("phone_excluded_prefixes")
+    @classmethod
+    def _check_excluded_prefixes(cls, value: list[str]) -> list[str]:
+        if not all(re.fullmatch(r"\+[1-9]\d{1,14}", prefix) for prefix in value):
+            raise ValueError("PHONE_EXCLUDED_PREFIXES must list number prefixes such as +1876")
         return value
 
     @field_validator(

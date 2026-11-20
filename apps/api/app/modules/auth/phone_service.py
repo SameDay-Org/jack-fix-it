@@ -1,6 +1,7 @@
 """Phone verification by SMS code (D4.3, #26): a signed-in user proves they own a number.
 
-- send: checks the number's country code and answers 202. A number another account has
+- send: checks the number's country code, and that it is in no excluded range (#526: the
+  other NANP countries that share +1), and answers 202. A number another account has
   verified gets the same 202 but no SMS. Twilio is called only after the response is sent
   (deliver_code, a background task), so neither the answer, its timing, nor a Twilio error can
   tell whether a number is taken. Twilio failures on send are logged, not returned.
@@ -37,11 +38,13 @@ class PhoneVerificationService:
         users: UserService,
         verifier: PhoneVerifier,
         allowed_country_codes: list[str],
+        excluded_prefixes: list[str],
     ) -> None:
         self._session = session
         self._users = users
         self._verifier = verifier
         self._allowed_country_codes = tuple(allowed_country_codes)
+        self._excluded_prefixes = tuple(excluded_prefixes)
 
     async def prepare_send(self, user: UserAccount, phone: str) -> bool:
         """Validates the request; True when a code should be delivered (deliver_code)."""
@@ -90,5 +93,7 @@ class PhoneVerificationService:
         return account
 
     def _check_country(self, phone: str) -> None:
-        if not phone.startswith(self._allowed_country_codes):
+        if not phone.startswith(self._allowed_country_codes) or phone.startswith(
+            self._excluded_prefixes
+        ):
             raise InvalidPhoneNumberError

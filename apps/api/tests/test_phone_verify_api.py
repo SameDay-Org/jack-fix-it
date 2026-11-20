@@ -544,6 +544,9 @@ async def test_no_raw_identifier_in_any_key(
     email = "ana@example.com"  # normalized before hashing
     email_key = hmac.new(KEY_SECRET.encode(), email.encode(), hashlib.sha256).hexdigest()
     phone_key = hmac.new(KEY_SECRET.encode(), PHONE.encode(), hashlib.sha256).hexdigest()
+    number_range = PHONE[: Settings.model_fields["phone_otp_prefix_length"].default]
+    range_key = hmac.new(KEY_SECRET.encode(), number_range.encode(), hashlib.sha256).hexdigest()
+    day = int(NOW // 86_400)  # the daily budgets' window (#526)
     assert keys == sorted(
         [
             f"{prefix}:auth_register:127.0.0.1:16",
@@ -553,10 +556,13 @@ async def test_no_raw_identifier_in_any_key(
             f"{prefix}:phone_send_phone:{phone_key}:16",
             f"{prefix}:phone_check_user:{ana.id}:16",
             f"{prefix}:phone_check_phone:{phone_key}:16",
+            f"{prefix}:phone_send_daily_user:{ana.id}:{day}",
+            f"{prefix}:phone_send_daily_phone:{phone_key}:{day}",
+            f"{prefix}:phone_send_daily_prefix:{range_key}:{day}",
         ]
     )
     # Neither the raw value, nor its plain hash, nor the development key's HMAC.
-    forbidden = [email, "ana", PHONE[1:], PHONE[-7:]]
+    forbidden = [email, "ana", PHONE[1:], PHONE[-7:], number_range[1:]]
     for value in (email, PHONE):
         forbidden.append(hashlib.sha256(value.encode()).hexdigest())
         forbidden.append(hashed_identifier(value, DEVELOPMENT_HMAC_KEY))
