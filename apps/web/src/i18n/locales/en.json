@@ -486,7 +486,9 @@
       "queue": "Queue",
       "pros": "Pros",
       "disputes": "Disputes",
-      "kpis": "KPIs"
+      "kpis": "KPIs",
+      "followups": "Follow-ups",
+      "followupsDue": "{{count}} due today"
     },
     "roles": {
       "agent": "Agent",
@@ -1265,6 +1267,39 @@
           "unavailable": "Something went wrong. Check the dispute before trying again."
         }
       }
+    },
+    "followups": {
+      "title": "Follow-ups",
+      "subtitle": "What the BDC said it would do next, the most overdue first.",
+      "views": {
+        "label": "Show",
+        "today": "Due today",
+        "all": "All open"
+      },
+      "assignee": {
+        "label": "Whose",
+        "mine": "Mine",
+        "show": "Show"
+      },
+      "columns": {
+        "request": "Request",
+        "status": "Status",
+        "note": "What to do",
+        "due": "Due",
+        "assignee": "Assigned to"
+      },
+      "empty": {
+        "today": "Nothing due today.",
+        "all": "No open follow-ups."
+      },
+      "loading": "Loading follow-ups…",
+      "loadError": "We couldn't load the follow-ups.",
+      "retry": "Try again",
+      "older": "Older",
+      "first": "First page",
+      "moved": "The list changed since this page: back to the first page.",
+      "forbidden": "Your account can't read this list now.",
+      "own": "Show my follow-ups"
     },
     "error": {
       "title": "The panel can't reach the server right now",
