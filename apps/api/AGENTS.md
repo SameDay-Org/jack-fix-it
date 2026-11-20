@@ -244,6 +244,11 @@ them idempotent: they can run twice.
   attempt are committed before Stripe; a retry looks the refund up first. One
   `dispute.resolve` audit row per resolution (`AuditService.record`); staff reads in
   `disputes/staff.py` (the detail is audited, `dispute.read`).
+- **The web service (#409).** Routes the web app's server calls on a visitor's behalf
+  (`POST /v1/interest`, and #86's to come) take `app.web_service.WebService`: `X-JFI-Web-Key` =
+  `WEB_SERVICE_KEY` (constant-time compare, else 401 `invalid_service_key`), and only then the
+  visitor's address from `X-JFI-Client-IP` for per-address limits. Never read a client's
+  `X-Forwarded-For`; both headers are scrubbed from Sentry (`observability._CREDENTIAL_HEADERS`).
 
 ## Stripe webhooks (#40, #280)
 

@@ -68,6 +68,7 @@ environment as **shared variables** referenced from both services, so the two ne
 | `RATE_LIMIT_TIMEOUT_SECONDS`       | optional; `0.5` by default                                                  | no              | D4.4 (#28) |
 | `JWT_SECRET`                       | required; random, at least 32 characters                                    | yes             | D4.2 (#25) |
 | `RATE_LIMIT_KEY_SECRET`            | required; random, at least 32 characters, one per environment               | yes             | #137       |
+| `WEB_SERVICE_KEY`                  | required; random, at least 32 characters; the web's own key, the same       | yes             | #409       |
 | `REFRESH_ROTATION_SECRET`          | required; random, at least 32 characters, one per environment               | yes             | #152       |
 | `REFRESH_REUSE_GRACE_SECONDS`      | optional; `30` by default                                                   | no              | #152       |
 | `TWILIO_ACCOUNT_SID`               | required                                                                    | no              | D4.3 (#26) |
@@ -299,6 +300,7 @@ never logs `worker_started`. Use the same values as api.
 | `SENTRY_DSN`                       | same as api                                                | no              | D3.1 (#22)  |
 | `JWT_SECRET`                       | same as api                                                | yes             | D4.2 (#25)  |
 | `RATE_LIMIT_KEY_SECRET`            | same as api                                                | yes             | #137        |
+| `WEB_SERVICE_KEY`                  | same as api                                                | yes             | #409        |
 | `REFRESH_ROTATION_SECRET`          | same as api                                                | yes             | #152        |
 | `TWILIO_ACCOUNT_SID`               | same as api                                                | no              | D4.3 (#26)  |
 | `TWILIO_AUTH_TOKEN`                | same as api                                                | yes             | D4.3 (#26)  |
