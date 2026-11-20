@@ -126,7 +126,12 @@ async def make_user(
     session.add(user)
     await session.flush()
     token = security.create_access_token(
-        user_id=user.id, role=role, secret=TEST_JWT_SECRET, ttl_seconds=900, now=datetime.now(UTC)
+        user_id=user.id,
+        role=role,
+        session_id=None,
+        secret=TEST_JWT_SECRET,
+        ttl_seconds=900,
+        now=datetime.now(UTC),
     )
     return user.id, {"Authorization": f"Bearer {token}"}
 

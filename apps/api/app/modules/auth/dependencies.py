@@ -62,13 +62,17 @@ def get_auth_service(
 
 async def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    session: Annotated[AsyncSession, Depends(get_session)],
     users: Annotated[UserService, Depends(get_user_service)],
     config: Annotated[AuthConfig, Depends(get_auth_config)],
 ) -> UserAccount:
-    """The active user of `Authorization: Bearer <access token>`, or 401 invalid_token."""
+    """The active user of `Authorization: Bearer <access token>` whose session is still open,
+    or 401 invalid_token."""
     if credentials is None:
         raise InvalidTokenError
-    return await authenticate_access_token(credentials.credentials, users=users, config=config)
+    return await authenticate_access_token(
+        credentials.credentials, session=session, users=users, config=config
+    )
 
 
 CurrentUser = Annotated[UserAccount, Depends(get_current_user)]
@@ -76,15 +80,19 @@ CurrentUser = Annotated[UserAccount, Depends(get_current_user)]
 
 async def get_optional_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    session: Annotated[AsyncSession, Depends(get_session)],
     users: Annotated[UserService, Depends(get_user_service)],
     config: Annotated[AuthConfig, Depends(get_auth_config)],
 ) -> UserAccount | None:
     """For public routes that use the caller when known: the active user of a valid bearer
-    token, else None. Never a 401: a missing, expired or invalid token is simply anonymous."""
+    token, else None. Never a 401: a missing, expired or invalid token, or one whose session was
+    revoked, is simply anonymous."""
     if credentials is None:
         return None
     try:
-        return await authenticate_access_token(credentials.credentials, users=users, config=config)
+        return await authenticate_access_token(
+            credentials.credentials, session=session, users=users, config=config
+        )
     except InvalidTokenError:
         return None
 

@@ -51,6 +51,7 @@ class QueuedRequest:
     next_action: str | None
     first_contact_at: datetime | None
     last_contact_at: datetime | None
+    info_requested_at: datetime | None
     created_at: datetime
     updated_at: datetime
     bucket: QueueBucket
@@ -67,6 +68,15 @@ class RequestBrief:
 
 
 @dataclass(frozen=True)
+class RequestScope:
+    """What decides who may take a request (#82): its status, its category and where it is."""
+
+    status: RequestStatus
+    category_id: uuid.UUID | None
+    address_id: uuid.UUID
+
+
+@dataclass(frozen=True)
 class LockedRequest:
     """A request whose row this transaction holds FOR UPDATE: its id, who holds it now, and
     what the BDC's actions read (#82). Handed back to `RequestQueueReader` to change it."""
@@ -76,6 +86,7 @@ class LockedRequest:
     status: RequestStatus
     category_id: uuid.UUID | None
     first_contact_at: datetime | None
+    info_requested_at: datetime | None
     _row: ServiceRequest = field(repr=False, compare=False)
 
 
@@ -125,6 +136,7 @@ class RequestQueueReader:
             request.status,
             request.category_id,
             request.first_contact_at,
+            request.info_requested_at,
             request,
         )
 
@@ -138,6 +150,14 @@ class RequestQueueReader:
         rows = await self._requests.get_many(request_ids)
         return {row.id: RequestBrief(row.public_code, row.status) for row in rows}
 
+    async def scope(self, request_id: uuid.UUID) -> RequestScope | None:
+        """The request's status, category and address, read without a lock (#82); None for an
+        unknown request."""
+        rows = await self._requests.get_many([request_id])
+        if not rows:
+            return None
+        return RequestScope(rows[0].status, rows[0].category_id, rows[0].address_id)
+
     async def contacted(self, locked: LockedRequest, at: datetime) -> None:
         """Writes the BDC's first contact with the customer on the locked request (#82). The
         caller checked it had none, and commits."""
@@ -147,6 +167,12 @@ class RequestQueueReader:
         """Writes the locked request's category (#82). The caller checked the request's status
         and that the category is active, and commits."""
         await self._queue.set_category(locked._row, category_id)
+
+    async def hold(self, locked: LockedRequest, at: datetime | None) -> None:
+        """Writes the BDC's hold on the locked request (#82): `at` while it waits for the
+        customer, None to release it. The re-dispatch (#478) leaves a held request alone. The
+        caller commits."""
+        await self._queue.set_info_requested(locked._row, at)
 
 
 def _queued(row: QueueRow) -> QueuedRequest:
@@ -170,6 +196,7 @@ def _queued(row: QueueRow) -> QueuedRequest:
         next_action=request.next_action,
         first_contact_at=request.first_contact_at,
         last_contact_at=request.last_contact_at,
+        info_requested_at=request.info_requested_at,
         created_at=request.created_at,
         updated_at=request.updated_at,
         bucket=row.bucket,

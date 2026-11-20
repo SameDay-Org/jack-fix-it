@@ -8,13 +8,17 @@ import {
   CATALOG_REVALIDATE_SECONDS,
   CATALOG_TAG,
   CatalogUnavailableError,
+  cityServicePaths,
+  findCityService,
   findService,
   isPageSlug,
   loadCatalog,
   RESERVED_SLUGS,
   serviceCategories,
+  servedCities,
   servedPlace,
   servedRegions,
+  slugify,
 } from "./catalog";
 import {
   CLEANING,
@@ -191,5 +195,72 @@ describe("the catalog read", () => {
     });
 
     await expect(loadCatalog()).rejects.toBeInstanceOf(CatalogUnavailableError);
+  });
+});
+
+describe("the served cities (#87, PR 2)", () => {
+  const zip = (code: string) => ({ id: `5b1f0c1e-2222-4333-8444-6555666${code}`, zip_code: code });
+
+  it("slug a city's name: lowercase ASCII words joined by hyphens", () => {
+    expect(slugify("Fort Lauderdale")).toBe("fort-lauderdale");
+    expect(slugify("Port St. Lucie")).toBe("port-st-lucie");
+    expect(slugify("Cañon City")).toBe("canon-city");
+    expect(slugify("  Hallandale  ")).toBe("hallandale");
+  });
+
+  it("are the cities with an active ZIP, with their region and ZIPs, in the API's order", () => {
+    const catalog = { categories: [CLEANING], regions: [SOUTH_FLORIDA, TREASURE_COAST] };
+
+    expect(servedCities(catalog)).toEqual([
+      {
+        slug: "fort-lauderdale",
+        city: "Fort Lauderdale",
+        state: "FL",
+        region: "South Florida",
+        zips: ["33301", "33304"],
+      },
+      {
+        slug: "hollywood",
+        city: "Hollywood",
+        state: "FL",
+        region: "South Florida",
+        zips: ["33019"],
+      },
+      { slug: "stuart", city: "Stuart", state: "FL", region: "Treasure Coast", zips: ["34994"] },
+    ]);
+  });
+
+  it("add the state when two served cities share a name, and drop a reserved or empty slug", () => {
+    const region = {
+      region: "Somewhere",
+      cities: [
+        { city: "Springfield", state: "IL", zips: [zip("62701")] },
+        { city: "Springfield", state: "MO", zips: [zip("65801")] },
+        { city: "Admin", state: "FL", zips: [zip("33001")] },
+        { city: "???", state: "FL", zips: [zip("33002")] },
+        { city: "Nowhere", state: "FL", zips: [] },
+      ],
+    };
+
+    expect(servedCities({ categories: [], regions: [region] }).map((c) => c.slug)).toEqual([
+      "springfield-il",
+      "springfield-mo",
+    ]);
+  });
+
+  it("pair an active service with a served city, nothing else", () => {
+    const catalog = { categories: [CLEANING, PAINTING], regions: [SOUTH_FLORIDA] };
+
+    expect(findCityService(catalog, "hollywood", "painting")).toMatchObject({
+      city: { slug: "hollywood" },
+      category: { slug: "painting" },
+    });
+    expect(findCityService(catalog, "stuart", "painting")).toBeNull();
+    expect(findCityService(catalog, "hollywood", "handyman")).toBeNull();
+    expect(findCityService(catalog, "Hollywood", "painting")).toBeNull();
+    expect(cityServicePaths("hollywood", "painting")).toEqual({
+      en: "/hollywood/painting",
+      es: "/es/hollywood/painting",
+    });
   });
 });
