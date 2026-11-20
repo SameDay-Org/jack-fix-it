@@ -20,7 +20,14 @@ from app.modules.auth import security
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.observability import JsonFormatter
-from tests.conftest import TEST_JWT_SECRET, TEST_STORAGE_SETTINGS, make_app, make_settings
+from app.rate_limit import get_rate_limiter, window_position
+from tests.conftest import (
+    TEST_JWT_SECRET,
+    TEST_STORAGE_SETTINGS,
+    InMemoryRateLimiter,
+    make_app,
+    make_settings,
+)
 
 # Distinct from the defaults, so the tests prove the values come from settings.
 UPLOAD_TTL = 120
@@ -476,3 +483,60 @@ async def test_logs_have_no_urls_or_signatures(
         str(TEST_STORAGE_SETTINGS["s3_secret_access_key"]),
     ):
         assert secret not in output
+
+
+# The per-user limit (#529)
+
+NOW = 1_800_000_000.0  # a fixed clock, so no test straddles two rate-limit windows
+UPLOAD_LIMIT = 3
+UPLOAD_WINDOW = 600
+RATE_LIMITED = {"error": {"code": "rate_limited", "message": "Too many requests. Try again later."}}
+
+
+async def test_upload_urls_are_limited_per_user(db_session: AsyncSession) -> None:
+    """Each URL lets its caller store up to the purpose's largest size, so one account gets
+    UPLOAD_URL_LIMIT of them per UPLOAD_URL_WINDOW_SECONDS; another account has its own."""
+    app = make_app(
+        make_settings(
+            **LIMITS, upload_url_limit=UPLOAD_LIMIT, upload_url_window_seconds=UPLOAD_WINDOW
+        )
+    )
+    fake = FakeStorage()
+    app.dependency_overrides[get_storage] = lambda: fake
+    limiter = InMemoryRateLimiter(clock=lambda: NOW)
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+
+    async def test_session() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = test_session
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        ana = await make_caller(db_session, UserRole.CUSTOMER)
+        bruno = await make_caller(db_session, UserRole.PRO)
+        allowed = [
+            await ask_upload(client, ana, "request_media", "video/mp4", MAX_VIDEO)
+            for _ in range(UPLOAD_LIMIT)
+        ]
+        issued = len(fake.puts)
+        limited = await ask_upload(client, ana, "request_media", "image/jpeg", 1)
+        after_limit = len(fake.puts)
+        other = await ask_upload(client, bruno, "job_photo", "image/jpeg", 1)
+
+    assert [response.status_code for response in allowed] == [201] * UPLOAD_LIMIT
+    assert (limited.status_code, limited.json()) == (429, RATE_LIMITED)
+    assert int(limited.headers["Retry-After"]) >= 1
+    assert after_limit == issued  # a limited request presigns nothing
+    assert other.status_code == 201
+    index, _ = window_position(NOW, UPLOAD_WINDOW)
+    assert limiter.counts == {  # the key is the user id only
+        f"upload_url:{ana.id}:{index}": UPLOAD_LIMIT + 1,
+        f"upload_url:{bruno.id}:{index}": 1,
+    }
+
+
+def test_the_upload_limit_is_documented(app: FastAPI) -> None:
+    documented = app.openapi()["paths"]["/v1/uploads"]["post"]["responses"]["429"]
+
+    assert "rate_limited" in documented["description"]
+    assert "Retry-After" in documented["headers"]

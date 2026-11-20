@@ -202,6 +202,10 @@ class Settings(BaseSettings):
     upload_max_image_bytes: int = Field(default=10 * MIB, gt=0)
     upload_max_video_bytes: int = Field(default=100 * MIB, gt=0)
     upload_max_document_bytes: int = Field(default=15 * MIB, gt=0)
+    # Upload URLs one user may get per window (#529): each lets them store up to the
+    # purpose's largest size.
+    upload_url_limit: int = Field(default=30, gt=0)
+    upload_url_window_seconds: int = Field(default=600, gt=0)
     # The worker's sweep of uploads no row references (#191): what it does (dry_run only counts
     # and logs; delete removes them), the age an upload must reach before it may count as
     # orphaned, how often it runs (a cron, in minutes of the hour), and the longest one run may
@@ -368,6 +372,9 @@ class Settings(BaseSettings):
     # customer may make per window. Each one is a call to Stripe.
     payment_method_write_limit: int = Field(default=20, gt=0)
     payment_method_write_window_seconds: int = Field(default=600, gt=0)
+    # Wallet lists one customer may read per window (#525): each one is two Stripe reads.
+    payment_method_read_limit: int = Field(default=60, gt=0)
+    payment_method_read_window_seconds: int = Field(default=600, gt=0)
     # The cards are read from Stripe 100 per page, at most this many pages: a customer with
     # more cards gets 503 payments_unavailable, never a partial list.
     payment_method_list_max_pages: int = Field(default=5, gt=0)
@@ -391,6 +398,10 @@ class Settings(BaseSettings):
     stripe_payment_intent_reconcile_after_seconds: int = Field(
         default=72_000, gt=0, lt=STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS
     )
+    # Payment sheets one customer may open per window (#525): each one reads the
+    # PaymentIntent and creates a CustomerSession at Stripe.
+    payment_sheet_limit: int = Field(default=20, gt=0)
+    payment_sheet_window_seconds: int = Field(default=600, gt=0)
     # Unpaid payments (#297): a payment still unpaid (requires_payment or failed) this many
     # seconds after its creation is canceled, so its quote and request reopen and another quote
     # can be accepted. The default (2 h) is provisional, tied to the request expiry and dispatch
