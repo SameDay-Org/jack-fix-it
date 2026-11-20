@@ -18,8 +18,13 @@ amount computed on the server, the key, no attempt yet. After that commit it que
    no dispute).
 3. Under the row's lock again, one of two outcomes:
    - Stripe's refund and its status are stored, forward only (RefundLedger.observe);
-   - or the attempt ends failed with Stripe's code. It is definitive only for the create's own
-     refusal.
+   - or the attempt ends failed with Stripe's code. It is definitive only when Stripe
+     refused the create itself with a code that says this charge can never be refunded
+     under the key (payments.refunds.REFUND_REFUSED_CODES, the rule a dispute's refund
+     follows since #450). Any other answer to the create (an expired API key, a parameter
+     Stripe does not know, a key still in use), like any answer to the retry's lookup,
+     says nothing final: the row stays for the sweep, which lists first and adopts or
+     creates.
 
 The money is back only at `succeeded`; until then the cancellation shows its refund pending.
 Stripe's refund events reach cancel_refund_event (from the refund webhook handler), which reads
@@ -290,8 +295,9 @@ class CancelRefunds:
                 )
                 return CancelRefundOutcome.FAILED
             except StripeCallError as error:
-                # Definitive only for the create's own refusal (#450 round 2).
-                definitive = isinstance(error, RefundCreateRejectedError) and error.code is not None
+                # Definitive only for the create's own refusal of the charge, by the shared
+                # allowlist (#450 round 4): any other coded 4xx may pass, and is retried.
+                definitive = isinstance(error, RefundCreateRejectedError) and error.definitive
                 await self._end_failed(started, error.code or type(error).__name__, definitive)
                 extra = {
                     **started.ids,

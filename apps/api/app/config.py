@@ -441,6 +441,12 @@ class Settings(BaseSettings):
     cancel_refund_sweep_minutes: int = Field(default=5, ge=1, le=60)
     cancel_refund_sweep_timeout_seconds: int = Field(default=270, gt=0)
     cancel_refund_batch_size: int = Field(default=50, gt=0)
+    # How many cancel previews, and how many cancels (a retry with the same Idempotency-Key
+    # counts too), one customer may ask for per window (#489 round 1).
+    cancel_preview_limit: int = Field(default=60, gt=0)
+    cancel_preview_window_seconds: int = Field(default=60, gt=0)
+    cancel_write_limit: int = Field(default=20, gt=0)
+    cancel_write_window_seconds: int = Field(default=600, gt=0)
     # Job execution (D12.2, #63): wrong arrival codes a pro may enter at check-in before the
     # code locks and the BDC is alerted (Cesar, 2026-10-29: 5).
     arrival_code_max_attempts: int = Field(default=5, gt=0)
