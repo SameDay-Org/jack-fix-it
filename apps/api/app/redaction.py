@@ -1199,14 +1199,20 @@ def _phones(match: re.Match[str]) -> list[tuple[int, int]]:
 
 def _glued_to_a_code(match: re.Match[str]) -> bool:
     """The digits end a model, serial or tracking code (WH12345678901, 1Z999AA1012345678): an
-    uppercase or alphanumeric prefix glued to them. A word ("cell3055550199", "CELL...") is not."""
+    uppercase or alphanumeric prefix glued to them. A word ("cell3055550199", "CELL...") is not.
+
+    The walk back stops at the first digit, which decides it (no cue word holds one): the next
+    digit run in the same word stops at this one's digits, so each character is read about once
+    per text, not once per digit run in its word (#528: "a1" * 1000 was quadratic)."""
     text, start = match.string, match.start()
     while start > 0 and text[start - 1].isalnum():
+        if text[start - 1].isdigit():
+            return True
         start -= 1
     prefix = text[start : match.start()]
     if not prefix or prefix.lower() in _CUE_PREFIXES:
         return False
-    return prefix.isupper() or any(char.isdigit() for char in prefix)
+    return prefix.isupper()
 
 
 def _window_end(
