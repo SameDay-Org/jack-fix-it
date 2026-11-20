@@ -58,6 +58,7 @@ class QueueSources:
     - `quote_starts`: quote_id, start_at.
     - `pending_quotes`: request_id, pending, oldest_at (requests with a pending quote only).
     - `open_ticket_jobs`: the ids of jobs with a support ticket that is not closed.
+    - `pro_cancelled_jobs`: the ids of jobs their pro cancelled recently (#69).
     - `zips`: address_id, zip_code.
     - `problem_job_statuses`: a job in one of these is a problem (disputed).
     - `active_job_statuses`: a job in one of these still has its visit ahead or under way.
@@ -67,6 +68,7 @@ class QueueSources:
     quote_starts: Subquery
     pending_quotes: Subquery
     open_ticket_jobs: Select[uuid.UUID | None]
+    pro_cancelled_jobs: Select[uuid.UUID]
     zips: Subquery
     problem_job_statuses: Collection[StrEnum]
     active_job_statuses: Collection[StrEnum]
@@ -109,7 +111,8 @@ class QueueRow:
 def bucket_of(sources: QueueSources, rules: QueueRules) -> ColumnElement[str]:
     """A request's bucket, by the database clock.
 
-    - problems: its job is disputed, or a support ticket about its job is not closed.
+    - problems: its job is disputed, a support ticket about its job is not closed, or its
+      pro cancelled the job recently (OPS_PRO_CANCEL_ATTENTION_HOURS, #69).
     - urgent: received or reviewing, never contacted, and marked urgent or older than the
       first-contact time.
     - new: received and nobody took it.
@@ -125,6 +128,7 @@ def bucket_of(sources: QueueSources, rules: QueueRules) -> ColumnElement[str]:
     problems = or_(
         jobs.job_status.in_(sources.problem_job_statuses),
         jobs.job_id.in_(sources.open_ticket_jobs),
+        jobs.job_id.in_(sources.pro_cancelled_jobs),
     )
     urgent = and_(
         _R.status.in_((_S.RECEIVED, _S.REVIEWING)),

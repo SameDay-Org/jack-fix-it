@@ -551,6 +551,8 @@ class Settings(BaseSettings):
     # Minutes a pending quote may wait for its customer before the request counts as waiting
     # on the customer instead of quote ready.
     ops_quote_waiting_minutes: int = Field(default=1_440, gt=0)
+    # Hours a request whose pro cancelled its job stays under problems in the queue (#69).
+    ops_pro_cancel_attention_hours: int = Field(default=72, gt=0)
     # The IANA time zone "scheduled today" is read in, as Postgres names it.
     business_time_zone: str = Field(
         default="America/New_York", pattern=r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$"

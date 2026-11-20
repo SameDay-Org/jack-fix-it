@@ -6,6 +6,7 @@ from app.errors import ErrorResponse
 from app.modules.addresses.router import router as addresses_router
 from app.modules.auth.router import router as auth_router
 from app.modules.cancellations.router import customer_router as cancel_customer_router
+from app.modules.cancellations.router import pro_router as cancel_pro_router
 from app.modules.categories.router import router as categories_router
 from app.modules.chat.router import flags_router as chat_flags_router
 from app.modules.chat.router import router as chat_router
@@ -82,6 +83,7 @@ v1_router.include_router(staff_ops_router)
 v1_router.include_router(reviews_router)
 v1_router.include_router(dispute_customer_router)
 v1_router.include_router(cancel_customer_router)
+v1_router.include_router(cancel_pro_router)
 v1_router.include_router(dispute_pro_router)
 v1_router.include_router(earnings_router)
 v1_router.include_router(staff_disputes_router)

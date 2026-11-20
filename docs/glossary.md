@@ -50,8 +50,10 @@ and answers 409 `invalid_transition` otherwise. The terminal states are `expired
   request's own deadline, so the request goes back out.
 - `accepted → quote_ready` (system): the payment failed (#61); the customer can retry or pick
   another quote.
-- `accepted → cancelled` (the customer who owns it, or staff): abandoned before paying; no money
-  has moved.
+- `accepted → cancelled` (the customer who owns it, or staff; the system after the pro cancels
+  the paid job, #69): abandoned before paying, no money has moved; or its paid job was cancelled
+  by either side (#69), the job's cancellation holding the refund. Never reopened: the
+  customer's way back is a new request.
 - `finding_pro → reviewing` (staff): the BDC pulls the request back to reclassify it.
 
 What the customer sees for a request, decided 2026-10-21 by Cesar. The mapping lives in
