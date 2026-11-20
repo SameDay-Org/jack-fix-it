@@ -22,6 +22,8 @@ const LINKS: { label: string; url: (id: string) => string; needsId: boolean }[] 
   { label: "Pro job", url: (id) => `/jobs/${id}`, needsId: true },
   { label: "Opportunity", url: (id) => `/opportunities/${id}`, needsId: true },
   { label: "Quote (no screen yet)", url: (id) => `/quotes/${id}`, needsId: true },
+  { label: "Pro chat (job id)", url: (id) => `/jobs/${id}/chat`, needsId: true },
+  { label: "Customer chat (request id)", url: (id) => `/requests/${id}/job/chat`, needsId: true },
   { label: "Home", url: () => "/", needsId: false },
   { label: "Unknown path", url: () => "/settings", needsId: false },
 ];
