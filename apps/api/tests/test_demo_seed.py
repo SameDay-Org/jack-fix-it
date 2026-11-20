@@ -380,6 +380,39 @@ async def test_a_whole_run_makes_the_scenes(seeded: Seeded) -> None:
         )
         assert len(tickets["items"]) >= 3
 
+        # The admin's follow-ups: one overdue since yesterday, then one due later today, on the
+        # request waiting on its customer, which has the admin's two internal notes.
+        followups = await world.call(admin, "GET", "/v1/admin/followups", what="follow-ups")
+        overdue, later = followups["items"]
+        assert (overdue["note"], later["note"]) == (cast.FOLLOWUP_OVERDUE, cast.FOLLOWUP_TODAY)
+        assert overdue["request_id"] == later["request_id"]
+        assert overdue["assigned_to"]["id"] == later["assigned_to"]["id"] == str(admin.user_id)
+        now = datetime.now(UTC)
+        assert datetime.fromisoformat(overdue["due_at"]) < now - timedelta(hours=12)
+        if await history.business_today(world) == today:  # not across the business midnight
+            assert datetime.fromisoformat(later["due_at"]) > now
+            badge = await world.call(admin, "GET", "/v1/admin/followups/summary", what="badge")
+            assert badge["due_today"] == 2
+        noted = await world.call(
+            admin, "GET", f"/v1/admin/requests/{overdue['request_id']}", what="noted request"
+        )
+        assert noted["status"] == "reviewing"
+        assert [note["body"] for note in noted["notes"]] == list(cast.BDC_NOTES)
+        assert {note["author"]["id"] for note in noted["notes"]} == {str(admin.user_id)}
+        # Yesterday's note and follow-up are dated yesterday; each action has its audit row.
+        dated = (
+            "SELECT (SELECT created_at FROM request_notes WHERE body = :note) < now() - "
+            "interval '12 hours' AND (SELECT created_at FROM request_followups WHERE note = "
+            ":followup) < now() - interval '12 hours'"
+        )
+        assert await _scalar(world, dated, note=cast.BDC_NOTES[0], followup=cast.FOLLOWUP_OVERDUE)
+        audited = (
+            "SELECT count(*) FROM audit_log WHERE actor_user_id = :admin AND entity_id = "
+            ":request AND action IN ('service_request.add_note', "
+            "'service_request.schedule_followup')"
+        )
+        assert await _scalar(world, audited, admin=admin.user_id, request=noted["id"]) == 4
+
         metrics = await world.call(admin, "GET", "/v1/admin/metrics", what="metrics")
         assert metrics["metrics"]["contact_rate"]["numerator"] > 0
         assert metrics["metrics"]["lead_to_job"]["numerator"] > 0
