@@ -8,7 +8,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base, IdTimestampsMixin
 
 # The cleanup still to do: storage objects not deleted, or cards not detached.
-PENDING_CONDITION = "storage_deleted_at IS NULL OR cards_detached_at IS NULL"
+PENDING_CONDITION = (
+    "storage_deleted_at IS NULL OR cards_detached_at IS NULL OR erased_again_at IS NULL"
+)
 
 
 class AccountDeletion(IdTimestampsMixin, Base):
@@ -41,6 +43,9 @@ class AccountDeletion(IdTimestampsMixin, Base):
     storage_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Set at the deletion when the account has no Stripe Customer (no card to detach).
     cards_detached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The worker erases the account once more after this time (accounts.eraser), when it did.
+    erase_settled_after: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    erased_again_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     attempts: Mapped[int] = mapped_column(server_default=text("0"))
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # The error class of the last failed attempt, never its message (it can carry ids).

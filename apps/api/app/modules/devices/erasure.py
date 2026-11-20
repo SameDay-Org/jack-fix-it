@@ -11,8 +11,10 @@ from app.modules.devices.repository import DeviceRepository
 
 
 async def forget_devices(session: AsyncSession, user_id: uuid.UUID) -> int:
-    """Deletes the user's devices under the owner's lock (DeviceService's order: a register
-    of a token of theirs waits, then finds no row to keep); how many. No commit."""
+    """Deletes the user's devices under the owner's lock, which a register of theirs takes
+    too (DeviceService's order); how many. No commit. A register already waiting on that lock
+    still writes its token once the deletion commits: the worker's second erasure deletes it
+    (accounts.eraser)."""
     await DeviceRepository(session).lock_owner(user_id)
     result = await session.execute(
         delete(Device).where(Device.user_id == user_id).execution_options(synchronize_session=False)

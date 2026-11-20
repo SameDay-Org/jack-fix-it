@@ -22,7 +22,7 @@ depends_on: str | Sequence[str] | None = None
 
 STATUS_CHECK = "ck_users_user_status"
 DELETED_CHECK = "ck_users_deleted_at_status"
-PENDING = "storage_deleted_at IS NULL OR cards_detached_at IS NULL"
+PENDING = "storage_deleted_at IS NULL OR cards_detached_at IS NULL OR erased_again_at IS NULL"
 
 
 def _timestamps() -> list[sa.Column[datetime]]:
@@ -64,6 +64,8 @@ def upgrade() -> None:
         sa.Column("storage_settled_after", sa.DateTime(timezone=True), nullable=False),
         sa.Column("storage_deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("cards_detached_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("erase_settled_after", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("erased_again_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("attempts", sa.Integer(), server_default=sa.text("0"), nullable=False),
         sa.Column("last_attempt_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_error", sa.String(length=64), nullable=True),

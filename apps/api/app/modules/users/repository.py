@@ -87,7 +87,8 @@ class UserRepository:
                 home_state=None,
                 photo_key=None,
                 status=UserStatus.DELETED,
-                deleted_at=func.now(),
+                # The first deletion's time: the worker's second pass anonymises again.
+                deleted_at=func.coalesce(User.deleted_at, func.now()),
             )
         )
 
@@ -105,6 +106,24 @@ class UserRepository:
             (row[0], row[1], row[2], row[3], row[4], row[5])
             for row in (await self._session.execute(statement)).all()
         ]
+
+    async def get_by_id_for_deletion(self, user_id: uuid.UUID) -> User | None:
+        """FOR UPDATE, not FOR NO KEY UPDATE (#97): until the deletion commits, a row that
+        references the user (a request, an address, a device, a payment) cannot be inserted
+        either, and a profile or phone write waits. Read as last committed."""
+        statement = (
+            select(User)
+            .where(User.id == user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def deleted_among(self, user_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        if not user_ids:
+            return set()
+        statement = select(User.id).where(User.id.in_(user_ids), User.status == UserStatus.DELETED)
+        return set(await self._session.scalars(statement))
 
     async def get_by_email(self, email: str, *, lock: bool = False) -> User | None:
         """`lock`: FOR NO KEY UPDATE until the transaction ends, reading the row as last

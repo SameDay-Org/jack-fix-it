@@ -9,8 +9,7 @@ from app.errors import ErrorResponse
 from app.middleware import NoStoreRoute
 from app.modules.accounts.schemas import AccountDeletionIn
 from app.modules.accounts.service import AccountDeletionConfig, AccountDeletionService
-from app.modules.auth.dependencies import CurrentUser, get_auth_service, get_user_service
-from app.modules.auth.service import AuthService
+from app.modules.auth.dependencies import CurrentUser, get_user_service
 from app.modules.users.service import UserService
 from app.queue import JobQueue, get_job_queue
 from app.rate_limit import RateLimiter, enforce_limit, get_rate_limiter
@@ -26,12 +25,11 @@ def _error(description: str) -> dict[str, Any]:
 def get_account_deletion_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     users: Annotated[UserService, Depends(get_user_service)],
-    auth: Annotated[AuthService, Depends(get_auth_service)],
     settings: Annotated[Settings, Depends(get_app_settings)],
     queue: Annotated[JobQueue, Depends(get_job_queue)],
 ) -> AccountDeletionService:
     return AccountDeletionService(
-        session, users, auth, AccountDeletionConfig.from_settings(settings), queue
+        session, users, AccountDeletionConfig.from_settings(settings), queue
     )
 
 

@@ -125,12 +125,6 @@ class AuthService:
         terms_required from terms_required. Never raises."""
         return UserOut.from_account(account, photo=photo, terms_required=terms_required)
 
-    async def revoke_all_sessions(self, user_id: uuid.UUID) -> None:
-        """Revokes every session of the user in the caller's transaction, which commits (an
-        account deletion, #97): their refresh tokens are refused, and their access tokens at
-        the next request (#161)."""
-        await self._refresh_tokens.revoke_all_for_user(user_id, datetime.now(UTC))
-
     async def register(self, data: RegisterRequest) -> AuthResponse:
         if len(data.password) < self._config.password_min_length:
             raise PasswordTooShortError
@@ -326,6 +320,13 @@ class AuthService:
         """Commits at once: on a failed refresh the revocation must outlive the error."""
         await self._refresh_tokens.revoke_family(family_id, now)
         await self._session.commit()
+
+
+async def revoke_all_sessions(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Revokes every session of the user in the caller's transaction, which commits (an
+    account deletion, #97, and the worker's second pass): their refresh tokens are refused, and
+    their access tokens at the next request (#161)."""
+    await RefreshTokenRepository(session).revoke_all_for_user(user_id, datetime.now(UTC))
 
 
 async def authenticate_access_token(

@@ -462,6 +462,9 @@ class Settings(BaseSettings):
     account_deletion_sweep_timeout_seconds: int = Field(default=540, gt=0)
     account_deletion_batch_size: int = Field(default=50, gt=0)
     account_deletion_retry_after_minutes: int = Field(default=10, gt=0)
+    # When the worker erases a deleted account once more: past the longest a request the
+    # account sent before the deletion may still run (it may write after the deletion's commit).
+    account_deletion_settle_seconds: int = Field(default=900, ge=0)
     # How many cancel previews, and how many cancels (a retry with the same Idempotency-Key
     # counts too), one customer may ask for per window (#489 round 1).
     cancel_preview_limit: int = Field(default=60, gt=0)

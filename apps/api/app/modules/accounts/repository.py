@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import ColumnElement, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +10,9 @@ from app.modules.accounts.models import AccountDeletion
 def _pending() -> ColumnElement[bool]:
     """Something is still to do (the partial index's condition, models.PENDING_CONDITION)."""
     return or_(
-        AccountDeletion.storage_deleted_at.is_(None), AccountDeletion.cards_detached_at.is_(None)
+        AccountDeletion.storage_deleted_at.is_(None),
+        AccountDeletion.cards_detached_at.is_(None),
+        AccountDeletion.erased_again_at.is_(None),
     )
 
 
@@ -24,6 +26,7 @@ class AccountDeletionRepository:
         *,
         storage_keys: list[str],
         storage_settled_after: datetime,
+        erase_settled_after: datetime,
         cards_detached_at: datetime | None,
     ) -> None:
         self._session.add(
@@ -31,6 +34,7 @@ class AccountDeletionRepository:
                 user_id=user_id,
                 storage_keys=storage_keys,
                 storage_settled_after=storage_settled_after,
+                erase_settled_after=erase_settled_after,
                 cards_detached_at=cards_detached_at,
             )
         )
@@ -56,6 +60,30 @@ class AccountDeletionRepository:
             .execution_options(populate_existing=True)
         )
         return (await self._session.scalars(statement)).one_or_none()
+
+    async def record_second_pass(
+        self, user_id: uuid.UUID, *, keys: list[str], has_stripe_customer: bool
+    ) -> AccountDeletion:
+        """The worker's second erasure is done: the files it found join the keys (and the
+        files' pass is open again), and a Stripe Customer it found has its cards detached
+        again. The row as it is now."""
+        row = (
+            await self._session.scalars(
+                select(AccountDeletion)
+                .where(AccountDeletion.user_id == user_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).one()
+        row.erased_again_at = datetime.now(UTC)
+        fresh = sorted(set(keys) - set(row.storage_keys))
+        if fresh:
+            row.storage_keys = sorted({*row.storage_keys, *fresh})
+            row.storage_deleted_at = None
+        if has_stripe_customer:
+            row.cards_detached_at = None
+        await self._session.flush()
+        return row
 
     async def record(
         self,

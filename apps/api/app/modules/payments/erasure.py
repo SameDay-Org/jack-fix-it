@@ -27,6 +27,14 @@ OPEN_PAYMENTS: Final = frozenset(
 UNSETTLED_TRANSFERS: Final = frozenset({TransferStatus.PENDING, TransferStatus.FAILED})
 
 
+def request_ids_with_an_open_payment(customer_id: uuid.UUID) -> Select[uuid.UUID]:
+    """The customer's requests with a payment still open, as a statement: never cancelled by
+    a deletion (requests.erasure)."""
+    return select(Payment.request_id).where(
+        Payment.customer_id == customer_id, Payment.status.in_(OPEN_PAYMENTS)
+    )
+
+
 async def customer_has_open_payment(session: AsyncSession, customer_id: uuid.UUID) -> bool:
     statement = select(
         exists().where(Payment.customer_id == customer_id, Payment.status.in_(OPEN_PAYMENTS))

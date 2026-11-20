@@ -144,14 +144,27 @@ class UserService:
         user = await self._users.get_by_id_for_share(user_id)
         return _to_account(user) if user else None
 
-    async def get_for_update(self, user_id: uuid.UUID) -> UserCredentials | None:
-        """The account and its password hash as last committed, its row locked until the
-        transaction ends: an account deletion (#97) holds it from the password check to the
-        commit, so a second deletion, a login or a password reset of the user waits for it."""
-        user = await self._users.get_by_id_for_update(user_id)
+    async def credentials(self, user_id: uuid.UUID) -> UserCredentials | None:
+        """The account and its password hash, unlocked: an account deletion's password check
+        (#97), made before it takes any lock."""
+        user = await self._users.get_by_id(user_id)
         if user is None:
             return None
         return UserCredentials(account=_to_account(user), password_hash=user.password_hash)
+
+    async def get_for_update(self, user_id: uuid.UUID) -> UserCredentials | None:
+        """The account and its password hash as last committed, its row locked FOR UPDATE
+        until the transaction ends (an account deletion, #97): a second deletion, a login, a
+        password reset, a profile or phone write of the user waits for it, and so does the
+        insert of any row that references the user."""
+        user = await self._users.get_by_id_for_deletion(user_id)
+        if user is None:
+            return None
+        return UserCredentials(account=_to_account(user), password_hash=user.password_hash)
+
+    async def deleted_among(self, user_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
+        """The ids among `user_ids` of deleted accounts (#97)."""
+        return await self._users.deleted_among(user_ids)
 
     async def anonymise(self, user_id: uuid.UUID) -> None:
         """Anonymises the account in place (#97); the caller holds its row (get_for_update) and

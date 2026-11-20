@@ -14,7 +14,7 @@ import asyncio
 import json
 import logging
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -27,7 +27,12 @@ from redis.exceptions import RedisError
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.integrations.storage import DeleteResult, StorageUnavailableError
+from app.integrations.storage import (
+    DeleteResult,
+    ObjectPage,
+    StorageUnavailableError,
+    StoredObject,
+)
 from app.integrations.stripe_errors import StripeUnavailableError
 from app.modules.accounts.models import AccountDeletion
 from app.modules.accounts.tasks import clean_up_deleted_account, retry_account_cleanups
@@ -96,7 +101,8 @@ PRICE, TAX, FEE = 10_000, 700, 1_500
 @pytest.fixture
 def settings() -> Any:
     # Not the default, so the rate limit test proves it comes from the settings.
-    return make_settings(auth_rate_limit_requests=RATE_LIMIT)
+    # The worker's second erasure at once: no request of the account is left running here.
+    return make_settings(auth_rate_limit_requests=RATE_LIMIT, account_deletion_settle_seconds=0)
 
 
 @dataclass
@@ -973,15 +979,24 @@ async def test_two_deletions_at_once_delete_once(
 
 @dataclass
 class FakeStorage:
-    """The storage port's delete, recorded; `failure` makes every call raise it."""
+    """The storage port's listing and delete: `objects` are what it holds, each delete is
+    recorded; `failure` makes every call raise it."""
 
+    objects: set[str] = field(default_factory=set)
     deleted: list[list[str]] = field(default_factory=list)
     failure: Exception | None = None
+
+    def list_older_than(self, prefix: str, before: datetime) -> Iterator[ObjectPage]:
+        if self.failure is not None:
+            raise self.failure
+        listed = [StoredObject(key, datetime.now(UTC)) for key in sorted(self.objects)]
+        yield ObjectPage(objects=[o for o in listed if o.key.startswith(prefix)], newer=0)
 
     def delete_many(self, keys: Any) -> DeleteResult:
         if self.failure is not None:
             raise self.failure
         self.deleted.append(sorted(keys))
+        self.objects -= set(keys)
         return DeleteResult(deleted=len(keys), failed=0)
 
 
@@ -1029,7 +1044,7 @@ async def make_due(world: World, user_id: uuid.UUID, settings: Any) -> None:
         await session.execute(
             update(AccountDeletion)
             .where(AccountDeletion.user_id == user_id)
-            .values(last_attempt_at=past, storage_settled_after=past)
+            .values(last_attempt_at=past, storage_settled_after=past, erase_settled_after=past)
         )
         await session.commit()
 
@@ -1163,3 +1178,136 @@ async def test_the_deletion_is_audited_with_ids_and_counts_only(
     assert row.after is not None
     assert row.after["status"] == "deleted"
     assert email not in json.dumps([row.before, row.after])
+
+
+# What the review of #97 found: writes that land after the deletion, files nothing references,
+# a request accepted with nothing paid, another account's entries, a deleted pro's quote.
+
+
+async def test_a_write_that_lands_after_the_deletion_is_erased_by_the_second_pass(
+    world: World, settings: Any
+) -> None:
+    # A request the account sent before the deletion committed waits on its lock, then writes:
+    # done here by hand, after the commit, as such a request would.
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+    async with world.sessions() as session:
+        await session.execute(
+            update(User)
+            .where(User.id == world.customer.id)
+            .values(first_name=f"Ann{world.sentinel}", phone=world.phone)
+        )
+        late = await add_request(session, world, RequestStatus.RECEIVED)
+        session.add_all(
+            [
+                Device(
+                    user_id=world.customer.id,
+                    expo_push_token=f"ExponentPushToken[{world.sentinel}]",
+                    platform=DevicePlatform.ANDROID,
+                    last_seen_at=datetime.now(UTC),
+                ),
+                SavedAddress(
+                    user_id=world.customer.id,
+                    label="Work",
+                    line1=f"{world.sentinel} Pine Rd",
+                    city="Orlando",
+                    state="FL",
+                    zip_code="32801",
+                ),
+            ]
+        )
+        await session.commit()
+        assert ("users", "first_name") in await sweep(session, world.sentinel, world.phone)
+
+    await clean_up_deleted_account(
+        worker_ctx(world, settings, FakeStorage(), FakeStripePaymentMethods()),
+        str(world.customer.id),
+    )
+
+    async with world.sessions() as session:
+        assert await sweep(session, world.sentinel, world.phone) == set()
+        status = await session.scalar(
+            select(ServiceRequest.status).where(ServiceRequest.id == late.id)
+        )
+        assert status is RequestStatus.CANCELLED
+    row = await cleanup_row(world, world.customer.id)
+    assert row.erased_again_at is not None
+
+
+async def test_every_upload_under_the_accounts_prefix_goes_but_job_and_dispute_photos(
+    world: World, settings: Any
+) -> None:
+    mine, theirs = world.customer.id, world.pro.id
+    replaced = f"u/{mine}/profile_photo/{uuid.uuid4().hex}.jpg"  # an ID photo replaced since
+    draft = f"u/{mine}/request_media/{uuid.uuid4().hex}.jpg"  # removed before the request
+    evidence = f"u/{mine}/dispute_photo/{uuid.uuid4().hex}.jpg"
+    other = f"u/{theirs}/profile_photo/{uuid.uuid4().hex}.jpg"
+    storage = FakeStorage(objects={replaced, draft, evidence, other})
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+
+    await clean_up_deleted_account(
+        worker_ctx(world, settings, storage, FakeStripePaymentMethods()), str(mine)
+    )
+
+    assert storage.objects == {evidence, other}
+    assert (await cleanup_row(world, mine)).storage_deleted_at is not None
+
+
+async def test_an_accepted_request_with_nothing_paid_is_cancelled_and_frees_its_pro(
+    world: World,
+) -> None:
+    async with world.sessions() as session:
+        request = await add_request(session, world)  # accepted: the payment sheet never ran
+        quote = await add_quote(session, world, request)
+        await session.commit()
+
+    customer = await delete_account(world.client, world.customer)
+    pro = await delete_account(world.client, world.pro)
+
+    assert (customer.status_code, pro.status_code) == (204, 204), (customer.text, pro.text)
+    async with world.sessions() as session:
+        status = await session.scalar(
+            select(ServiceRequest.status).where(ServiceRequest.id == request.id)
+        )
+        quote_status = await session.scalar(select(Quote.status).where(Quote.id == quote.id))
+    assert status is RequestStatus.CANCELLED
+    assert quote_status is QuoteStatus.ACCEPTED  # kept untouched: the request holds it no more
+
+
+async def test_another_accounts_waitlist_entry_with_the_same_email_stays(world: World) -> None:
+    async with world.sessions() as session:
+        # The pro, signed in, typed the customer's email (a household member).
+        session.add(
+            WaitlistEntry(
+                user_id=world.pro.id,
+                zip_code="00011",
+                email=world.customer.email,
+                source=next(iter(WaitlistSource)),
+            )
+        )
+        await session.commit()
+
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+
+    async with world.sessions() as session:
+        owners = list(
+            await session.scalars(
+                select(WaitlistEntry.user_id).where(WaitlistEntry.zip_code == "00011")
+            )
+        )
+    assert owners == [world.pro.id]
+
+
+async def test_a_deleted_pros_quote_is_never_hired(world: World) -> None:
+    assert (await delete_account(world.client, world.pro)).status_code == 204
+    async with world.sessions() as session:
+        # A quote a request in flight inserted after the deletion.
+        request = await add_request(session, world, RequestStatus.QUOTE_READY)
+        await add_quote(session, world, request, QuoteStatus.PENDING)
+        await session.commit()
+
+    listed = await world.client.get(
+        f"/v1/requests/{request.id}/quotes", headers=world.customer.headers
+    )
+
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["items"] == []

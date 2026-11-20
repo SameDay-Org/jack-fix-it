@@ -37,6 +37,12 @@ class JobErasure:
         return select(Job.id).where(Job.pro_id == pro_id)
 
     @staticmethod
+    def request_ids_with_a_job() -> Select[uuid.UUID]:
+        """The requests a job was made for, as a statement: an accepted request with one is
+        history, never cancelled (requests.erasure)."""
+        return select(Job.request_id)
+
+    @staticmethod
     def quote_ids_with_a_job() -> Select[uuid.UUID]:
         """The quotes a job was made from, as a statement: an accepted quote without one is
         still being paid (quotes.erasure)."""
