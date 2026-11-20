@@ -401,6 +401,23 @@ async def test_an_earlier_attempts_success_is_contained_and_flagged_for_staff(
     assert (await reread(db_session, tip.id)).status is TipStatus.CANCELED
 
 
+@pytest.mark.parametrize("stripe_says", ["canceled", "succeeded"])
+async def test_an_earlier_attempts_intent_is_never_adopted_for_a_lost_create(
+    db_session: AsyncSession, world: JobWorld, job: Job, stripe_says: str
+) -> None:
+    """The current attempt (2) waits on a lost create; attempt 1's intent speaks up. It is
+    not this attempt's, so it is never stored as the tip's (a success is contained instead)."""
+    tip = await add_tip(db_session, world, job, intent=None, attempt=2)
+    stripe = FakeStripePayments()
+    stripe_holds(stripe, tip, status=stripe_says, attempt="1")
+
+    await deliver(db_session, stripe, event(SUCCEEDED))
+
+    row = await reread(db_session, tip.id)
+    assert (row.stripe_payment_intent_id, row.status) == (None, TipStatus.REQUIRES_PAYMENT)
+    assert (row.late_success_at is not None) is (stripe_says == "succeeded")
+
+
 @pytest.mark.parametrize(
     "override",
     [{"tip_id": "not-a-uuid"}, {"tip_id": str(uuid.uuid4())}, {"tip_id": None}, {"kind": None}],
