@@ -29,10 +29,13 @@ release(tip_id), in four steps:
      and amount, tips/intents.mismatches) and succeeded, and its charge must exist and be
      neither refunded (any amount) nor disputed. Anything else creates nothing and is staff's;
    - a retry (any attempt after the first) lists the request's transfer group and looks for a
-     transfer whose metadata names this tip (kind "tip", its tip_id): exactly one that fits
-     (amount, currency, destination, no job_id, not reversed) is adopted, so a lost answer
-     never leads to a second create. More than one live match, one that does not fit, only
-     reversed ones, or a listing with further pages: nothing is created (staff);
+     transfer whose metadata names this tip (kind "tip", its tip_id), before the charge's
+     gates: exactly one that fits (amount, currency, destination, no job_id, not reversed) is
+     adopted, so a lost answer never leads to a second create and is never left unrecorded.
+     Adopted while the charge would stop a create (refunded or disputed since, or no longer
+     matching): stored anyway, since Stripe made it, with an ERROR for staff. More than one
+     live match, one that does not fit, only reversed ones, or a listing with further pages:
+     nothing is created (staff);
    - the initiation boundary: under the job's lock again, the dispute and refund checks run
      again, and the attempt must still be the row's one under way; then committed;
    - the create: the tip's amount exactly, its currency, to the pro's account, in the request's
@@ -214,6 +217,9 @@ class _CreateRefusedError(Exception):
 class _Made:
     facts: TransferFacts
     adopted: bool
+    # Why Stripe's read of the tip's charge would have stopped a create (an adopted transfer
+    # only): it is stored anyway, since Stripe made it, and flagged for staff.
+    charge_problem: str | None = None
 
 
 def _utc_now() -> datetime:
@@ -399,9 +405,11 @@ class TipTransferService:
         self, payments: StripePayments, transfers: StripeTransfers, attempt: _Attempt
     ) -> _Made | TipTransferOutcome:
         """Step 2: Stripe's read of the tip's charge, then the transfer found (a retry) or
-        created. No transaction is open during a Stripe call."""
+        created. A retry looks the transfer up BEFORE the charge's gates: a transfer an
+        earlier attempt made is stored whatever the charge shows now (and flagged when the
+        charge would stop a create), never left unrecorded. No transaction is open during a
+        Stripe call."""
         charge = await payments.tip_charge(attempt.payment_intent_id)
-        source = _payable_charge(charge, attempt)
         group = transfer_group(attempt.request_id)
         if attempt.number > 1:
             found = await transfers.list_transfers(group)
@@ -416,10 +424,12 @@ class TipTransferService:
             if len(live) > 1:
                 raise _ReviewError("several_transfers")
             if live:
-                return _Made(_fitting(live[0], attempt), adopted=True)
+                problem = _charge_problem(charge, attempt)
+                return _Made(_fitting(live[0], attempt), adopted=True, charge_problem=problem)
             if ours:
                 # The tip's only transfers were reversed: sending it again is staff's call.
                 raise _ReviewError("transfer_reversed")
+        source = _payable_charge(charge, attempt)
         stopped = await self._cross_boundary(attempt)
         if stopped is not None:
             return stopped
@@ -472,13 +482,18 @@ class TipTransferService:
         if not stored:
             # Another attempt of this tip stored it first: the same transfer (one key).
             return await self._leave(TipTransferOutcome.ALREADY_CREATED)
+        how = "adopted" if made.adopted else "created"
         if await self._money_returned(attempt.job_id):
             logger.error(
                 "tip_transfer_needs_reversal",
-                extra={
-                    **attempt.ids,
-                    "stored_under_hold": "adopted" if made.adopted else "created",
-                },
+                extra={**attempt.ids, "stored_under_hold": how, "reason": JOB_REFUNDED_OR_DISPUTED},
+            )
+        if made.charge_problem is not None:
+            # An earlier attempt's create made it before the charge went back (or stopped
+            # matching): staff reverse it in Stripe; nothing here undoes a transfer.
+            logger.error(
+                "tip_transfer_needs_reversal",
+                extra={**attempt.ids, "stored_under_hold": how, "reason": made.charge_problem},
             )
         await self._session.commit()
         logger.info(
@@ -539,6 +554,14 @@ class TipTransferService:
 def _payable_charge(charge: TipChargeFacts, attempt: _Attempt) -> str:
     """The charge a transfer may pay from: the tip's current attempt's, succeeded, neither
     refunded nor disputed, as Stripe shows it now. Else nothing is created (staff)."""
+    problem = _charge_problem(charge, attempt)
+    if problem is not None or charge.charge_id is None:
+        raise _ReviewError(problem or "tip_not_charged", TIP_CHARGE_NOT_PAYABLE)
+    return charge.charge_id
+
+
+def _charge_problem(charge: TipChargeFacts, attempt: _Attempt) -> str | None:
+    """Why the charge is no charge to pay this tip from (a fixed word), or None."""
     differ = mismatches(
         charge.intent,
         tip_id=attempt.tip_id,
@@ -553,12 +576,12 @@ def _payable_charge(charge: TipChargeFacts, attempt: _Attempt) -> str:
         or charge.intent.attempt != str(attempt.tip_attempt)
         or charge.intent.payment_intent_id != attempt.payment_intent_id
     ):
-        raise _ReviewError("tip_intent_mismatch", TIP_CHARGE_NOT_PAYABLE)
+        return "tip_intent_mismatch"
     if charge.intent.status != "succeeded" or charge.charge_id is None:
-        raise _ReviewError("tip_not_charged", TIP_CHARGE_NOT_PAYABLE)
+        return "tip_not_charged"
     if charge.refunded or charge.disputed:
-        raise _ReviewError("tip_charge_returned", TIP_CHARGE_NOT_PAYABLE)
-    return charge.charge_id
+        return "tip_charge_returned"
+    return None
 
 
 def _fitting(made: TransferFacts, attempt: _Attempt) -> TransferFacts:

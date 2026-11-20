@@ -557,6 +557,50 @@ async def test_a_lost_answer_is_found_again_and_never_sent_twice(
     assert (row.stripe_transfer_id, row.transfer_attempts) == (made, 2)
 
 
+@pytest.mark.parametrize("returned", ["refunded", "disputed", "mismatch"])
+async def test_a_lost_answer_is_stored_even_once_the_charge_went_back_and_flagged(
+    db_session: AsyncSession,
+    world: JobWorld,
+    payments: FakeStripePayments,
+    stripe: FakeStripeTransfers,
+    clock: Clock,
+    caplog: pytest.LogCaptureFixture,
+    returned: str,
+) -> None:
+    """The self-review's case: attempt 1's create made the transfer but its answer was lost;
+    before the retry the tip's charge was refunded, charged back, or stops matching. The retry
+    looks the transfer up before the charge's gates, so Stripe's transfer is recorded (never
+    left unknown), and staff get an ERROR to reverse it."""
+    tip_id, _, _ = await committed_tip(db_session, world, payments)
+    stripe.lost_answers = 1
+    assert await service(db_session, payments, stripe, clock).release(tip_id) is (
+        TipTransferOutcome.FAILED
+    )
+    [intent] = payments.tip_facts
+    if returned == "refunded":
+        payments.refunded_charges.add(intent)
+    elif returned == "disputed":
+        payments.disputed_charges.add(intent)
+    else:
+        payments.tip_facts[intent] = TipIntentFacts(
+            **{**payments.tip_facts[intent].__dict__, "customer_id": "cus_someoneelse"}
+        )
+    clock.now += CONFIG.stuck_after
+
+    outcome = await service(db_session, payments, stripe, clock).release(tip_id)
+
+    assert outcome is TipTransferOutcome.CREATED
+    assert len(stripe.creates) == 1
+    row = await tip_row(db_session, tip_id)
+    [made] = stripe.by_key.values()
+    assert (row.transfer_status, row.stripe_transfer_id) == (TipTransferStatus.CREATED, made)
+    flagged = [r for r in caplog.records if r.message == "tip_transfer_needs_reversal"]
+    reason = "tip_intent_mismatch" if returned == "mismatch" else "tip_charge_returned"
+    assert [
+        (r.levelno, r.__dict__["reason"], r.__dict__["stored_under_hold"]) for r in flagged
+    ] == [(logging.ERROR, reason, "adopted")]
+
+
 @pytest.mark.parametrize("code", sorted(tip_transfers.TIP_TRANSFER_REFUSED_CODES))
 async def test_a_create_stripe_refuses_for_good_is_staffs(
     db_session: AsyncSession,

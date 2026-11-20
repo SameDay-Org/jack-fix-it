@@ -12228,9 +12228,16 @@
             "description": "What the pro receives for the job, in integer cents (never the tip)."
           },
           "tip_cents": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Tip Cents",
-            "description": "The customer's tip on the job, all of it the pro's, in integer cents; 0 when none. Its own transfer: the summary counts it by that transfer's state."
+            "description": "The customer's tip on the job, all of it the pro's, in integer cents; 0 when none. Its own transfer: the summary counts it by that transfer's state. Always sent; optional in the schema so clients built before #273 keep compiling."
           },
           "status": {
             "$ref": "#/components/schemas/EarningStatus"
@@ -12273,7 +12280,6 @@
           "job_id",
           "category",
           "amount_cents",
-          "tip_cents",
           "status",
           "completed_at",
           "paid_at",

@@ -52,9 +52,11 @@ class EarningItem(_Out):
     amount_cents: int = Field(
         description="What the pro receives for the job, in integer cents (never the tip)."
     )
-    tip_cents: int = Field(
+    tip_cents: int | None = Field(
+        default=None,
         description="The customer's tip on the job, all of it the pro's, in integer cents; 0 "
-        "when none. Its own transfer: the summary counts it by that transfer's state."
+        "when none. Its own transfer: the summary counts it by that transfer's state. Always "
+        "sent; optional in the schema so clients built before #273 keep compiling.",
     )
     status: EarningStatus
     completed_at: datetime

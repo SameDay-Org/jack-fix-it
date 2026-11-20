@@ -3447,9 +3447,9 @@ export interface components {
             amount_cents: number;
             /**
              * Tip Cents
-             * @description The customer's tip on the job, all of it the pro's, in integer cents; 0 when none. Its own transfer: the summary counts it by that transfer's state.
+             * @description The customer's tip on the job, all of it the pro's, in integer cents; 0 when none. Its own transfer: the summary counts it by that transfer's state. Always sent; optional in the schema so clients built before #273 keep compiling.
              */
-            tip_cents: number;
+            tip_cents?: number | null;
             status: components["schemas"]["EarningStatus"];
             /**
              * Completed At
