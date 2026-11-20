@@ -264,6 +264,27 @@ const ready = (page) =>
     { timeout: 15000 },
   );
 
+/** Presses the queue tab named `name` and waits until it is the current one: ready() alone
+ * can pass on the old tab's list (Loom's first take of #552). */
+async function openTab(page, name) {
+  const tab = page.getByRole("link", { name });
+  await press(page, tab);
+  await page
+    .locator('a[aria-current="page"]')
+    .filter({ hasText: name })
+    .first()
+    .waitFor({ timeout: 15000 });
+  await ready(page);
+}
+
+/** Whether `locator` shows within `ms`: a list may draw a moment after its tab is current. */
+const shows = (locator, ms = 3000) =>
+  locator
+    .first()
+    .waitFor({ timeout: ms })
+    .then(() => true)
+    .catch(() => false);
+
 /** True (after a still of the empty list) when a scene's subject is gone: an earlier take
  * used it up. The scene ends there; reseed for the full one. */
 async function nothingLeft(locator, still) {
@@ -403,18 +424,18 @@ async function cardActions(page, still) {
   const addNote = page.getByRole("button", { name: "Add note" });
   if (await addNote.count()) {
     await press(page, addNote);
-    await type(page, page.getByLabel("Internal note (staff only)"), NOTE);
-    await beat(page, 500);
+    await type(page, page.getByLabel("Internal note (staff only)"), NOTE, 45);
+    await beat(page, 300);
     await press(page, page.getByRole("button", { name: "Save note" }));
     await page.getByText(NOTE).first().waitFor();
-    await beat(page, 1200);
+    await beat(page, 900);
     await still("note");
   }
   const contacted = page.getByRole("button", { name: "Mark contacted" });
   if (await contacted.count()) {
     await press(page, contacted);
     await contacted.waitFor({ state: "detached" }); // the card then offers it no more
-    await beat(page, 1000);
+    await beat(page, 800);
   }
   const schedule = page.getByRole("button", { name: "Schedule follow-up" });
   if (await schedule.count()) {
@@ -425,18 +446,22 @@ async function cardActions(page, still) {
     const time = page.getByLabel("Time");
     await press(page, time);
     await time.fill(FOLLOWUP_TIME);
-    await type(page, page.getByLabel("What to do"), FOLLOWUP);
-    await beat(page, 500);
+    await type(page, page.getByLabel("What to do"), FOLLOWUP, 45);
+    await beat(page, 300);
     await press(page, page.getByRole("button", { name: "Schedule", exact: true }));
     await page.getByText(FOLLOWUP).first().waitFor();
-    await beat(page, 1000);
-    await still("followup");
+    await beat(page, 600);
   }
-  for (const name of ["Internal notes", "Follow-ups"]) {
+  // The form resets once saved: the still is of the card's list, which shows the new item.
+  for (const [name, shot] of [
+    ["Internal notes", null],
+    ["Follow-ups", "followup"],
+  ]) {
     const heading = page.getByRole("heading", { name, exact: true });
     if (!(await heading.count())) continue;
-    await bring(page, heading, 1000);
-    await beat(page, 1500);
+    await bring(page, heading, 900);
+    await beat(page, 1200);
+    if (shot) await still(shot);
   }
 }
 
@@ -453,17 +478,16 @@ const SCENES = {
       await ready(page);
       await beat(page, 1300);
     }
-    await press(page, page.getByRole("link", { name: /^New/ }));
-    await ready(page);
+    await openTab(page, /^New/);
     await beat(page, 800);
     // The newest request nobody holds in New, else in Urgent (so "Take this request" shows).
     const unheld = () =>
       page.locator('main a[href^="/admin/requests/"]:visible', { hasText: "Nobody" }).first();
     let card = unheld();
-    if (!(await card.count())) {
-      await press(page, page.getByRole("link", { name: /^Urgent/ }));
-      await ready(page);
+    if (!(await shows(card))) {
+      await openTab(page, /^Urgent/);
       card = unheld();
+      await shows(card);
     }
     if (await nothingLeft(card, still)) return;
     await glide(page, card);
@@ -486,19 +510,21 @@ const SCENES = {
     }
   },
 
-  // Storyboard 14: classify an urgent request nobody holds (Loom's beat B). Never the New
-  // request: it waits for Maria (storyboard 3/6). Saving may send it to the category's pros,
-  // so it then leaves Urgent: that is the story.
+  // Storyboard 14: classify an unclassified request nobody holds (Loom's beat B), in Urgent,
+  // else in Waiting on customer (where #549's seed leaves it). Never the New request: it waits
+  // for Maria (storyboard 3/6). Saved, it stays in review: it is not dispatched (first take).
   async classify(page, still) {
     await visit(page, `${base}/admin/queue`);
     await ready(page);
-    await press(page, page.getByRole("link", { name: /^Urgent/ }));
-    await ready(page);
-    await beat(page, 1000);
     const card = page
       .locator('main a[href^="/admin/requests/"]:visible', { hasText: "Nobody" })
       .filter({ hasText: "Unclassified" })
       .first();
+    for (const tab of [/^Urgent/, /^Waiting on customer/]) {
+      await openTab(page, tab);
+      await beat(page, 800);
+      if (await shows(card)) break;
+    }
     if (await nothingLeft(card, still)) return;
     await glide(page, card);
     await beat(page, 600);
