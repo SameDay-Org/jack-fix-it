@@ -29,6 +29,12 @@ DEMO_DIR: Final = Path(__file__).resolve().parent
 API_DIR: Final = DEMO_DIR.parents[1] / "apps" / "api"
 # The API's own packages (`app`), and the settings' .env, live in apps/api.
 sys.path.insert(0, str(API_DIR))
+# Where the command was typed: a relative --password-file is read from there.
+INVOKED_FROM: Final = Path.cwd()
+if __name__ == "__main__":
+    # The settings read apps/api/.env from the current directory, and app.worker (imported
+    # below) loads them as it is imported: the directory changes before that.
+    os.chdir(API_DIR)
 
 import httpx  # noqa: E402
 import stripe  # noqa: E402
@@ -267,7 +273,8 @@ async def check_catalog(http: httpx.AsyncClient, api: str) -> list[Check]:
 
 
 async def check_worker() -> Check:
-    """The worker takes a `ping` job off the queue: it is running, on the API's Redis."""
+    """A worker takes a `ping` job off the queue: one is running on REDIS_URL's Redis. It
+    cannot tell which database that worker writes: start the worker from the same .env."""
     try:
         pool = await create_pool(WorkerSettings.redis_settings)
     except (RedisError, OSError):
@@ -279,7 +286,7 @@ async def check_worker() -> Check:
         waited = 0.0
         while waited < WORKER_WAIT_SECONDS:
             if await job.status() is not JobStatus.queued:
-                return ok("Worker", "running: it took the ping job")
+                return ok("Worker", "one on this Redis took the ping job")
             await asyncio.sleep(0.25)
             waited += 0.25
         return fail("Worker", "no worker took the ping job: start it (arq app.worker...)")
@@ -417,7 +424,7 @@ def render(checks: Sequence[Check], *, colour: bool) -> str:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    os.chdir(API_DIR)
+    args.password_file = INVOKED_FROM / args.password_file
     checks = asyncio.run(run(get_settings(), args))
     print(render(checks, colour=sys.stdout.isatty()))
     return 1 if any(check.state is State.FAIL for check in checks) else 0

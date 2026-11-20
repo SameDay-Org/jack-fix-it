@@ -6,9 +6,11 @@ minutes and a Connect account per pro. These classes implement the ports of app/
 real services. Ids are derived from the idempotency key, as Stripe answers the same key with
 the same object, and every id says `demo` so nobody takes one for a Stripe object.
 
-Nothing here ever calls Stripe. A payment made through a stand-in cannot be refunded by the
-running API (Stripe has no such PaymentIntent): the disputed job that the video resolves is
-paid through the real TEST gateway instead (stripe_test.py).
+Nothing here ever calls Stripe, and Stripe knows none of these ids. So the running stack
+cannot act on a stand-in payment later: the API cannot refund it (the disputed job the video
+resolves is paid through the real TEST gateway instead, stripe_test.py), and a stand-in job
+left waiting for its confirmation fails its transfer when the worker's 48 h auto-confirm
+comes. A demo database is for the day it was seeded: reseed rather than let one age.
 """
 
 import hashlib

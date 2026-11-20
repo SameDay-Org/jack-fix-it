@@ -8,9 +8,12 @@ edges are swapped, at the seams the API's tests use:
   functions `app/worker.py` registers, in order. Pushes and geocoding are dropped (no device
   hears about a seeded job; Mapbox is billed per call);
 - the rate limits: none (the seed registers dozens of accounts from one address);
-- the pros' live positions: kept in memory (no seeded job is left on the way);
+- the pros' live positions: kept in memory (the seed pings none: a job it leaves on the
+  way has no position yet);
 - Stripe: the stand-ins (stripe_standins.py) or the TEST gateway (stripe_test.py), switched
-  with `World.use`.
+  with `World.use`. The payment call answers 503 without a publishable key, and the seed
+  never shows a Payment Sheet: on a machine with no Stripe keys this app (never the running
+  API) gets a stand-in one, so the history can still be paid through the stand-ins.
 
 Nothing here connects to Redis, so the seed never touches the running stack's queue.
 """
@@ -40,6 +43,7 @@ from app.modules.jobs.location import Position, get_job_location_store
 from app.modules.users.types import UserRole
 from app.rate_limit import RateLimitResult, get_rate_limiter
 from app.worker import WorkerSettings
+from demo_seed import guard
 
 # Queued by the API and not run by the seed: no device should hear about a seeded job, a
 # geocode is a billed Mapbox call, and Stripe's events are applied by the seed itself.
@@ -47,6 +51,8 @@ DROPPED_TASKS: Final = frozenset({"send_push", "geocode_address", "ping"})
 # A safe-copy task asks for another try while a file's copy is still running elsewhere; inline
 # there is no elsewhere, so a second ask is a failure.
 MAX_TASK_TRIES: Final = 3
+# Not a key: the shape the payment call checks, for this app when the settings have none.
+STAND_IN_PUBLISHABLE_KEY: Final = "pk_test_demoStandInNotAKey"
 # The seed's own access tokens: long enough for the slowest run.
 TOKEN_TTL_SECONDS: Final = 4 * 3600
 
@@ -259,7 +265,11 @@ async def open_world(
     settings: Settings, storage: Storage, gateways: Gateways
 ) -> AsyncIterator[World]:
     """The app on `settings`' database, with the seed's edges in place. The lifespan never
-    runs: it would connect to Redis."""
+    runs: it would connect to Redis. Every run comes through here, so the guard is checked
+    here too, whatever the caller did."""
+    guard.check_settings(settings)
+    if settings.stripe_publishable_key is None:
+        settings = settings.model_copy(update={"stripe_publishable_key": STAND_IN_PUBLISHABLE_KEY})
     app = create_app(settings)
     engine = create_engine(settings)
     app.state.engine = engine

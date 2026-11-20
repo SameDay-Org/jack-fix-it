@@ -159,6 +159,15 @@ async def set_account_photo(world: World, actor: Actor, person: Person, place: P
     await world.call(actor, "PATCH", "/v1/auth/me", json=body, what="account photo")
 
 
+async def make_first_card_default(world: World, customer: Actor) -> None:
+    """The customer's saved card becomes their default, as the wallet screen's button does."""
+    cards = await world.call(customer, "GET", "/v1/me/payment-methods", what="saved cards")
+    if not cards:
+        raise SeedError(f"{customer.email}: the wallet lists no saved card")
+    path = f"/v1/me/payment-methods/{cards[0]['id']}/default"
+    await world.call(customer, "POST", path, what="default card")
+
+
 async def save_address(world: World, actor: Actor, place: Place, label: str) -> None:
     body = {**place.body(), "label": label, "is_default": True}
     await world.call(actor, "POST", "/v1/addresses", json=body, what="saved address")
@@ -422,8 +431,11 @@ async def reply_to_problem(world: World, pro: Actor, job_id: uuid.UUID, message:
 
 
 async def dispute_of(world: World, admin: Actor, job_id: uuid.UUID) -> DisputeRef:
-    """The job's dispute as the panel reads it: the list, then the detail (an audited read)."""
-    listing = await world.call(admin, "GET", "/v1/admin/disputes", what="disputes")
+    """The job's open dispute as the panel reads it: the open list (the default list is the
+    20 oldest of any status), then the detail (an audited read)."""
+    listing = await world.call(
+        admin, "GET", "/v1/admin/disputes", params={"status": "open"}, what="open disputes"
+    )
     for dispute in listing["disputes"]:
         if dispute["job_id"] == str(job_id):
             path = f"/v1/admin/disputes/{dispute['id']}"

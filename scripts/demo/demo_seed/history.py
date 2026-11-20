@@ -297,8 +297,11 @@ class CaseRun:
         )
         line = Timeline(self._world.sessions, request.id)
         await line.mark(created)
-        if case.contact_after is not None and self._due(created + case.contact_after):
-            line.put("first_contact_at", created + case.contact_after)
+        if case.contact_after is not None:
+            contacted = created + case.contact_after
+            cancelled = case.ending is Ending.CANCELLED and contacted >= created + case.cancel_after
+            if self._due(contacted) and not cancelled:
+                line.put("first_contact_at", contacted)
         try:
             job_id = await self._live(line, case, work, customer, request, created, start)
         finally:

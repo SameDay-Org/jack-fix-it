@@ -46,11 +46,9 @@ _DOCUMENT_VALID_FOR: Final = timedelta(days=540)
 _MONTH: Final = timedelta(days=30)
 # Positions in cast.PROS' categories: Dan is the first pro of handyman and painting.
 _DAN: Final = 0
-# A job "scheduled today" starts this long from now, never past the day's end, and never
-# sooner than a quote may propose.
+# A job "scheduled today" starts this long from now, never past the day's end.
 _TODAY_LEAD: Final = timedelta(hours=3)
 _BEFORE_MIDNIGHT: Final = timedelta(minutes=20)
-_SOONEST: Final = timedelta(minutes=30)
 # The requests the queue's "New" tab opens with.
 _FRESH_CATEGORY: Final = cast.MARIA_CATEGORIES[0]
 
@@ -262,6 +260,7 @@ async def _jamie(world: World, options: Options, stripe: Stripe) -> Actor:
             jamie, "POST", "/v1/me/payment-methods/setup-intent", what="card setup"
         )
         await stripe.test_checkout.save_card(intent["client_secret"])
+        await flows.make_first_card_default(world, jamie)
     return jamie
 
 
@@ -455,8 +454,10 @@ class _NoCheckout:
 
 
 async def _later_today(world: World, now: datetime) -> datetime:
-    """A start still ahead today, in the business time zone: three hours from now, or just
-    before its midnight when the day is nearly over."""
+    """A start today in the business time zone: three hours from now, or twenty minutes
+    before its midnight when the day is nearly over (in its last minutes that is a visit
+    already due: still today's). The quote that proposes it is dated two days back, so the
+    start itself need not be ahead of the clock."""
     statement = text(
         "SELECT timezone(:zone, date_trunc('day', timezone(:zone, now())) + interval '1 day')"
     )
@@ -464,7 +465,7 @@ async def _later_today(world: World, now: datetime) -> datetime:
         midnight: datetime = (
             await session.execute(statement, {"zone": world.settings.business_time_zone})
         ).scalar_one()
-    return max(min(now + _TODAY_LEAD, midnight - _BEFORE_MIDNIGHT), now + _SOONEST)
+    return min(now + _TODAY_LEAD, midnight - _BEFORE_MIDNIGHT)
 
 
 async def _tickets(
@@ -488,10 +489,20 @@ async def _write_marker(world: World, options: Options, summary: Summary) -> Non
 
 
 async def people_of(world: World) -> People:
-    """The seeded customers and pros, read back by email: for `--fresh` on a seeded database."""
+    """The seeded customers, pros and admin, read back by email: for a run on a database
+    that is seeded already (`--fresh`)."""
     customers: list[tuple[Actor, Person, Place]] = []
+    pros: dict[str, list[Actor]] = {}
     async with world.session() as session:
         users = UserService(session)
+        for setup in cast.PROS:
+            account = await users.get_by_email(setup.person.email)
+            if account is None:
+                raise SeedError(f"{setup.person.email} is missing: run --reset")
+            for slug in setup.categories:
+                pros.setdefault(slug, []).append(
+                    world.actor(account.id, UserRole.PRO, setup.person.email)
+                )
         for index, person in enumerate(cast.CUSTOMERS):
             account = await users.get_by_email(person.email)
             if account is None:
@@ -503,7 +514,7 @@ async def people_of(world: World) -> People:
         raise SeedError("the demo admin is missing: run --reset")
     return People(
         customers=customers,
-        pros={},
+        pros=pros,
         admin=world.actor(admin.id, UserRole.ADMIN, cast.ADMIN_EMAIL),
     )
 

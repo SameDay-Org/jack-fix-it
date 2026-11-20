@@ -20,8 +20,11 @@ Rules:
   48 hours after it, a start proposed two days out stays two days out. The distance is
   measured from when the step began (`Timeline.ahead` gives a step the real time that lands
   exactly where it wants).
-- Each row is compared with what the previous step left, never two clocks, so it does not
-  matter that Postgres and this process read different ones.
+- What a step wrote is found by comparing each row with what the previous step left, never
+  by comparing clocks. A value only ever moves back: one the database stamped a moment
+  before `at` (a request made "now", a database clock behind this process) stays as it is,
+  so nothing is ever dated in the future. Only the deadline test reads this process's clock,
+  with a minute of slack.
 - audit_log is append-only (its trigger refuses updates): the audit rows of seeded staff
   actions keep the day the seed ran.
 """
@@ -42,6 +45,8 @@ _REQUESTS: Final = "service_requests"
 # The rows that belong to one request, by table: what a step of its life can write.
 CASE_TABLES: Final[Mapping[str, str]] = {
     _REQUESTS: "id = :request",
+    # Each request has its own address row.
+    "addresses": "id IN (SELECT address_id FROM service_requests WHERE id = :request)",
     "request_media": "request_id = :request",
     "request_dispatches": "request_id = :request",
     "quotes": "request_id = :request",
@@ -100,7 +105,7 @@ def moved(value: Moment, at: datetime, began: datetime) -> Moment:
         return at.date() + (value - began.date())
     if value > began + FUTURE_SLACK:
         return at + (value - began)
-    return at
+    return min(at, value)
 
 
 class Timeline:
