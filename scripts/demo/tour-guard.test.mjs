@@ -224,7 +224,9 @@ test("with the other host allowed, the same form does reach it: the guard is wha
     await page.goto(`${origin}/form/307`);
     await page.locator("button").click();
     await page.waitForURL(`${elsewhere}/receive`);
-    assert.deepEqual(leaks.requests, [{ method: "POST", path: "/receive", canary: true }]);
+    // The posted form, canary included (the browser may then ask that host for its icon).
+    const posted = leaks.requests.filter((hit) => hit.method === "POST");
+    assert.deepEqual(posted, [{ method: "POST", path: "/receive", canary: true }]);
   } finally {
     await unguarded.close();
     await open.close();
