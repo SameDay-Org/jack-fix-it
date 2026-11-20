@@ -7,6 +7,7 @@ total with tax shows.
 """
 
 import dataclasses
+import io
 import json
 import logging
 import uuid
@@ -27,9 +28,12 @@ from app.modules.jobs.models import Job, JobStatus
 from app.modules.tips.intents import tip_cancel_idempotency_key
 from app.modules.tips.models import Tip, TipStatus
 from app.modules.users.models import User
+from app.modules.users.types import UserRole
 from app.money import tip_amount
 from app.observability import JsonFormatter
 from app.rate_limit import RateLimitResult, get_rate_limiter
+from scripts import resolve_tip_intent
+from tests.audit_helpers import OPERATOR_EMAIL, audit_rows, make_staff
 from tests.conftest import InMemoryRateLimiter, make_settings
 from tests.job_world import (
     JobWorld,
@@ -38,6 +42,7 @@ from tests.job_world import (
     make_job,
     record_pushes,
 )
+from tests.test_create_staff_user import sessions_of
 from tests.test_payments_api import (
     PUBLISHABLE_KEY,
     SPLIT_WORDS,
@@ -1288,3 +1293,174 @@ async def test_tip_logs_carry_ids_only(
             "intent_status",
         }, record.message
     assert json.loads(JsonFormatter().format(tip_records[0]))["tip_id"]
+
+
+# --- #510 self-review: the key is stored with the change it settles -------------------------
+
+
+CUSTOM_10 = {"choice": "custom", "amount_cents": 1_000}
+
+
+async def test_a_keyed_choice_whose_sheet_failed_never_undoes_a_newer_choice(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+) -> None:
+    """The self-review's case: K1 settled 12 % and its intent, then its sheet failed; K2 chose
+    another amount; K1's late retry answers the tip as it is now and cancels nothing."""
+    job = await confirmed(db_session, world)
+    key_1, key_2 = uuid.uuid4(), uuid.uuid4()
+    stripe_fake.errors["create_customer_session"] = StripeUnavailableError(request_id="req_x")
+    failed = await choose(db_client, world, job, PERCENT_12, key=key_1)
+    del stripe_fake.errors["create_customer_session"]
+    [first] = stripe_fake.intents_by_key.values()
+
+    newer = await choose(db_client, world, job, CUSTOM_10, key=key_2)
+    late = await choose(db_client, world, job, PERCENT_12, key=key_1)
+
+    assert (failed.status_code, code(failed)) == (503, "payments_unavailable")
+    assert newer.status_code == 200, newer.text
+    assert late.status_code == 200, late.text
+    assert late.json()["sheet"] is None
+    assert late.json()["tip"]["amount_cents"] == 1_000
+    # Only the first intent was ever canceled (by the newer choice), never the newer one.
+    assert [intent for intent, _ in stripe_fake.cancels] == [first]
+    assert len(stripe_fake.intent_calls) == 2
+    row = await tip_row(db_session, job)
+    assert row is not None
+    assert (row.amount_cents, row.status) == (1_000, TipStatus.REQUIRES_PAYMENT)
+
+
+async def test_a_failed_keyed_choice_keeps_its_key_for_its_own_body(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+) -> None:
+    job = await confirmed(db_session, world)
+    key = uuid.uuid4()
+    stripe_fake.errors["create_customer_session"] = StripeUnavailableError(request_id="req_x")
+    await choose(db_client, world, job, PERCENT_12, key=key)
+    del stripe_fake.errors["create_customer_session"]
+
+    other = await choose(db_client, world, job, CUSTOM_10, key=key)
+
+    assert (other.status_code, code(other)) == (409, "idempotency_key_reused")
+    assert stripe_fake.cancels == []
+
+
+async def test_a_keyed_create_that_failed_resumes_under_the_same_stripe_key(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+) -> None:
+    job = await confirmed(db_session, world)
+    key = uuid.uuid4()
+    stripe_fake.errors["create_payment_intent"] = StripeUnavailableError(request_id="req_x")
+    failed = await choose(db_client, world, job, PERCENT_12, key=key)
+    del stripe_fake.errors["create_payment_intent"]
+
+    retried = await choose(db_client, world, job, PERCENT_12, key=key)
+
+    assert failed.status_code == 503
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["sheet"] is not None
+    row = await tip_row(db_session, job)
+    assert row is not None
+    # The same attempt, so the same Stripe key: Stripe replays a create it made.
+    assert row.attempt == 1
+    assert [call["idempotency_key"] for call in stripe_fake.intent_calls] == [f"tip:{row.id}:1"]
+
+
+# --- #510 self-review: staff's way out of a lost create Stripe never made ------------------
+
+
+async def lost_create(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+    age: timedelta,
+) -> JobRef:
+    """A tip whose create Stripe never made (nothing under its key), sent `age` ago."""
+    job = await confirmed(db_session, world)
+    stripe_fake.errors["create_payment_intent"] = StripeUnavailableError(request_id="req_x")
+    await choose(db_client, world, job, PERCENT_12)
+    del stripe_fake.errors["create_payment_intent"]
+    await set_tip(db_session, job, payment_intent_requested_at=datetime.now(UTC) - age)
+    return job
+
+
+async def resolve_tip(
+    db_session: AsyncSession, settings: Settings, tip_id: uuid.UUID, *extra: str
+) -> tuple[int, str]:
+    out = io.StringIO()
+    argv = ["--tip", str(tip_id), "--allow-new", "--operator", OPERATOR_EMAIL, "--yes", *extra]
+    exit_code = await resolve_tip_intent.run(
+        argv, sessions_of(db_session), settings, resolve_tip_intent.Io(out=out)
+    )
+    return exit_code, out.getvalue()
+
+
+async def test_staff_clear_a_lost_create_stripe_never_made_and_the_customer_chooses_again(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+    settings: Settings,
+) -> None:
+    operator = await make_staff(db_session)
+    await db_session.commit()
+    job = await lost_create(db_client, db_session, world, stripe_fake, timedelta(hours=25))
+    stuck = await choose(db_client, world, job, {"choice": "none"})
+    row = await tip_row(db_session, job)
+    assert row is not None
+    tip_id, attempt = row.id, row.attempt
+
+    exit_code, printed = await resolve_tip(db_session, settings, tip_id, "--reason", "probe")
+    after = await choose(db_client, world, job, {"choice": "none"})
+
+    assert (stuck.status_code, code(stuck)) == (409, NEEDS_REVIEW)
+    assert exit_code == 0, printed
+    assert f"Tip {tip_id} can take a new choice." in printed
+    assert after.status_code == 200, after.text
+    assert after.json()["tip"]["status"] == "declined"
+    [audit] = [r for r in await audit_rows(db_session) if r.action == "tip.allow_new_intent"]
+    assert (audit.actor_user_id, audit.entity_type, audit.entity_id) == (operator, "tip", tip_id)
+    assert audit.before["attempt"] == attempt
+    assert audit.after["payment_intent_requested_at"] is None
+
+
+@pytest.mark.parametrize("case", ["young", "has_intent", "no_create", "unknown", "not_admin"])
+async def test_staff_recovery_is_refused_and_changes_nothing(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+    settings: Settings,
+    case: str,
+) -> None:
+    await make_staff(db_session, role=UserRole.AGENT if case == "not_admin" else UserRole.ADMIN)
+    await db_session.commit()
+    age = timedelta(hours=23) if case == "young" else timedelta(hours=25)
+    job = await lost_create(db_client, db_session, world, stripe_fake, age)
+    if case == "has_intent":
+        await set_tip(db_session, job, stripe_payment_intent_id="pi_resolvetipfixture")
+    elif case == "no_create":
+        await set_tip(db_session, job, payment_intent_requested_at=None)
+    row = await tip_row(db_session, job)
+    assert row is not None
+    tip_id = uuid.uuid4() if case == "unknown" else row.id
+    before = row.payment_intent_requested_at
+
+    exit_code, printed = await resolve_tip(db_session, settings, tip_id)
+
+    assert exit_code == 1
+    assert printed.startswith("Error: ")
+    assert "pi_" not in printed
+    after = await tip_row(db_session, job)
+    assert after is not None
+    assert after.payment_intent_requested_at == before
+    assert [r for r in await audit_rows(db_session) if r.action == "tip.allow_new_intent"] == []
