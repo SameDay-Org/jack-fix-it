@@ -876,7 +876,20 @@ async def test_a_staff_account_is_refused(world: World) -> None:
 
 
 async def test_a_deleted_account_cannot_sign_in_and_its_email_signs_up_anew(world: World) -> None:
+    second_session = await world.client.post(
+        "/v1/auth/login", json={"email": world.customer.email, "password": PASSWORD}
+    )
+    assert second_session.status_code == 200
     assert (await delete_account(world.client, world.customer)).status_code == 204
+    # Read before any refresh: a refresh of a deleted account would revoke its family itself.
+    async with world.sessions() as session:
+        sessions = list(
+            await session.scalars(
+                select(RefreshToken.revoked_at).where(RefreshToken.user_id == world.customer.id)
+            )
+        )
+    assert len(sessions) == 2
+    assert all(at is not None for at in sessions)  # every session of the account ended
 
     login = await world.client.post(
         "/v1/auth/login", json={"email": world.customer.email, "password": PASSWORD}
@@ -891,11 +904,6 @@ async def test_a_deleted_account_cannot_sign_in_and_its_email_signs_up_anew(worl
     assert (login.status_code, login.json()["error"]["code"]) == (401, "invalid_credentials")
     assert refreshed.status_code == 401
     assert (me.status_code, me.json()["error"]["code"]) == (401, "invalid_token")
-    async with world.sessions() as session:
-        revoked = await session.scalars(
-            select(RefreshToken.revoked_at).where(RefreshToken.user_id == world.customer.id)
-        )
-        assert all(at is not None for at in revoked)  # every session of the account ended
     assert again.id != world.customer.id
     assert (await world.client.get("/v1/auth/me", headers=again.headers)).status_code == 200
 
@@ -1066,8 +1074,9 @@ async def test_what_the_worker_could_not_do_is_finished_by_the_sweep(
 
     await clean_up_deleted_account(ctx, str(world.customer.id))
     failed = await cleanup_row(world, world.customer.id)
-    # Within the retry wait the sweep leaves it alone.
+    # Within the retry wait neither the sweep nor another task takes it (the claim).
     await retry_account_cleanups(ctx)
+    await clean_up_deleted_account(ctx, str(world.customer.id))
     waited = await cleanup_row(world, world.customer.id)
     methods.errors.clear()
     storage.failure = None
