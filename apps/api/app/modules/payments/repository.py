@@ -554,25 +554,53 @@ class RefundRepository:
         self, key_prefix: str, needs_review_code: str, tried_before: datetime, limit: int
     ) -> list[uuid.UUID]:
         """The job of each cancellation refund (#69: no dispute, its key under `key_prefix`)
-        left without Stripe's answer: no Stripe refund stored, not refused for good, not for
-        staff (`needs_review_code`), and its latest try (or its creation, before the first)
-        before `tried_before`. Least recently tried first."""
-        since = func.coalesce(Refund.requested_at, Refund.created_at)
+        the worker still has something to learn about, last looked at before `tried_before`,
+        least recently first:
+        - no Stripe refund stored, not refused for good, not for staff (`needs_review_code`):
+          left without Stripe's answer since its latest try (or its creation, before the
+          first);
+        - a Stripe refund stored that Stripe had not finished (neither succeeded, failed nor
+          canceled) when the row was last written (updated_at: every read of it writes the
+          row). Its event may never come, or may have come before the id was stored, so it is
+          read again (#489 round 1)."""
+        held = Refund.stripe_refund_id.is_not(None)
+        since = case(
+            (held, Refund.updated_at),
+            else_=func.coalesce(Refund.requested_at, Refund.created_at),
+        )
+        not_made = and_(
+            Refund.stripe_refund_id.is_(None),
+            Refund.status.in_(REFUND_NOT_MADE),
+            Refund.last_error_definitive.is_(False),
+            Refund.last_error_code.is_distinct_from(needs_review_code),
+        )
+        unfinished = and_(
+            held,
+            or_(
+                Refund.stripe_status.is_(None),
+                Refund.stripe_status.not_in([STRIPE_REFUND_SUCCEEDED, *STRIPE_REFUND_DEAD]),
+            ),
+        )
         statement = (
             select(Refund.job_id)
             .where(
                 Refund.dispute_id.is_(None),
                 Refund.idempotency_key.startswith(key_prefix, autoescape=True),
-                Refund.stripe_refund_id.is_(None),
-                Refund.status.in_(REFUND_NOT_MADE),
-                Refund.last_error_definitive.is_(False),
-                Refund.last_error_code.is_distinct_from(needs_review_code),
+                or_(not_made, unfinished),
                 since < tried_before,
             )
             .order_by(since, Refund.id)
             .limit(limit)
         )
         return list(await self._session.scalars(statement))
+
+    async def touch(self, refund_id: uuid.UUID) -> None:
+        """Marks the row as looked at now (updated_at), nothing else: a held refund whose read
+        failed waits the stuck window before the sweep reads it again, like one that was
+        read."""
+        await self._session.execute(
+            update(Refund).where(Refund.id == refund_id).values(updated_at=func.now())
+        )
 
     async def add(self, refund: Refund) -> Refund:
         """Inserts the row now (flush), so a second row under the key surfaces here."""

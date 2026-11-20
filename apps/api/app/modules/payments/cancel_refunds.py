@@ -28,11 +28,23 @@ amount computed on the server, the key, no attempt yet. After that commit it que
 
 The money is back only at `succeeded`; until then the cancellation shows its refund pending.
 Stripe's refund events reach cancel_refund_event (from the refund webhook handler), which reads
-the refund again by its stored id and stores what Stripe says. A refund that will not go
-through is logged as an ERROR for staff (`cancel_refund_failed`) and never retried: the same
-key would get the same answer. The sweep (retry_cancel_refunds) takes every row left without
-Stripe's answer once REFUND_STUCK_PENDING_MINUTES have passed since its latest try: a task
-never queued, a worker that died, Stripe unavailable, a lost answer.
+the refund again by its stored id and stores what Stripe says. An event can also come before
+step 3 stored that id (the create answered a pending refund, Stripe finished it, and its event
+was handled first): early_cancel_refund_event then reads the refund from Stripe and, when
+Stripe says it carries a cancellation's key and names no dispute, stores it on that key's row
+under its lock, id and status together. Step 3 stores its older answer afterwards, and a status
+only moves forward (RefundLedger.observe), so the terminal one stands. A refund that will not
+go through is logged as an ERROR for staff (`cancel_refund_failed`) and never retried: the same
+key would get the same answer.
+
+The sweep (retry_cancel_refunds) takes, once REFUND_STUCK_PENDING_MINUTES have passed since the
+row was last looked at:
+- every row left without Stripe's answer: a task never queued, a worker that died, Stripe
+  unavailable, a lost answer, a create Stripe rejected for a reason that may pass;
+- every row holding a Stripe refund that Stripe had not finished at the last read: it is read
+  again by its id, so a refund whose event never came, or was not matched, still settles. A
+  read that fails counts as a look too (the row is touched), so one bad row waits the window
+  like the others instead of coming first in every run.
 
 The key is `cancel:<job id>:refund`: one refund per cancelled job (the column is unique).
 Nothing here touches the job: it is cancelled already, and a cancelled job is never paid out
@@ -64,6 +76,7 @@ from app.modules.payments.refunds import (
     RefundCreateRejectedError,
     RefundLedger,
     RefundNeedsReviewError,
+    made_for,
     make_refund,
     recheck_refund,
     refund_fits,
@@ -262,8 +275,8 @@ class CancelRefunds:
     # --- The worker ------------------------------------------------------------------------
 
     async def due(self, limit: int) -> list[uuid.UUID]:
-        """The jobs whose refund is left without Stripe's answer past the stuck window, least
-        recently tried first."""
+        """The jobs whose refund is left without Stripe's answer, or held but not finished
+        at Stripe, past the stuck window; least recently looked at first."""
         try:
             return await self._refunds.due_cancel_refunds(
                 CANCEL_REFUND_PREFIX, REFUND_NEEDS_REVIEW, self._clock() - self._stuck_after, limit
@@ -349,13 +362,16 @@ class CancelRefunds:
     async def _end_failed(
         self, started: CancelAttempt | CancelRefund, code: str, definitive: bool = False
     ) -> None:
-        """No refund came back: the attempt ends failed (a read of a held refund leaves the row
-        as it is), committed."""
+        """No refund came back: the attempt ends failed; a read of a held refund leaves the row
+        as it is, only touched, so the sweep waits the stuck window before reading it again.
+        Committed."""
         if isinstance(started, CancelAttempt):
             await self._refunds.mark_failed(
                 started.refund_id, started.number, code[:REFUND_CODE_LENGTH], definitive=definitive
             )
-            await self._session.commit()
+        else:
+            await self._refunds.touch(started.refund_id)
+        await self._session.commit()
 
     async def _store(self, job_id: uuid.UUID, read: RefundFacts) -> CancelRefundOutcome:
         """Step 3: Stripe's refund and its status stored under the row's lock, committed."""
@@ -391,6 +407,37 @@ async def cancel_refund_of(session: AsyncSession, stripe_refund_id: str) -> Canc
     """The cancelled job's refund holding this Stripe refund, unlocked; None for any other."""
     row = await RefundRepository(session).by_stripe_id(stripe_refund_id)
     return None if row is None or not is_cancel_refund(row) else _view(row)
+
+
+def is_cancel_refund_key(key: str) -> bool:
+    return key.startswith(CANCEL_REFUND_PREFIX)
+
+
+async def early_cancel_refund_event(
+    session: AsyncSession,
+    stripe: StripeRefunds,
+    stripe_refund_id: str,
+    key: str,
+    log: dict[str, str],
+) -> bool:
+    """Stripe's event for a refund no row holds yet, whose payload names the cancellation key
+    `key`. The payload only says whom to ask: the refund is read from Stripe by the event's id
+    (before any lock), and only one Stripe itself shows made for that key, with no dispute,
+    is stored, on the key's row under its lock, with its id and status (forward only). False
+    when Stripe's refund is not that key's or no cancellation refund has the key: the caller
+    treats the event as any unknown refund's. A refund that does not fit the row (another
+    amount, or the row holds another Stripe refund) raises RefundNeedsReviewError: the event
+    fails for staff. Never commits: the worker does."""
+    read = await stripe.retrieve_refund(stripe_refund_id)
+    if read.refund_id != stripe_refund_id or not made_for(read, None, key):
+        return False
+    row = await RefundRepository(session).by_key_for_update(key)
+    if row is None or not is_cancel_refund(row):
+        return False
+    held = _view(row)
+    await apply_read(RefundLedger(session), held, read)
+    logger.info("refund_event_applied_early", extra={**log, **held.ids})
+    return True
 
 
 async def cancel_refund_event(
