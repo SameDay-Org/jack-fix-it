@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from app.config import Settings, get_app_settings
+from app.email_layout import SenderIdentity
 from app.integrations.email import EmailSender, EmailUnavailableError
 from app.modules.auth import security
 from app.modules.auth.email_copy import password_reset_code_email
@@ -127,6 +128,7 @@ class PasswordResetConfig:
     daily_limit: int
     daily_window_seconds: int
     redis_timeout_seconds: float
+    sender: SenderIdentity  # the email footer's support email and identity (#92)
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "PasswordResetConfig":
@@ -137,6 +139,7 @@ class PasswordResetConfig:
             daily_limit=settings.password_reset_daily_limit,
             daily_window_seconds=settings.password_reset_daily_window_seconds,
             redis_timeout_seconds=settings.rate_limit_timeout_seconds,
+            sender=SenderIdentity.from_settings(settings),
         )
 
 
@@ -196,7 +199,9 @@ class PasswordResetService:
         except (RedisError, OSError):  # OSError includes TimeoutError
             logger.error("password_reset_store_unavailable", extra=extra)
             return
-        content = password_reset_code_email(user.locale, code, self._config.code_ttl_seconds)
+        content = password_reset_code_email(
+            user.locale, code, self._config.code_ttl_seconds, sender=self._config.sender
+        )
         try:
             await self._sender.send(user.email, content.subject, content.text, content.html)
         except EmailUnavailableError:

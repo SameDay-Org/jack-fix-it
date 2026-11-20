@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import Message, Receive, Scope, Send
 
 from app.config import Settings
+from app.email_layout import BRAND, NO_IDENTITY
 from app.integrations.email import EmailUnavailableError, get_email_sender
 from app.modules.auth import password_reset, security
 from app.modules.auth.email_copy import PASSWORD_RESET_CODE, password_reset_code_email
@@ -111,6 +112,9 @@ def settings_with(**overrides: object) -> Settings:
         # High, so only the rate-limit and daily-cap tests ever reach them.
         "password_reset_request_limit": 50,
         "password_reset_daily_limit": 50,
+        # The email footer's sender (#92): no six digits, so the code stays the only ones.
+        "receipt_legal_name": "Reset Fixture LLC",
+        "receipt_support_email": "help@reset.invalid",
     }
     values.update(overrides)
     return make_settings(**values)
@@ -224,6 +228,23 @@ async def test_forgot_is_202_for_known_and_unknown_email_and_sends_only_for_know
         assert response.content == b""
     assert known.headers.keys() == unknown.headers.keys()
     assert [email.to for email in sender.sent] == [EMAIL]
+
+
+async def test_the_code_email_is_in_the_branded_layout_with_the_settings_footer(
+    db_client: httpx.AsyncClient, sender: FakeSender
+) -> None:
+    """#92: the reset code goes out in the shared layout, its footer from the settings."""
+    await register(db_client, email=EMAIL)
+
+    await forgot(db_client, EMAIL)
+
+    [email] = sender.sent
+    assert email.text.startswith(f"{BRAND}\n\n")
+    assert email.html.startswith("<!doctype html>")
+    for part in (email.text, email.html):
+        assert "Questions? Write to help@reset.invalid or open Help in the app." in part
+        assert "Reset Fixture LLC" in part
+    assert f"<strong>{email.code}</strong>" in email.html
 
 
 async def test_forgot_sends_after_response(
@@ -617,8 +638,8 @@ async def test_no_email_or_code_in_logs(
 
 def test_email_copy_has_en_and_es_and_no_links() -> None:
     assert set(PASSWORD_RESET_CODE) == {"en", "es"}
-    en = password_reset_code_email("en", "042917", 900)
-    es = password_reset_code_email("es", "042917", 900)
+    en = password_reset_code_email("en", "042917", 900, sender=NO_IDENTITY)
+    es = password_reset_code_email("es", "042917", 900, sender=NO_IDENTITY)
 
     assert en.subject != es.subject
     assert en.text != es.text
@@ -631,8 +652,8 @@ def test_email_copy_has_en_and_es_and_no_links() -> None:
             for link in ("http", "www.", "href", "<a", ".com"):
                 assert link not in lowered
     # A locale without copy falls back to English; never less than one minute.
-    assert password_reset_code_email("fr", "042917", 900) == en
-    assert "1 " in password_reset_code_email("en", "042917", 59).text
+    assert password_reset_code_email("fr", "042917", 900, sender=NO_IDENTITY) == en
+    assert "1 " in password_reset_code_email("en", "042917", 59, sender=NO_IDENTITY).text
 
 
 def test_openapi_documents_password_routes(app: FastAPI) -> None:

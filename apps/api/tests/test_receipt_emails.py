@@ -152,7 +152,8 @@ async def test_the_payment_receipt_is_sent_once_with_the_card_read_from_stripe(
         assert f"Tax: {money(TAX)}" in part
         assert f"Total paid: {money(PRICE + TAX)}" in part
         assert "Visa •••• 4242" in part
-        assert "Fixture Legal Name LLC · support@fixture.invalid · 1 Fixture Way" in part
+        assert "Questions? Write to support@fixture.invalid or open Help in the app." in part
+        assert "Fixture Legal Name LLC · 1 Fixture Way, Orlando FL" in part
         # Never the street, the fee, the payout or a Stripe id.
         for leak in (LINE1, LINE2, money(FEE), money(PAYOUT), "pi_probe68"):
             assert leak not in part, leak

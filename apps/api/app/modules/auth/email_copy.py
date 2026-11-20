@@ -1,18 +1,14 @@
-"""Copy of the emails auth sends (D4.3, #27), in English and Spanish.
+"""Copy of the emails auth sends (D4.3, #27), in English and Spanish, in the branded layout
+(app.email_layout, #92).
 
-Plain and neutral: no links, no promises. Branded templates come with #92.
+Plain and neutral: no links, no promises.
 """
 
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
 
-
-@dataclass(frozen=True)
-class EmailContent:
-    subject: str
-    text: str
-    html: str
+from app.email_layout import EmailContent, SenderIdentity, render_email, with_strong
 
 
 @dataclass(frozen=True)
@@ -42,18 +38,22 @@ PASSWORD_RESET_CODE: Final = MappingProxyType(
 )
 
 
-def password_reset_code_email(locale: str, code: str, ttl_seconds: int) -> EmailContent:
+def password_reset_code_email(
+    locale: str, code: str, ttl_seconds: int, *, sender: SenderIdentity
+) -> EmailContent:
     """The reset code email in the user's locale (English when it has no copy)."""
-    copy = PASSWORD_RESET_CODE.get(locale, PASSWORD_RESET_CODE[DEFAULT_LOCALE])
+    language = locale if locale in PASSWORD_RESET_CODE else DEFAULT_LOCALE
+    copy = PASSWORD_RESET_CODE[language]
     # Rounded down, so the email never promises more time than the code has.
     minutes = max(1, ttl_seconds // 60)
-    code_line = copy.code_line.format(code=code)
-    expiry_line = copy.expiry_line.format(minutes=minutes)
-    text = f"{code_line}\n\n{expiry_line}\n\n{copy.ignore_line}\n"
-    # The code is six digits and the copy is ours, so nothing here needs HTML escaping.
-    html = (
-        f"<p>{copy.code_line.format(code=f'<strong>{code}</strong>')}</p>"
-        f"<p>{expiry_line}</p>"
-        f"<p>{copy.ignore_line}</p>"
+    return render_email(
+        locale=language,
+        subject=copy.subject,
+        paragraphs=[
+            (with_strong(copy.code_line, "code", code),),
+            (copy.expiry_line.format(minutes=minutes),),
+            (copy.ignore_line,),
+        ],
+        reason=None,  # the ignore line says it
+        sender=sender,
     )
-    return EmailContent(subject=copy.subject, text=text, html=html)

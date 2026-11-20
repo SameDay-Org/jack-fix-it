@@ -7,18 +7,18 @@ tests/test_receipt_email_copy.py applies the app's own legal guard to every stri
 is in it: the customer's first name, the receipt's code, the category, the pro's public name,
 the scheduled date in the business time zone, the amounts, the card's brand and last 4 digits,
 the city (never the street, Q-R2), and who issues it (settings, Q-R1). Never a Stripe id, the
-platform's fee or the pro's payout. Every value that did not come from this file is
-HTML-escaped in the HTML part.
+platform's fee or the pro's payout. Rendered in the branded layout (app.email_layout, #92),
+which HTML-escapes every value in the HTML part and adds the footer: why the customer gets it,
+the service-email line, where to ask and who sends it (settings, Q-R1).
 """
 
-import html
 from dataclasses import dataclass
 from datetime import datetime
 from types import MappingProxyType
 from typing import Final
 
+from app.email_layout import EmailContent, Paragraph, SenderIdentity, language_of, render_email
 from app.integrations.stripe_payments import CardFacts
-from app.modules.auth.email_copy import EmailContent
 
 DEFAULT_LOCALE: Final = "en"
 
@@ -71,10 +71,7 @@ COPY: Final = MappingProxyType(
             paid_with="Paid with {method}",
             card="Card",
             in_app="See this receipt any time in the app: open your job and tap Receipt.",
-            why=(
-                "You're getting this email because you booked a job with Jack Fix It. "
-                "Questions? Open Help in the app."
-            ),
+            why="You're getting this email because you booked a job with Jack Fix It.",
             months=(
                 "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -101,10 +98,7 @@ COPY: Final = MappingProxyType(
             paid_with="Pagado con {method}",
             card="Tarjeta",
             in_app="Consulta este recibo cuando quieras en la app: abre tu trabajo y toca Recibo.",
-            why=(
-                "Recibes este correo porque reservaste un trabajo con Jack Fix It. "
-                "¿Preguntas? Abre Ayuda en la app."
-            ),
+            why="Recibes este correo porque reservaste un trabajo con Jack Fix It.",
             months=(
                 "ene", "feb", "mar", "abr", "may", "jun",
                 "jul", "ago", "sept", "oct", "nov", "dic",
@@ -185,7 +179,7 @@ class ReceiptEmailFacts:
     lines: tuple[tuple[str, int], ...]  # (label, cents)
     total_cents: int
     card: CardFacts | None
-    issuer: tuple[str, ...]  # the legal name, the support email, the address: those set
+    sender: SenderIdentity  # the footer's support email and identity (settings, Q-R1)
 
 
 def _render(subject: str, intro: str, facts: ReceiptEmailFacts) -> EmailContent:
@@ -204,15 +198,21 @@ def _render(subject: str, intro: str, facts: ReceiptEmailFacts) -> EmailContent:
     amounts = [f"{label}: {money(cents)}" for label, cents in facts.lines]
     amounts.append(f"{copy.total}: {money(facts.total_cents)}")
     method = copy.paid_with.format(method=payment_method(facts.card, facts.locale))
-    footer = [copy.why, *([" · ".join(facts.issuer)] if facts.issuer else [])]
-    blocks = [[greeting], [intro], details, amounts, [method], [copy.in_app], footer]
-    text = "\n\n".join("\n".join(block) for block in blocks) + "\n"
-
-    def paragraph(lines: list[str]) -> str:
-        return "<p>" + "<br>".join(html.escape(line) for line in lines) + "</p>"
-
-    body = "".join(paragraph(block) for block in blocks)
-    return EmailContent(subject=subject, text=text, html=body)
+    paragraphs: list[Paragraph] = [
+        (greeting,),
+        (intro,),
+        tuple(details),
+        tuple(amounts),
+        (method,),
+        (copy.in_app,),
+    ]
+    return render_email(
+        locale=language_of(facts.locale),
+        subject=subject,
+        paragraphs=paragraphs,
+        reason=copy.why,
+        sender=facts.sender,
+    )
 
 
 def payment_receipt_email(facts: ReceiptEmailFacts) -> EmailContent:
