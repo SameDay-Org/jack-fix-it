@@ -33,6 +33,11 @@ class DispatchRepository:
         statement = select(exists().where(RequestDispatch.request_id == request_id))
         return bool(await self._session.scalar(statement))
 
+    async def pro_ids_of(self, request_id: uuid.UUID) -> set[uuid.UUID]:
+        """The pros the request was sent to, whatever became of each offer (#82)."""
+        statement = select(RequestDispatch.pro_id).where(RequestDispatch.request_id == request_id)
+        return set((await self._session.scalars(statement)).all())
+
     async def add_many(self, rows: Sequence[RequestDispatch]) -> None:
         """Inserts now (flush): a duplicate (request, pro) fails here, inside the transaction."""
         self._session.add_all(rows)
