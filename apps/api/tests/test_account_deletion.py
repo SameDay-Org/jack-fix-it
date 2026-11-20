@@ -35,6 +35,7 @@ from app.modules.addresses.models import Address, SavedAddress
 from app.modules.audit.models import AuditLog
 from app.modules.audit.service import AuditService
 from app.modules.audit.types import AuditAction, AuditEntity, AuditEntityType, AuditState
+from app.modules.auth.models import RefreshToken
 from app.modules.categories.models import Category
 from app.modules.chat.models import JobMessage
 from app.modules.devices.models import Device, DevicePlatform
@@ -890,6 +891,11 @@ async def test_a_deleted_account_cannot_sign_in_and_its_email_signs_up_anew(worl
     assert (login.status_code, login.json()["error"]["code"]) == (401, "invalid_credentials")
     assert refreshed.status_code == 401
     assert (me.status_code, me.json()["error"]["code"]) == (401, "invalid_token")
+    async with world.sessions() as session:
+        revoked = await session.scalars(
+            select(RefreshToken.revoked_at).where(RefreshToken.user_id == world.customer.id)
+        )
+        assert all(at is not None for at in revoked)  # every session of the account ended
     assert again.id != world.customer.id
     assert (await world.client.get("/v1/auth/me", headers=again.headers)).status_code == 200
 
