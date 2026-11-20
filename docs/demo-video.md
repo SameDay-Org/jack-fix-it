@@ -10,8 +10,9 @@ tour. Everything lives in `scripts/demo/`.
 
 **Never record production data.** The seed refuses anything but a local `jackdemo*` database (and
 a storage that is not on this machine, a deployed `APP_ENV`, a Stripe key that is not a TEST
-key), the web tour refuses any host but `localhost`, `127.0.0.1` and one named staging host, and
-Stripe is always in TEST mode.
+key). The web tour's browser can reach `localhost`, `127.0.0.1` and one named staging host, and
+no other: every connection it makes goes through a guard that refuses the rest. Stripe is always
+in TEST mode.
 
 ## The cast
 
@@ -222,6 +223,20 @@ nothing left to act on ends early (a `nothing-left` still), and the run still ex
 | 07  | site     | 1          | `/`, `/app`, `/for-pros`: hero, an eased scroll down, back to the top                                                | 24      |
 | 08  | site-es  | 1 (ES)     | `/es`, `/es/app`, `/es/for-pros`: the heroes                                                                         | 9       |
 | 09  | closing  | 15         | `/` with the cursor off the frame, 5 s                                                                               | 6       |
+
+The host guard (`tour-guard.mjs`): the browser is launched behind a small proxy the script runs,
+loopback included, and the proxy connects to the allowed hosts only. A Playwright route could not
+do this: it sees the first request of a redirect chain and not the hops after it, so an allowed
+page answering 307 could forward a form to any host. At the proxy every connection is asked for
+by name first: each hop of a redirect, a subresource, a frame, a fetch, a websocket. A refused
+host gets no connection at all. What goes around a proxy is closed too: WebRTC sends no UDP (a
+launch switch, and every frame of a scene loses the WebRTC constructors), and the guard's own
+requests ignore Node's proxy settings (`NODE_USE_ENV_PROXY`, `HTTP_PROXY`). A broken answer from
+an allowed server is a 502 for that request, never a crash. `scenes.md` lists the other hosts a
+scene's pages asked for (all refused); `scenes.json` also lists everything the guard refused
+during the scene (`guardRefused`), Edge's own background calls included (they are refused too). A
+scene whose page would have left fails. The guard has its own tests in a real browser
+(`pnpm test` in `scripts/demo`, also run by CI).
 
 Cursor and recording:
 
