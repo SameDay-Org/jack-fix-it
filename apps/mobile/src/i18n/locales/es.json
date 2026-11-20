@@ -1958,6 +1958,90 @@
       "action": "Configurar pagos"
     }
   },
+  "cancellation": {
+    "entry": "Cancelar trabajo",
+    "entryFailed": "No pudimos comprobar si este trabajo se puede cancelar.",
+    "entryBusy": "Necesitamos un momento para comprobar si este trabajo se puede cancelar.",
+    "retry": "Reintentar",
+    "title": "¿Cancelar este trabajo?",
+    "intro": "Cuéntanos por qué y revisa cuánto cuesta. Le avisaremos a tu profesional.",
+    "reasonLabel": "¿Por qué cancelas?",
+    "reasonMissing": "Elige por qué cancelas.",
+    "reason": {
+      "changed_my_mind": "Cambié de opinión",
+      "found_another_pro": "Encontré a otro profesional",
+      "pro_late": "El profesional llega tarde",
+      "other": "Otra cosa"
+    },
+    "noteLabel": "¿Algo más? (opcional)",
+    "noteHint": "Solo nuestro equipo lo lee.",
+    "tooLong_one": "Tiene {{count}} carácter de más.",
+    "tooLong_other": "Tiene {{count}} caracteres de más.",
+    "costTitle": "Cuánto cuesta",
+    "cost": {
+      "free": "Cancelar no tiene costo: recibes de vuelta el total de {{amount}}.",
+      "fee": "Cancelar ahora cuesta {{fee}} ({{rate}} del precio del trabajo). Recibes de vuelta {{amount}}."
+    },
+    "confirm": "Cancelar trabajo",
+    "keep": "No cancelar",
+    "retrySend": "Reintentar",
+    "sent": {
+      "title": "Tu trabajo fue cancelado",
+      "body": "Le avisamos a tu profesional.",
+      "back": "Volver al trabajo"
+    },
+    "money": {
+      "title": "Cancelación",
+      "fee": "Cancelar costó {{fee}}.",
+      "none": "No había nada que devolverte.",
+      "pending": "{{amount}} está volviendo a tu método de pago. Se está procesando.",
+      "succeeded": "{{amount}} volvió a tu método de pago.",
+      "failed": "{{amount}} todavía no volvió a tu método de pago. Nuestro equipo lo está revisando y te contactará en la app."
+    },
+    "closed": {
+      "title": "Este trabajo ya no se puede cancelar",
+      "body": "Un trabajo no se puede cancelar una vez que empezó. Si algo anda mal, habla con Jack."
+    },
+    "review": {
+      "title": "Primero tenemos que revisar este trabajo",
+      "body": "Algo de su pago necesita a nuestro equipo. Habla con Jack y lo resolvemos."
+    },
+    "talkToJack": "Hablar con Jack",
+    "loadFailed": {
+      "title": "No pudimos cargar esto",
+      "body": "Revisa tu conexión e inténtalo de nuevo."
+    },
+    "busy": {
+      "title": "Espera un momento",
+      "body": "Ahora no podemos mostrar cuánto cuesta cancelar. Inténtalo de nuevo en breve."
+    },
+    "failure": {
+      "offline": {
+        "title": "Sin conexión",
+        "body": "Tu elección sigue aquí. Inténtalo de nuevo cuando vuelvas a tener conexión."
+      },
+      "feeChanged": {
+        "title": "El costo cambió",
+        "body": "Tu profesional ya va en camino, así que cancelar tiene un costo. Revisa el nuevo monto antes de cancelar."
+      },
+      "closed": {
+        "title": "Esto ya no se puede hacer",
+        "body": "Las cosas cambiaron mientras tanto. Lo que ves ahora está al día."
+      },
+      "invalid": {
+        "title": "Revisa tu nota",
+        "body": "Algo en ella no se pudo aceptar. Revísala e inténtalo de nuevo."
+      },
+      "rateLimited": {
+        "title": "Son muchos intentos seguidos",
+        "body": "No se canceló nada y tu elección sigue aquí. Inténtalo de nuevo un poco más tarde."
+      },
+      "failed": {
+        "title": "No se pudo completar",
+        "body": "Algo salió mal de nuestro lado. Inténtalo de nuevo en un momento."
+      }
+    }
+  },
   "disputes": {
     "entry": "Reportar un problema",
     "entryFailed": "No pudimos comprobar si puedes reportar un problema.",
