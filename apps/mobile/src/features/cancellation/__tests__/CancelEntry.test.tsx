@@ -20,7 +20,7 @@ import {
 import { attachQueryClient, sessionStore } from "../../../api/session";
 import { SIGNED_OUT } from "../../auth/__tests__/helpers";
 import { customerJob } from "../../jobs/__tests__/helpers";
-import { cancelFailureOf, mayCancel, refusalOf, type CancelPreview } from "../api";
+import { cancelFailureOf, isRateLimited, mayCancel, refusalOf, type CancelPreview } from "../api";
 import { CancelEntry } from "../CancelEntry";
 
 jest.mock(
@@ -124,6 +124,39 @@ describe("Cancel job on the job screen", () => {
     expect(reads()).toBe(2);
   });
 
+  it("is left out when the API asks to wait (429), says so calmly, and its retry brings it", async () => {
+    answer = refuse(429, "rate_limited");
+    await renderEntry();
+    expect(await screen.findByTestId("job-cancel-check-failed")).toHaveTextContent(
+      "Checking if this job can be cancelled needs a moment. Try again",
+    );
+    expect(screen.queryByTestId("job-cancel")).toBeNull();
+    expect(screen.queryByText(/rate_limited|API request failed/)).toBeNull();
+    answer = respond(FREE);
+    await fireEvent.press(screen.getByTestId("job-cancel-check-failed"));
+    expect(await screen.findByTestId("job-cancel")).toBeTruthy();
+    expect(reads()).toBe(2);
+  });
+
+  it("is taken back when a later read is asked to wait (429), and returns with the next answer", async () => {
+    const first = Date.now();
+    const rendered = await renderEntry(SCHEDULED, first);
+    expect(await screen.findByTestId("job-cancel")).toBeTruthy();
+    // The pro set off: the cost is read again and the API asks to wait. The earlier answer
+    // (free) says nothing of the cost now.
+    const onTheWay: CustomerJob = { ...SCHEDULED, status: "on_the_way" };
+    answer = refuse(429, "rate_limited");
+    await rendered.rerender(entry(onTheWay, first + 1_000));
+    expect(await screen.findByTestId("job-cancel-check-failed")).toHaveTextContent(
+      /needs a moment/,
+    );
+    expect(screen.queryByTestId("job-cancel")).toBeNull();
+    answer = respond({ ...FREE, job_status: "on_the_way", fee_applies: true, fee_cents: 1_234 });
+    await rendered.rerender(entry(onTheWay, first + 2_000));
+    expect(await screen.findByTestId("job-cancel")).toBeTruthy();
+    expect(reads()).toBe(3);
+  });
+
   it("reads a failed preview again with the next answer for the job", async () => {
     answer = refuse(503, "unavailable");
     const first = Date.now();
@@ -170,11 +203,21 @@ describe("the cancel's API helpers", () => {
     expect(refusalOf(new ApiError(409, "cancel_needs_review"))).toBe("needsReview");
     expect(refusalOf(new ApiError(409, "something_else"))).toBeNull();
     expect(refusalOf(new ApiError(503, "unavailable"))).toBeNull();
+    expect(refusalOf(new ApiError(429, "rate_limited"))).toBeNull();
     expect(refusalOf(new NetworkError(false))).toBeNull();
+  });
+
+  it("knows a wait the API asked for by its status only", () => {
+    expect(isRateLimited(new ApiError(429, "rate_limited"))).toBe(true);
+    expect(isRateLimited(new ApiError(429, undefined))).toBe(true);
+    expect(isRateLimited(new ApiError(409, "cancel_not_allowed"))).toBe(false);
+    expect(isRateLimited(new ApiError(503, "unavailable"))).toBe(false);
+    expect(isRateLimited(new NetworkError(false))).toBe(false);
   });
 
   it("maps every failure to the screen's own words", () => {
     expect(cancelFailureOf(new SessionExpiredError())).toBeNull();
+    expect(cancelFailureOf(new ApiError(429, "rate_limited"))).toBe("rateLimited");
     expect(cancelFailureOf(new NetworkError(false))).toBe("offline");
     expect(cancelFailureOf(new ApiError(409, "cancel_fee_changed"))).toBe("feeChanged");
     expect(cancelFailureOf(new ApiError(409, "cancel_not_allowed"))).toBe("closed");

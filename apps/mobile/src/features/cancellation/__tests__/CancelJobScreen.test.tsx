@@ -414,6 +414,89 @@ describe("CancelJobScreen", () => {
     expect(previewReads()).toBe(2);
   });
 
+  it("opened while the API asks to wait (429), says so calmly, offers no cancel, and reads again on a tap", async () => {
+    preview = [429, "rate_limited"];
+    await renderScreen();
+    expect(await screen.findByTestId("cancel-load-failed")).toBeTruthy();
+    expect(screen.getByText("Give it a moment")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "We can't show what cancelling costs right now. Wait a moment, then try again.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("cancel-form")).toBeNull();
+    expect(screen.queryByTestId("cancel-confirm")).toBeNull();
+    expect(screen.queryByText(/rate_limited|API request failed|Check your connection/)).toBeNull();
+    preview = FREE;
+    await fireEvent.press(screen.getByTestId("cancel-retry"));
+    expect(await screen.findByTestId("cancel-form")).toBeTruthy();
+    expect(previewReads()).toBe(2);
+  });
+
+  it("a cancel the API asks to wait for (429) keeps the choice, and goes again with the same Idempotency-Key", async () => {
+    await renderScreen();
+    await pick();
+    await fireEvent.changeText(screen.getByTestId("cancel-note"), "Running two hours late.");
+    await confirm();
+    const reads = previewReads();
+    await answer(0, errorResponse(429, "rate_limited", { "Retry-After": "540" }));
+    expect(screen.getByTestId("cancel-failure")).toHaveTextContent(
+      /Give it a moment.*That was a few tries in a row\. Your choice is still here: try again in a few minutes\./,
+    );
+    expect(screen.queryByText(/rate_limited|API request failed|540/)).toBeNull();
+    expect(screen.getByText("Try again")).toBeTruthy();
+    // The form stands as it was: nothing is read again, and the cost shown is the one agreed to.
+    expect(screen.getByTestId("cancel-note").props.value).toBe("Running two hours late.");
+    expect(screen.getByRole("radio", { name: "The pro is late" })).toBeChecked();
+    expect(previewReads()).toBe(reads);
+    await confirm();
+    await waitFor(() => expect(postCalls()).toHaveLength(2));
+    const [first, second] = postCalls();
+    expect(keyOf(first!)).toMatch(UUID);
+    expect(keyOf(second!)).toBe(keyOf(first!));
+    expect(callBody(second!)).toEqual(callBody(first!));
+    await answer(1, jsonResponse(200, cancellation({ fee_cents: 0, refund_cents: 18_050 })));
+    expect(await screen.findByText("Your job was cancelled")).toBeTruthy();
+  });
+
+  it("a cost read again that the API asks to wait for (429) closes the form until it answers", async () => {
+    await renderScreen();
+    await pick();
+    await confirm();
+    // The pro set off between the preview and the tap; the cost is read again, and the API asks
+    // to wait: the old cost (free) must not stand beside a cancel button.
+    preview = [429, "rate_limited"];
+    await answer(0, errorResponse(409, "cancel_fee_changed"));
+    expect(await screen.findByText("Give it a moment")).toBeTruthy();
+    expect(screen.queryByTestId("cancel-confirm")).toBeNull();
+    expect(screen.queryByText(/Cancelling is free/)).toBeNull();
+    preview = FEE;
+    await fireEvent.press(screen.getByTestId("cancel-retry"));
+    expect(await screen.findByText(/Cancelling now costs \$12\.34/)).toBeTruthy();
+    expect(postCalls()).toHaveLength(1);
+  });
+
+  it("asks to wait in Spanish too", async () => {
+    await i18n.changeLanguage("es");
+    preview = [429, "rate_limited"];
+    await renderScreen();
+    expect(await screen.findByText("Espera un momento")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Ahora no podemos mostrar cuánto cuesta cancelar. Espera un momento e inténtalo de nuevo.",
+      ),
+    ).toBeTruthy();
+    preview = FREE;
+    await fireEvent.press(screen.getByTestId("cancel-retry"));
+    await fireEvent.press(await screen.findByRole("radio", { name: "Otra cosa" }));
+    await confirm();
+    await answer(0, errorResponse(429, "rate_limited"));
+    expect(screen.getByTestId("cancel-failure")).toHaveTextContent(
+      /Espera un momento.*Tu elección sigue aquí: inténtalo de nuevo en unos minutos\./,
+    );
+    expect(screen.getByText("Reintentar")).toBeTruthy();
+  });
+
   it("speaks Spanish", async () => {
     await i18n.changeLanguage("es");
     preview = FEE;

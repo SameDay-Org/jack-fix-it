@@ -77,6 +77,14 @@ export function refusalOf(error: unknown): Refusal | null {
 }
 
 /**
+ * The API asked this customer to wait (429: too many previews or cancels in a row). A preview
+ * that answered so tells nothing about the cost, held numbers included: the action and the form
+ * stay closed, with a retry, until it answers again.
+ */
+export const isRateLimited = (error: unknown): boolean =>
+  error instanceof ApiError && error.status === 429;
+
+/**
  * Cancels the job: one Idempotency-Key per screen, sent again with every retry, so a double tap or
  * a retry after a lost answer cancels once (the API answers with the cancellation as it is). The
  * preview's fee goes along as `expected_fee_cents`: if the cost changed since (the pro set off),
@@ -106,13 +114,15 @@ export async function cancelJob(
  * Why a cancel did not go, as the screen says it. `null`: the session ended and the signed-out
  * handling takes over. `feeChanged`: the cost moved since the preview (the pro set off): the
  * screen reads it again. `closed`: the job cannot be cancelled now: the screen reads it again and
- * shows why.
+ * shows why. `rateLimited`: the API asked to wait (429): the same cancel goes again later.
  */
-export type CancelFailure = "offline" | "feeChanged" | "closed" | "invalid" | "failed";
+export type CancelFailure =
+  "offline" | "feeChanged" | "closed" | "invalid" | "rateLimited" | "failed";
 
 export function cancelFailureOf(error: unknown): CancelFailure | null {
   if (error instanceof SessionExpiredError) return null;
   if (error instanceof NetworkError) return "offline";
+  if (isRateLimited(error)) return "rateLimited";
   if (error instanceof ApiError) {
     if (error.status === 409) return error.code === "cancel_fee_changed" ? "feeChanged" : "closed";
     if (error.status === 422) return "invalid";

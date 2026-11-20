@@ -19,6 +19,7 @@ import {
   CANCEL_REASONS,
   cancelFailureOf,
   cancelJob,
+  isRateLimited,
   mayCancel,
   refusalOf,
   useCancelPreview,
@@ -31,6 +32,8 @@ import { costStatement, moneyLines } from "./CancellationStatus";
 import { NOTE_MAX } from "./config";
 
 const TALK_TO_JACK = "/help/contact";
+/** The failures after which the same cancel goes again: the button says "Try again". */
+const SEND_AGAIN: ReadonlySet<CancelFailure> = new Set(["offline", "rateLimited", "failed"]);
 
 /**
  * "Cancel job" (`/requests/[id]/cancel`, #69): one full screen over the job. Why (one of four
@@ -51,6 +54,9 @@ export function CancelJobScreen() {
   const [sent, setSent] = useState<{ requestId: string; cancellation: Cancellation } | null>(null);
   const sentHere = sent?.requestId === id ? sent.cancellation : null;
   const refusal = refusalOf(preview.error);
+  // A preview the API asked to wait for (429) says nothing of the cost now, held numbers
+  // included: no form and no cancel until it answers again.
+  const limited = preview.isError && isRateLimited(preview.error);
   const cancelled = sentHere ?? job.data?.cancellation ?? null;
   const back = () => (router.canGoBack() ? router.back() : router.replace(jobHref(id)));
   const reread = () => void Promise.all([job.refetch(), preview.refetch()]);
@@ -100,7 +106,7 @@ export function CancelJobScreen() {
         <Button label={t("cancellation.sent.back")} variant="secondary" onPress={back} />
       </State>
     );
-  } else if (job.data && preview.data) {
+  } else if (job.data && preview.data && !limited) {
     body = (
       <CancelForm
         // A form per job: its reason, note and Idempotency-Key never carry over to another.
@@ -117,11 +123,12 @@ export function CancelJobScreen() {
       />
     );
   } else if (job.isError || preview.isError) {
+    const copy = limited ? "busy" : "loadFailed";
     body = (
       <State
         requestId={id}
-        title={t("cancellation.loadFailed.title")}
-        body={t("cancellation.loadFailed.body")}
+        title={t(`cancellation.${copy}.title`)}
+        body={t(`cancellation.${copy}.body`)}
         testID="cancel-load-failed"
       >
         <Button
@@ -198,9 +205,10 @@ type CancelFormProps = {
 
 /**
  * The form. "Cancel the job" checks it first and says what is missing at the field; then one
- * cancel goes with this screen's Idempotency-Key (made once, sent with every retry) and the
- * preview's fee as the amount the customer agreed to, so a double tap or a retry cancels once and
- * a cost that changed in between is never taken unseen.
+ * cancel goes with this screen's Idempotency-Key (made once, sent with every retry: after a lost
+ * connection, or after the API asked to wait) and the preview's fee as the amount the customer
+ * agreed to, so a double tap or a retry cancels once and a cost that changed in between is never
+ * taken unseen.
  */
 function CancelForm({ jobId, requestId, preview, onSent, onChanged, onKeep }: CancelFormProps) {
   const { t } = useTranslation();
@@ -343,7 +351,7 @@ function CancelForm({ jobId, requestId, preview, onSent, onChanged, onKeep }: Ca
         <View className="gap-3">
           <Button
             label={
-              failure === "offline" || failure === "failed"
+              failure && SEND_AGAIN.has(failure)
                 ? t("cancellation.retrySend")
                 : t("cancellation.confirm")
             }
