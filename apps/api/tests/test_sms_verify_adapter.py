@@ -53,7 +53,7 @@ async def test_start_posts_to_verify_service_with_basic_auth() -> None:
         requests.append(request)
         return httpx.Response(201, json={"status": "pending"})
 
-    await verifier(handler).start(PHONE)
+    await verifier(handler).start(PHONE, None)
 
     [request] = requests
     assert request.method == "POST"
@@ -61,6 +61,21 @@ async def test_start_posts_to_verify_service_with_basic_auth() -> None:
     assert form(request) == {"To": PHONE, "Channel": "sms"}
     expected = base64.b64encode(f"{ACCOUNT_SID}:{AUTH_TOKEN}".encode()).decode()
     assert request.headers["Authorization"] == f"Basic {expected}"
+
+
+@pytest.mark.parametrize("locale", ["en", "es"])
+async def test_start_asks_for_the_users_language(locale: str) -> None:
+    """#92: Twilio writes its text in the user's language, not the number's country's."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(201, json={"status": "pending"})
+
+    await verifier(handler).start(PHONE, locale)
+
+    [request] = requests
+    assert form(request) == {"To": PHONE, "Channel": "sms", "Locale": locale}
 
 
 async def test_check_posts_code_to_verification_check() -> None:
@@ -101,7 +116,7 @@ async def test_invalid_number_raises_invalid_phone() -> None:
     body = {"code": 60200, "message": f"Invalid parameter `To`: {PHONE}", "status": 400}
 
     with pytest.raises(InvalidPhoneError) as start_error:
-        await verifier(respond(400, body)).start(PHONE)
+        await verifier(respond(400, body)).start(PHONE, None)
     with pytest.raises(InvalidPhoneError) as check_error:
         await verifier(respond(400, body)).check(PHONE, CODE)
 
@@ -134,7 +149,7 @@ async def test_timeout_and_5xx_raise_unavailable(handler: Handler) -> None:
     client = verifier(handler)
 
     with pytest.raises(VerificationUnavailableError):
-        await client.start(PHONE)
+        await client.start(PHONE, None)
     with pytest.raises(VerificationUnavailableError):
         await client.check(PHONE, CODE)
 
@@ -163,7 +178,7 @@ async def test_errors_not_about_the_number_or_code_are_unavailable(
     client = verifier(respond(status, body))
 
     with pytest.raises(VerificationUnavailableError):
-        await client.start(PHONE)
+        await client.start(PHONE, None)
     with pytest.raises(VerificationUnavailableError):
         await client.check(PHONE, CODE)
 
@@ -173,20 +188,20 @@ async def test_number_errors_raise_invalid_phone(twilio_code: int) -> None:
     client = verifier(respond(400, {"code": twilio_code}))
 
     with pytest.raises(InvalidPhoneError):
-        await client.start(PHONE)
+        await client.start(PHONE, None)
     with pytest.raises(InvalidPhoneError):
         await client.check(PHONE, CODE)
 
 
 async def test_max_send_attempts_raises_throttled() -> None:
     with pytest.raises(VerificationThrottledError):
-        await verifier(respond(429, {"code": 60203})).start(PHONE)
+        await verifier(respond(429, {"code": 60203})).start(PHONE, None)
 
 
 async def test_start_404_is_unavailable_not_a_bad_code() -> None:
     # On start, a 404 means a wrong service SID: a configuration problem.
     with pytest.raises(VerificationUnavailableError):
-        await verifier(respond(404, {"code": 20404})).start(PHONE)
+        await verifier(respond(404, {"code": 20404})).start(PHONE, None)
 
 
 async def test_timeout_comes_from_settings() -> None:
@@ -203,7 +218,7 @@ async def test_timeout_comes_from_settings() -> None:
         timeout_seconds=1.5,
         transport=httpx.MockTransport(handler),
     )
-    await client.start(PHONE)
+    await client.start(PHONE, None)
 
     assert seen == [{"connect": 1.5, "read": 1.5, "write": 1.5, "pool": 1.5}]
 
@@ -222,7 +237,7 @@ async def test_adapter_logs_no_number_or_code(caplog: pytest.LogCaptureFixture) 
     with caplog.at_level(logging.DEBUG):
         for handler in handlers:
             client = verifier(handler)
-            for call in (client.start(PHONE), client.check(PHONE, CODE)):
+            for call in (client.start(PHONE, None), client.check(PHONE, CODE)):
                 with contextlib.suppress(InvalidPhoneError, VerificationUnavailableError):
                     await call
 
