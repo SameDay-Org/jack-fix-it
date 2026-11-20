@@ -730,6 +730,8 @@
       "request": {
         "title": "Solicitud",
         "preferred": "Día preferido",
+        "yes": "Sí",
+        "no": "No",
         "period": {
           "morning": "Mañana",
           "afternoon": "Tarde",
