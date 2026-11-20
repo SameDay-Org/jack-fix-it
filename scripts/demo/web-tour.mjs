@@ -270,7 +270,7 @@ async function openTab(page, name) {
   const tab = page.getByRole("link", { name });
   await press(page, tab);
   await page
-    .locator('a[aria-current="page"]')
+    .locator('a[aria-current="true"]')
     .filter({ hasText: name })
     .first()
     .waitFor({ timeout: 15000 });
