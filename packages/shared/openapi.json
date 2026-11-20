@@ -7599,6 +7599,134 @@
         }
       }
     },
+    "/v1/pros/me/jobs/{job_id}/cancel": {
+      "post": {
+        "tags": [
+          "cancellations"
+        ],
+        "summary": "Cancel a job I can no longer do (pro)",
+        "description": "The pro cancels their scheduled or on-the-way job. The customer is never charged: their\nwhole payment, tax included, goes back to the original payment method through Stripe. The\njob and its request are cancelled (the request is not reopened: the customer starts a new\none), and the customer is notified. A job is cancelled once: sending again, or after the\ncustomer cancelled, returns that cancellation (200).",
+        "operationId": "pro_cancel_job_v1_pros_me_jobs__job_id__cancel_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A UUID the app makes once per cancel and sends again with every retry of it. A retry answers 200 with the cancellation as it is now and writes nothing; the same key with another body, or on another job, answers 409 idempotency_key_reused. With or without it, a job is cancelled once.",
+              "title": "Idempotency-Key"
+            },
+            "description": "A UUID the app makes once per cancel and sends again with every retry of it. A retry answers 200 with the cancellation as it is now and writes nothing; the same key with another body, or on another job, answers 409 idempotency_key_reused. With or without it, a job is cancelled once."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProCancelIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProCancellationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: an unknown or a customer's reason_code; a note longer than 500 characters, holding a NUL, or empty once invisible characters are dropped; an unknown field; a job_id or an Idempotency-Key that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only pros cancel here (a customer's cancel is separate).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id of which the caller is the pro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "cancel_not_allowed: the work started, or the job is done, confirmed, paid out, disputed or refunded (the message names its status); cancel_needs_review: the job's payment needs a look by staff first; idempotency_key_reused: the caller already used this Idempotency-Key with a different body or on another job. Nothing was changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many cancels by this pro in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/pros/me/jobs/{job_id}/dispute": {
       "get": {
         "tags": [
@@ -12471,6 +12599,80 @@
         ],
         "title": "PreferredPeriod",
         "description": "When in the preferred day the customer would like the visit (#237). Pros propose the\nexact start in their quote; the period only refines a preferred date."
+      },
+      "ProCancelIn": {
+        "properties": {
+          "reason_code": {
+            "$ref": "#/components/schemas/ProCancelReason"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1,
+                "pattern": "^[^\\x00]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "Optional, plain text. Contact details are masked before it is stored; only the masked text is kept, for staff."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason_code"
+        ],
+        "title": "ProCancelIn"
+      },
+      "ProCancelReason": {
+        "type": "string",
+        "enum": [
+          "cannot_make_it",
+          "customer_unreachable",
+          "scope_changed",
+          "other"
+        ],
+        "title": "ProCancelReason",
+        "description": "Why the pro cancels: the reasons their app offers."
+      },
+      "ProCancellationOut": {
+        "properties": {
+          "cancelled_by": {
+            "$ref": "#/components/schemas/CancelParty"
+          },
+          "reason_code": {
+            "$ref": "#/components/schemas/CancelReason"
+          },
+          "cancelled_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Cancelled At"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "job_status": {
+            "$ref": "#/components/schemas/JobStatus",
+            "description": "cancelled."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cancelled_by",
+          "reason_code",
+          "cancelled_at",
+          "job_id",
+          "job_status"
+        ],
+        "title": "ProCancellationOut",
+        "description": "The cancel's answer to the pro: their job view's cancellation (who, why and when; never\nthe money or the note) with the job. cancelled_by is customer when the customer cancelled\nfirst."
       },
       "ProDisputeOut": {
         "properties": {
