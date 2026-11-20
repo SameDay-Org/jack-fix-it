@@ -12579,7 +12579,7 @@ export interface operations {
             query?: {
                 /** @description today: due by the end of today in BUSINESS_TIME_ZONE, overdue too. */
                 due?: components["schemas"]["FollowupDue"];
-                /** @description Another staff member's (admins only). */
+                /** @description Whose follow-ups (admins only; an agent reads their own without it). */
                 assignee?: string | null;
                 /** @description Page size; capped. */
                 limit?: number | null;
@@ -12609,7 +12609,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description forbidden: only agents and admins; only an admin reads someone else's. */
+            /** @description forbidden: only active agents and admins; only an admin names an assignee (their own id included). */
             403: {
                 headers: {
                     [name: string]: unknown;

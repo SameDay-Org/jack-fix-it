@@ -470,7 +470,8 @@ async def staff_followup_done(
     responses={
         **_STAFF_ACCESS,
         status.HTTP_403_FORBIDDEN: _error(
-            "forbidden: only agents and admins; only an admin reads someone else's."
+            "forbidden: only active agents and admins; only an admin names an assignee "
+            "(their own id included)."
         ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error("validation_error: a bad cursor or limit."),
     },
@@ -483,7 +484,8 @@ async def staff_list_followups(
         Query(description="today: due by the end of today in BUSINESS_TIME_ZONE, overdue too."),
     ] = FollowupDue.TODAY,
     assignee: Annotated[
-        uuid.UUID | None, Query(description="Another staff member's (admins only).")
+        uuid.UUID | None,
+        Query(description="Whose follow-ups (admins only; an agent reads their own without it)."),
     ] = None,
     limit: Annotated[int | None, Query(gt=0, description="Page size; capped.")] = None,
     cursor: Annotated[str | None, Query(max_length=200)] = None,

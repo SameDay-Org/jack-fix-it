@@ -7,8 +7,11 @@ takes, so two staff members acting on one request take turns), and in that trans
   agent holds is a 409 request_held (read it, claim it when it is released, or ask an admin);
   an admin acts on any request;
 - the actor is checked again as an active agent or admin, read as last committed and
-  share-locked until the commit (AuditService.active_staff): one demoted or suspended since
-  they were authenticated gets 403 and nothing is written;
+  share-locked until the commit (AuditService.current_staff): one demoted or suspended since
+  they were authenticated gets 403 and nothing is written. Every decision a role makes (the
+  holder rule, a follow-up for someone else, marking another's done) takes the role of that
+  read, never the one the token was issued with: an admin demoted to agent since is an agent
+  (#499 round 1). Each check comes before anything is written;
 - one audit_log row with the actor and a before and after of ids, statuses and counts: never
   a note's text or a contact. An audit write that fails changes nothing.
 
@@ -20,12 +23,18 @@ takes, so two staff members acting on one request take turns), and in that trans
   to an active category (422 otherwise). It runs nothing else: dispatch reads the category
   when the request moves on.
 - Follow-up: due in the future and at most OPS_FOLLOWUP_MAX_DAYS ahead; the caller's by
-  default, someone else's only when an admin gives it, and only to an active agent or admin.
-  Done by its assignee or an admin, once (again changes nothing). The request's holder rule
-  does not apply to marking one done: the follow-up is its assignee's.
-- Due: the caller's follow-ups not done (an admin may read another staff member's), due before
-  the end of today in BUSINESS_TIME_ZONE (overdue included) or whenever, by due time, cursor
-  paged. Each names its request by code and status: no contact.
+  default, someone else's only when an admin gives it, and only to an active agent or admin
+  (also read share-locked, so the assignee cannot be demoted before the commit). Done by its
+  assignee or an admin, once: again changes nothing, but the actor is checked first, so one
+  revoked since gets 403 and no follow-up (#499 round 1 B3). The request's holder rule does
+  not apply to marking one done: the follow-up is its assignee's.
+- Who reads a follow-up (#499 round 1 B2): an agent only those assigned to them, an admin
+  every one, on the request's card and in the list alike (repository.followups_visible_to).
+  Internal notes stay shared by all staff.
+- Due: the caller's follow-ups not done, due before the end of today in BUSINESS_TIME_ZONE
+  (overdue included) or whenever, by due time, cursor paged. Only an admin may name an
+  assignee (another staff member's, or their own): an agent naming one, even themselves, gets
+  403. Each names its request by code and status: no contact.
 - More info (part 2): the question is kept as a note; the request goes to reviewing through the
   state machine's staff edge (already there: it stays) and is held there (info_requested_at),
   so the re-dispatch (#478) leaves it alone. Nobody messages the customer: no channel exists
@@ -114,14 +123,13 @@ from app.modules.requests.errors import InvalidTransitionError
 from app.modules.requests.queue import LockedRequest, RequestQueueReader, RequestStatus
 from app.modules.requests.state_machine import RequestStateMachine, staff_moves
 from app.modules.users.service import UserService
-from app.modules.users.types import UserAccount, UserRole, UserStatus
+from app.modules.users.types import UserAccount, UserRole
 from app.queue import JobQueue
 
 logger = logging.getLogger(__name__)
 
 # The statuses a category may be set in: before dispatch takes the request.
 CLASSIFIABLE: Final = frozenset({RequestStatus.RECEIVED, RequestStatus.REVIEWING})
-_STAFF: Final = frozenset({UserRole.AGENT, UserRole.ADMIN})
 # Never moved by hand (#82): into finding_pro, which dispatch owns (the offers and the move in
 # one transaction; by hand the request would wait with no offer anything ever sends), nor out
 # of accepted, whose moves the payment and its cancellation own (#61, #69): a paid job's
@@ -203,9 +211,10 @@ class OpsRecords:
             for note in notes
         ]
 
-    async def followups_of(self, request_id: uuid.UUID) -> list[FollowupOut]:
-        """By due time."""
-        followups = await self._followups.of_request(request_id)
+    async def followups_of(self, request_id: uuid.UUID, viewer: UserAccount) -> list[FollowupOut]:
+        """The ones `viewer` may read (repository.followups_visible_to), by due time. `viewer`
+        is the account as the caller's transaction read it."""
+        followups = await self._followups.of_request(request_id, viewer)
         agents = await self.agents({row.assigned_to for row in followups})
         return [_followup_out(row, agents[row.assigned_to]) for row in followups]
 
@@ -236,7 +245,7 @@ class OpsActions:
         self._pros = ProService(session)
 
     async def add_note(self, staff: UserAccount, request_id: uuid.UUID, body: str) -> NoteOut:
-        locked = await self._acting(staff, request_id)
+        locked, _ = await self._acting(staff, request_id)
         note = await self._notes.add(
             RequestNote(request_id=locked.id, author_id=staff.id, body=body)
         )
@@ -256,7 +265,7 @@ class OpsActions:
         return out
 
     async def mark_contacted(self, staff: UserAccount, request_id: uuid.UUID) -> ContactedOut:
-        locked = await self._acting(staff, request_id)
+        locked, _ = await self._acting(staff, request_id)
         if locked.first_contact_at is not None:
             # Again: the first value stands, nothing is written; the row lock goes.
             await self._session.commit()
@@ -275,7 +284,7 @@ class OpsActions:
     async def classify(
         self, staff: UserAccount, request_id: uuid.UUID, category_id: uuid.UUID
     ) -> ClassifyOut:
-        locked = await self._acting(staff, request_id)
+        locked, _ = await self._acting(staff, request_id)
         if locked.status not in CLASSIFIABLE:
             await self._session.rollback()
             raise RequestNotClassifiableError
@@ -300,7 +309,7 @@ class OpsActions:
     async def request_more_info(
         self, staff: UserAccount, request_id: uuid.UUID, question: str
     ) -> MoreInfoOut:
-        locked = await self._acting(staff, request_id)
+        locked, _ = await self._acting(staff, request_id)
         moving = locked.status is not RequestStatus.REVIEWING
         if moving and RequestStatus.REVIEWING not in staff_moves(locked.status):
             await self._session.rollback()
@@ -331,7 +340,7 @@ class OpsActions:
         )
 
     async def resume(self, staff: UserAccount, request_id: uuid.UUID) -> ResumeOut:
-        locked = await self._acting(staff, request_id)
+        locked, _ = await self._acting(staff, request_id)
         if locked.info_requested_at is None:
             await self._session.commit()  # not on hold: nothing written; the row lock goes
             return ResumeOut(id=locked.id, status=locked.status)
@@ -348,7 +357,7 @@ class OpsActions:
     async def change_status(
         self, staff: UserAccount, request_id: uuid.UUID, to: RequestStatus, reason: str
     ) -> StatusChangeOut:
-        locked = await self._acting(staff, request_id)
+        locked, _ = await self._acting(staff, request_id)
         if to not in status_changes(locked.status):
             await self._session.rollback()
             raise InvalidTransitionError
@@ -368,7 +377,7 @@ class OpsActions:
     async def assign_pro(
         self, staff: UserAccount, request_id: uuid.UUID, pro_id: uuid.UUID, queue: JobQueue
     ) -> AssignOut:
-        locked = await self._acting(staff, request_id)
+        locked, _ = await self._acting(staff, request_id)
         made = await self._dispatch.assign(locked.id, pro_id, staff)
         if isinstance(made, AssignRefusal):
             await self._session.rollback()
@@ -429,18 +438,18 @@ class OpsActions:
     async def schedule_followup(
         self, staff: UserAccount, request_id: uuid.UUID, data: FollowupIn
     ) -> FollowupOut:
-        locked = await self._acting(staff, request_id)
+        locked, actor = await self._acting(staff, request_id)
         now = self._clock()
         if not now < data.due_at <= now + self._config.followup_max_ahead:
             await self._session.rollback()
             raise FollowupDueOutOfRangeError
-        assignee = data.assigned_to or staff.id
-        if assignee != staff.id:
-            if staff.role is not UserRole.ADMIN:
+        assignee = data.assigned_to or actor.id
+        if assignee != actor.id:
+            if actor.role is not UserRole.ADMIN:
                 await self._session.rollback()
                 raise ForbiddenError
-            account = await self._users.get_by_id(assignee)
-            if account is None or account.role not in _STAFF or account.status != UserStatus.ACTIVE:
+            # Share-locked as the actor is: the assignee cannot be demoted before the commit.
+            if await self._audit.current_staff(assignee) is None:
                 await self._session.rollback()
                 raise AssigneeNotStaffError
         followup = await self._followups.add(
@@ -469,18 +478,20 @@ class OpsActions:
     async def followup_done(
         self, staff: UserAccount, request_id: uuid.UUID, followup_id: uuid.UUID
     ) -> FollowupOut:
+        # The actor first (#499 round 1 B3): one revoked since they were authenticated gets
+        # 403 before anything of the follow-up is read, a replay of a done one included.
+        actor = await self._current(staff)
         followup = await self._followups.for_update(followup_id)
         if followup is None or followup.request_id != request_id:
             await self._session.rollback()
             raise FollowupNotFoundError
-        if followup.assigned_to != staff.id and staff.role is not UserRole.ADMIN:
+        if followup.assigned_to != actor.id and actor.role is not UserRole.ADMIN:
             await self._session.rollback()
             raise ForbiddenError
         if followup.done_at is not None:
             out = await self._followup_out(followup)
-            await self._session.commit()  # again: nothing written; the row lock goes
+            await self._session.commit()  # again: nothing written; the locks go
             return out
-        await self._active(staff)
         now = self._clock()
         await self._followups.mark_done(followup.id, staff.id, now)
         done = await self._followups.for_update(followup.id)
@@ -530,12 +541,17 @@ class OpsActions:
         cursor: str | None,
     ) -> FollowupsPage:
         """A staff member's open follow-ups (see the module doc). Ends its transaction."""
-        if assignee is not None and assignee != staff.id and staff.role is not UserRole.ADMIN:
+        actor = await self._current(staff)
+        if assignee is not None and actor.role is not UserRole.ADMIN:
+            # The parameter is an admin's, the caller's own id included (#499 round 1 B2).
+            await self._session.rollback()
             raise ForbiddenError
         size = min(limit or self._config.list_default_limit, self._config.list_max_limit)
         after = _decode_cursor(cursor) if cursor else None
         due_before = await self._end_of_today() if due is FollowupDue.TODAY else None
-        rows = await self._followups.open_due(assignee or staff.id, due_before, after, size + 1)
+        rows = await self._followups.open_due(
+            assignee or actor.id, actor, due_before, after, size + 1
+        )
         page, more = rows[:size], len(rows) > size
         briefs = await self._requests.briefs([row.request_id for row in page])
         agents = await self._records.agents({row.assigned_to for row in page})
@@ -552,19 +568,22 @@ class OpsActions:
         await self._session.rollback()
         return FollowupsPage(items=items, next_cursor=next_cursor)
 
-    async def _acting(self, staff: UserAccount, request_id: uuid.UUID) -> LockedRequest:
-        """The request locked, the holder rule and the actor checked; on a refusal the
-        transaction is rolled back first."""
+    async def _acting(
+        self, staff: UserAccount, request_id: uuid.UUID
+    ) -> tuple[LockedRequest, UserAccount]:
+        """The request locked, then the actor as this transaction reads it (share-locked to the
+        commit), then the holder rule by that account's role; on a refusal the transaction is
+        rolled back first. Returns the locked request and the actor's current account."""
         locked = await self._requests.lock(request_id)
         if locked is None:
             await self._session.rollback()
             raise QueueRequestNotFoundError
+        actor = await self._current(staff)
         holder = locked.assigned_agent_id
-        if holder is not None and holder != staff.id and staff.role is not UserRole.ADMIN:
+        if holder is not None and holder != actor.id and actor.role is not UserRole.ADMIN:
             await self._session.rollback()
             raise RequestHeldError
-        await self._active(staff)
-        return locked
+        return locked, actor
 
     async def _note(self, staff: UserAccount, locked: LockedRequest, body: str) -> NoteOut:
         """An internal note by the actor on the locked request, in its transaction."""
@@ -578,10 +597,18 @@ class OpsActions:
             created_at=note.created_at,
         )
 
-    async def _active(self, staff: UserAccount) -> None:
-        if not await self._audit.active_staff(staff.id):
+    async def _current(self, staff: UserAccount) -> UserAccount:
+        """The caller's account as last committed, an active agent or admin, share-locked
+        until the transaction ends (AuditService.current_staff); 403, rolled back, for anyone
+        else. Decide with ITS role, never `staff.role` (the token's)."""
+        actor = await self._audit.current_staff(staff.id)
+        if actor is None:
             await self._session.rollback()
             raise ForbiddenError
+        return actor
+
+    async def _active(self, staff: UserAccount) -> None:
+        await self._current(staff)
 
     async def _audited(
         self,
