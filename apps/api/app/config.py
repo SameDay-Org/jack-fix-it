@@ -159,6 +159,9 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
     sentry_dsn: str | None = None
     health_check_timeout_seconds: float = Field(default=2.0, gt=0)
+    # Largest request body in bytes (#523), refused with 413 before it is read. The Stripe
+    # webhooks read up to stripe_webhook_max_body_bytes instead.
+    http_max_body_bytes: int = Field(default=262_144, gt=0)
     # Required in staging and production; without it, auth endpoints answer a generic 500.
     jwt_secret: SecretStr | None = None
     access_token_ttl_seconds: int = Field(default=900, gt=0)
@@ -819,6 +822,12 @@ class Settings(BaseSettings):
     def _list_default_within_max(self) -> Self:
         if self.request_list_default_limit > self.request_list_max_limit:
             raise ValueError("REQUEST_LIST_DEFAULT_LIMIT must not exceed REQUEST_LIST_MAX_LIMIT")
+        return self
+
+    @model_validator(mode="after")
+    def _body_cap_holds_the_intake(self) -> Self:
+        if self.http_max_body_bytes < self.request_intake_max_bytes:
+            raise ValueError("HTTP_MAX_BODY_BYTES must be at least REQUEST_INTAKE_MAX_BYTES")
         return self
 
     @model_validator(mode="after")
