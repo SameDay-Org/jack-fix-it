@@ -26,6 +26,15 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { chromium } from "playwright-core";
+import {
+  allowedHosts,
+  guardContext,
+  hostOf,
+  isElsewhere,
+  launchGuarded,
+  permits,
+  startGuard,
+} from "./tour-guard.mjs";
 
 const { values: args } = parseArgs({
   options: {
@@ -36,10 +45,12 @@ const { values: args } = parseArgs({
   },
 });
 
-// ---- Guard: local or the named staging host only, never production. ----
-const ALLOWED = new Set(["localhost", "127.0.0.1", process.env.DEMO_STAGING_HOST].filter(Boolean));
+// ---- Guard: local or the named staging host only, never production. The base URL is
+// checked here; every request the browser then makes is checked by the proxy it runs behind
+// (tour-guard.mjs), so a redirect, a subresource or a frame cannot reach another host. ----
+const ALLOWED = allowedHosts(process.env.DEMO_STAGING_HOST);
 const BASE = new URL(args.base);
-if (!ALLOWED.has(BASE.hostname)) {
+if (!/^https?:$/.test(BASE.protocol) || !permits(ALLOWED, BASE.hostname)) {
   console.error(`refusing: ${BASE.hostname} is not localhost, 127.0.0.1 or DEMO_STAGING_HOST`);
   process.exit(2);
 }
@@ -69,7 +80,7 @@ const STORY = {
   closing: ["15", "Closing: landing hero"],
 };
 const WANTED = args.scenes ? args.scenes.split(",") : Object.keys(STORY);
-const unknown = WANTED.filter((id) => !(id in STORY));
+const unknown = WANTED.filter((id) => !Object.hasOwn(STORY, id));
 if (unknown.length) {
   console.error(`unknown scene(s): ${unknown.join(", ")}. Known: ${Object.keys(STORY).join(", ")}`);
   process.exit(2);
@@ -204,18 +215,19 @@ async function bring(page, locator, ms = 1200) {
   await scrollTo(page, Math.max(0, y - 140), ms);
 }
 
-/** Whether `url` is a web address on a host the tour may not be on. */
-const elsewhere = (url) => {
-  const { protocol, hostname } = new URL(url);
-  return protocol.startsWith("http") && !ALLOWED.has(hostname);
-};
+/** Whether `url` is somewhere the tour may not be (tour-guard.mjs: fails closed, never
+ * throws). */
+const elsewhere = (url) => isElsewhere(url, ALLOWED);
 
-/** Opens `url`, then makes sure the page ended on an allowed host. A redirect is not seen by
- * the route guard (Playwright continues a redirected request without asking it), so where the
- * page ended is checked before anything is typed or pressed there. */
+/** A URL's path for a report; the whole text when Node cannot parse it. */
+const pathOf = (url) => (URL.canParse(url) ? new URL(url).pathname : url);
+
+/** Opens `url`, then makes sure the page ended on an allowed host. The guard already refused
+ * the connection (nothing reached the other host); the page now shows the refusal under that
+ * host's address, and the scene stops before anything is typed or pressed there. */
 async function visit(page, url) {
   const response = await page.goto(url);
-  if (elsewhere(page.url())) throw new Error(`left for ${new URL(page.url()).hostname}`);
+  if (elsewhere(page.url())) throw new Error(`left for ${hostOf(page.url())}`);
   return response;
 }
 
@@ -238,7 +250,8 @@ async function nothingLeft(locator, still) {
 }
 
 // ---- One scene = one context = one WebM. ----
-const browser = await chromium.launch({ channel: CHANNEL, headless: !args.headed });
+const guard = await startGuard(ALLOWED);
+const browser = await launchGuarded(chromium, guard, { channel: CHANNEL, headless: !args.headed });
 let storageState;
 const scenes = [];
 
@@ -254,31 +267,31 @@ async function scene(id, story, title, run) {
     recordVideo: { dir: RAW, size: VIEW },
     storageState,
   });
+  await guardContext(context);
   await context.addInitScript(CURSOR);
   const issues = [];
+  // The other hosts this scene's pages asked for (each hop of a redirect, a websocket), all
+  // refused by the guard; and everything the guard refused during the scene, the browser's
+  // own background calls included.
   const foreign = new Set();
-  await context.route("**/*", (route) => {
-    const url = new URL(route.request().url());
-    if (url.protocol.startsWith("http") && !ALLOWED.has(url.hostname)) {
-      foreign.add(url.hostname);
-      // Never let the tour leave for another host (production included).
-      if (route.request().isNavigationRequest()) return route.abort();
-    }
-    return route.continue();
-  });
+  const refusedBefore = guard.refused.length;
+  const note = (url) => {
+    if (elsewhere(url)) foreign.add(hostOf(url));
+  };
+  context.on("request", (request) => note(request.url()));
+  context.on("page", (opened) => opened.on("websocket", (socket) => note(socket.url())));
   const page = await context.newPage();
-  // A press or a redirect that takes the page to another host ends the scene there: the page
-  // is closed, so nothing more is typed or pressed, and the host is listed.
+  // A press or a redirect that would take the page to another host ends the scene there: the
+  // guard refused the connection, and the page is closed so nothing more is typed or pressed.
   page.on("framenavigated", (frame) => {
     if (frame !== page.mainFrame() || !elsewhere(frame.url())) return;
-    foreign.add(new URL(frame.url()).hostname);
     page.close().catch(() => {});
   });
   page.on("pageerror", (e) => issues.push(`pageerror: ${e.message}`));
   page.on("console", (m) => m.type() === "error" && issues.push(`console: ${m.text()}`));
   page.on(
     "response",
-    (r) => r.status() >= 400 && issues.push(`http ${r.status()}: ${new URL(r.url()).pathname}`),
+    (r) => r.status() >= 400 && issues.push(`http ${r.status()}: ${pathOf(r.url())}`),
   );
   let shot = 0;
   const still = async (name) =>
@@ -297,11 +310,28 @@ async function scene(id, story, title, run) {
   const video = page.video();
   await context.close();
   const file = `${number}-${id}.webm`;
-  if (video) {
-    await video.saveAs(join(OUT, file));
-    await video.delete();
+  try {
+    if (video) {
+      await video.saveAs(join(OUT, file));
+      await video.delete();
+    }
+  } catch (error) {
+    // A scene that never drew a frame has no video; the report still lists it.
+    failed ??= `no video: ${error.message.split("\n")[0]}`;
   }
-  scenes.push({ number, id, story, title, file, seconds, failed, issues, foreign: [...foreign] });
+  const guardRefused = [...new Set(guard.refused.slice(refusedBefore))];
+  scenes.push({
+    number,
+    id,
+    story,
+    title,
+    file,
+    seconds,
+    failed,
+    issues,
+    foreign: [...foreign],
+    guardRefused,
+  });
   console.log(
     `${number} ${id}: ${seconds}s${failed ? ` FAILED ${failed}` : ""}${issues.length ? ` issues ${issues.length}` : ""}`,
   );
@@ -389,10 +419,13 @@ const SCENES = {
     // tour shows the file in place and comes back (images only: headless Edge downloads PDFs).
     const file = page.getByRole("link", { name: /^Open the file/ }).first();
     if (await file.count()) {
-      const href = await file.getAttribute("href");
+      const href = new URL(await file.getAttribute("href"), base);
+      // The product links a document through its own panel route: anything else (another
+      // origin, a file: URL) is not opened.
+      if (href.origin !== base) throw new Error(`document link outside ${base}`);
       await glide(page, file);
       await beat(page, 500);
-      const response = await visit(page, new URL(href, base).href);
+      const response = await visit(page, href.href);
       const type = response?.headers()["content-type"] ?? "";
       if (type.startsWith("image/")) {
         await beat(page, 2500);
@@ -567,22 +600,30 @@ const SCENES = {
   },
 };
 
-await signIn();
-for (const id of WANTED) await scene(id, STORY[id][0], STORY[id][1], SCENES[id]);
-await browser.close();
-rmSync(RAW, { recursive: true, force: true });
+// Whatever happens, the browser and the guard close and the report is written.
+try {
+  await signIn();
+  for (const id of WANTED) await scene(id, STORY[id][0], STORY[id][1], SCENES[id]);
+} finally {
+  await browser.close().catch(() => {});
+  await guard.close();
+  rmSync(RAW, { recursive: true, force: true });
+  writeReport();
+}
 
-const list = scenes
-  .map(
+function writeReport() {
+  const list = scenes.map(
     (s) =>
       `${s.number}. **${s.title}** (storyboard ${s.story}) - \`${s.file}\`, ${s.seconds} s` +
       (s.failed ? ` - FAILED: ${s.failed}` : "") +
       (s.issues.length ? `\n   - issues: ${s.issues.join("; ")}` : "") +
-      (s.foreign.length ? `\n   - other hosts: ${s.foreign.join(", ")}` : ""),
-  )
-  .join("\n");
-writeFileSync(join(OUT, "scenes.md"), `# Web tour scenes (${base})\n\n${list}\n`);
-writeFileSync(join(OUT, "scenes.json"), JSON.stringify(scenes, null, 2));
+      (s.foreign.length ? `\n   - other hosts (refused): ${s.foreign.join(", ")}` : ""),
+  );
+  writeFileSync(join(OUT, "scenes.md"), `# Web tour scenes (${base})\n\n${list.join("\n")}\n`);
+  // scenes.json also lists, per scene, every host the guard refused (guardRefused), the
+  // browser's own background calls included.
+  writeFileSync(join(OUT, "scenes.json"), JSON.stringify(scenes, null, 2));
+}
 const failed = scenes.filter((s) => s.failed).length;
 console.log(`${scenes.length} scenes, ${failed} failed -> ${OUT}`);
 process.exit(failed ? 1 : 0);
