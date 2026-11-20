@@ -143,6 +143,7 @@ def customer_headers(world: World) -> dict[str, str]:
     token = security.create_access_token(
         user_id=world.customer_id,
         role=UserRole.CUSTOMER,
+        session_id=None,
         secret=TEST_JWT_SECRET,
         ttl_seconds=900,
         now=datetime.now(UTC),
