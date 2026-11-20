@@ -68,9 +68,11 @@ class ServiceAreaService:
         """The ids among `ids` that exist and are active."""
         return await self._areas.active_ids(ids)
 
-    async def active_ids_for_zip(self, zip_code: str) -> set[uuid.UUID]:
-        """The active areas serving the ZIP (5 digits or ZIP+4; none when it is not served)."""
-        return await self._areas.active_ids_for_zip(zip5(zip_code))
+    async def active_ids_for_zip(self, zip_code: str, *, lock: bool = False) -> set[uuid.UUID]:
+        """The active areas serving the ZIP (5 digits or ZIP+4; none when it is not served).
+        `lock`: those areas' rows FOR SHARE until the caller's transaction ends (#511): an area
+        switched off first is not among them, one switched off after waits for that commit."""
+        return await self._areas.active_ids_for_zip(zip5(zip_code), lock=lock)
 
     async def get_many(self, ids: Collection[uuid.UUID]) -> list[ServiceAreaOut]:
         """The areas with these ids, active or not, by ZIP."""
