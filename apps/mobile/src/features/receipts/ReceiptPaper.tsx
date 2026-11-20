@@ -132,9 +132,11 @@ export function ReceiptPaper({ receipt, withAddress, testID }: ReceiptPaperProps
           <Text accessibilityRole="header" className="text-center text-title-2 text-navy-900">
             {t("brand.name")}
           </Text>
-          <Text className="text-center text-caption text-gray-500">
-            {receipt.issuer.legal_name}
-          </Text>
+          {receipt.issuer ? (
+            <Text className="text-center text-caption text-gray-500">
+              {receipt.issuer.legal_name}
+            </Text>
+          ) : null}
           <Text className="mt-2 text-center text-footnote text-navy-900" style={FIGURES}>
             {t("receipt.number", { code: receipt.receipt_number })}
           </Text>
@@ -149,9 +151,11 @@ export function ReceiptPaper({ receipt, withAddress, testID }: ReceiptPaperProps
           <Text className="text-headline text-navy-900">
             {receipt.category ? categoryName(receipt.category) : t("receipt.service")}
           </Text>
-          <Text className="text-callout text-navy-900">
-            {t("receipt.pro", { name: receipt.pro_name })}
-          </Text>
+          {receipt.pro_name ? (
+            <Text className="text-callout text-navy-900">
+              {t("receipt.pro", { name: receipt.pro_name })}
+            </Text>
+          ) : null}
           <Text className="text-footnote text-gray-500">
             {receipt.completed_at
               ? t("receipt.done", { date: receiptDay(receipt.completed_at) })
@@ -201,9 +205,11 @@ export function ReceiptPaper({ receipt, withAddress, testID }: ReceiptPaperProps
 
         <View accessible className="gap-1" testID="receipt-footer">
           <Text className="text-center text-callout text-navy-900">{t("receipt.thanks")}</Text>
-          <Text className="text-center text-footnote text-gray-500">
-            {t("receipt.questions", { email: receipt.issuer.support_email })}
-          </Text>
+          {receipt.issuer ? (
+            <Text className="text-center text-footnote text-gray-500">
+              {t("receipt.questions", { email: receipt.issuer.support_email })}
+            </Text>
+          ) : null}
         </View>
       </View>
       {width > 0 ? (

@@ -59,7 +59,9 @@ export function lineLabel(t: TFunction, line: ReceiptLine, receipt: ReceiptOut):
     case "tax":
       return t("receipt.tax");
     case "tip":
-      return t("receipt.tip", { name: proFirstName(receipt.pro_name) });
+      return receipt.pro_name
+        ? t("receipt.tip", { name: proFirstName(receipt.pro_name) })
+        : t("receipt.tipNoName");
     case "returned":
       return t("receipt.returned");
   }

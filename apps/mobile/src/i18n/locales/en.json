@@ -2216,6 +2216,7 @@
     "serviceOf": "{{category}} service",
     "tax": "Tax",
     "tip": "Tip for {{name}}",
+    "tipNoName": "Tip",
     "returned": "Returned to your payment method",
     "total": "Total paid",
     "paidWith": "Paid with {{method}}",

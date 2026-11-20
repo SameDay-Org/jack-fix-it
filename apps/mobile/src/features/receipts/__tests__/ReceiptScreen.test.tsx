@@ -102,6 +102,20 @@ describe("ReceiptScreen (#62)", () => {
     expect(screen.queryByText(/fee/i, HIDDEN)).toBeNull();
   });
 
+  it("without an issuer or a pro's name the paper leaves those lines out, inventing nothing", async () => {
+    await renderScreen(async () => receipt({ issuer: null, pro_name: null }));
+    await screen.findByTestId("receipt-paper");
+
+    expect(paper().queryByText("Jack Fix It LLC")).toBeNull();
+    expect(paper().queryByText(/^Questions\?/)).toBeNull();
+    expect(paper().queryByText(/^With /)).toBeNull();
+    expect(screen.getByLabelText("Tip, $12.50")).toBeTruthy();
+    // The rest of the paper is whole.
+    expect(paper().getByText("Receipt JF-000124")).toBeTruthy();
+    expect(paper().getByText("Thank you for using Jack Fix It.")).toBeTruthy();
+    expect(screen.getByLabelText("Total paid, $137.50")).toBeTruthy();
+  });
+
   it("an amount that went back is its own dated line, with the status that says so", async () => {
     await renderScreen(async () =>
       receipt({

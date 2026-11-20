@@ -2216,6 +2216,7 @@
     "serviceOf": "Servicio de {{category}}",
     "tax": "Impuestos",
     "tip": "Propina para {{name}}",
+    "tipNoName": "Propina",
     "returned": "Devuelto a tu método de pago",
     "total": "Total pagado",
     "paidWith": "Pagado con {{method}}",
