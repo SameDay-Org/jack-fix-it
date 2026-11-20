@@ -23,8 +23,20 @@ import {
   requestMediaHref,
 } from "../../queue/queue";
 import { StatusBadge } from "../../queue/status-badge";
-import { claimRequest, releaseRequest } from "../actions";
+import { businessTimeZone } from "../../kpis/config";
+import {
+  addNote,
+  claimRequest,
+  classifyRequest,
+  markContacted,
+  releaseRequest,
+  scheduleFollowup,
+} from "../actions";
+import { classifiable, dayIn } from "../ops";
+import { followupMaxDays } from "../ops-server";
 import { ClaimControl } from "./claim-control";
+import { ActionBar } from "./ops-controls";
+import { actionBarText, FollowupsSection, NotesThread, opsText } from "./ops-sections";
 
 const CONTACT_LINK =
   "inline-flex h-11 items-center gap-2 rounded-pill bg-green-500 px-5 text-sm font-semibold text-navy-900 outline-none hover:bg-green-700 hover:text-white focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2";
@@ -32,6 +44,34 @@ const FILE_LINK =
   "inline-flex items-center gap-1 self-start rounded-pill text-sm font-semibold text-navy-900 underline outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2";
 const TERM = "text-gray-500";
 const FACTS = "grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-3 text-sm";
+
+/**
+ * The active categories, named in the reader's language; none when the API cannot say. The
+ * list is public and the same for every reader, so it is read at most once an hour, as the
+ * landing's services grid reads it (a card view must not spend the public endpoint's rate limit;
+ * a category retired meanwhile is refused by the API: category_inactive).
+ */
+async function loadCategories(locale: string): Promise<{ id: string; name: string }[]> {
+  try {
+    const categories = await apiGet("/v1/categories", { next: { revalidate: 3600 } });
+    return categories.map((category) => ({
+      id: category.id,
+      name: categoryName(category, locale),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** The active staff an admin may give a follow-up to; null (no picker) when unreadable. */
+async function loadStaff(auth: RequestInit): Promise<{ id: string; name: string | null }[] | null> {
+  try {
+    const { staff } = await apiGet("/v1/admin/staff", auth);
+    return staff.map((member) => ({ id: member.id, name: member.first_name }));
+  } catch {
+    return null;
+  }
+}
 
 /** The request, or why there is none to show. */
 async function loadCard(
@@ -112,6 +152,16 @@ export default async function RequestPage({ params }: { params: Promise<{ reques
   const mine = holder?.id === user.id;
   const mayRelease = holder !== null && (mine || user.role === "admin");
   const answers = Object.entries(card.intake_answers);
+  // The BDC's actions (#82): shown only when the API says this reader may act on the request.
+  const zone = businessTimeZone();
+  const maxDays = followupMaxDays();
+  const canClassify = card.actions_allowed && classifiable(card.status);
+  const [categories, staff] = await Promise.all([
+    canClassify ? loadCategories(locale) : Promise.resolve([]),
+    card.actions_allowed && user.role === "admin"
+      ? loadStaff(await staffAuth())
+      : Promise.resolve(null),
+  ]);
   const claimText = {
     claim: t("admin.requests.assignment.claim"),
     release: t("admin.requests.assignment.release"),
@@ -184,6 +234,33 @@ export default async function RequestPage({ params }: { params: Promise<{ reques
       </Card>
 
       <Card className="flex flex-col gap-4">
+        <CardTitle>{t("admin.requests.ops.title")}</CardTitle>
+        <ActionBar
+          allowed={card.actions_allowed}
+          heldText={
+            holder?.name
+              ? t("admin.requests.ops.heldBy", { name: holder.name })
+              : t("admin.requests.ops.heldByNoName")
+          }
+          addNote={addNote.bind(null, card.id)}
+          markContacted={markContacted.bind(null, card.id)}
+          classify={classifyRequest.bind(null, card.id)}
+          schedule={scheduleFollowup.bind(null, card.id)}
+          contacted={card.first_contact_at !== null}
+          canClassify={canClassify && categories.length > 0}
+          categories={categories}
+          currentCategoryId={card.category?.id ?? null}
+          staff={staff}
+          selfId={user.id}
+          days={{
+            min: dayIn(now, zone),
+            max: dayIn(now.getTime() + maxDays * 86_400_000, zone),
+          }}
+          text={actionBarText(t, maxDays, zone, locale)}
+        />
+      </Card>
+
+      <Card className="flex flex-col gap-4">
         <CardTitle>{t("admin.requests.customer.title")}</CardTitle>
         <dl className={FACTS}>
           <dt className={TERM}>{t("admin.requests.customer.name")}</dt>
@@ -251,6 +328,18 @@ export default async function RequestPage({ params }: { params: Promise<{ reques
           text={claimText}
         />
       </Card>
+
+      <NotesThread notes={card.notes} selfId={user.id} t={t} locale={locale} />
+      <FollowupsSection
+        followups={card.followups}
+        requestId={card.id}
+        self={user}
+        t={t}
+        locale={locale}
+        zone={zone}
+        nowMs={now.getTime()}
+        text={opsText(t, maxDays)}
+      />
 
       <Card className="flex flex-col gap-4">
         <CardTitle>{t("admin.requests.request.title")}</CardTitle>
