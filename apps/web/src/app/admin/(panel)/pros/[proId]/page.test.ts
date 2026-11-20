@@ -5,12 +5,19 @@ import { FakeCookieJar, routeFetch } from "@/lib/test-helpers";
 
 const { jar } = vi.hoisted(() => ({ jar: { current: null as unknown } }));
 
-vi.mock("next/headers", () => ({ cookies: async () => jar.current }));
+vi.mock("next/headers", () => ({
+  cookies: async () => jar.current,
+  headers: async () => new Headers(),
+}));
 vi.mock("next/navigation", async () => {
   const { RedirectSignal: Signal } = await import("@/lib/test-helpers");
   return {
     redirect: (url: string) => {
       throw new Signal(url);
+    },
+    // A missing record answers 404 (not-found.tsx, #494).
+    notFound: () => {
+      throw new Error("NEXT_NOT_FOUND");
     },
   };
 });
@@ -204,21 +211,15 @@ describe("pro page", () => {
     async (proId) => {
       api(() => Response.json(pro()));
 
-      const page = await render(proId);
-
-      expect(page).toContain("This pro doesn't exist.");
+      await expect(render(proId)).rejects.toThrow("NEXT_NOT_FOUND");
       expect(requestsTo(fetchMock.mock.calls, PRO)).toEqual([]);
     },
   );
 
-  it("says when the pro does not exist", async () => {
+  it("answers 404 when the pro does not exist (#494)", async () => {
     api(() => Response.json({ error: { code: "pro_not_found" } }, { status: 404 }));
 
-    const page = await render();
-
-    expect(page).toContain("This pro doesn't exist.");
-    expect(page).not.toContain('role="alert"');
-    expect(buttons(page)).toEqual([]);
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
   it.each([

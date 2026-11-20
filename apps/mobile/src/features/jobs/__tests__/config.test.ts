@@ -1,4 +1,10 @@
-import { DEFAULT_ETA_CLOSE_MINUTES, DEFAULT_POLL_SECONDS, readJobsConfig } from "../config";
+import {
+  DEFAULT_ETA_CLOSE_MINUTES,
+  DEFAULT_POLL_SECONDS,
+  MAX_POLL_SECONDS,
+  pollIntervalMs,
+  readJobsConfig,
+} from "../config";
 
 describe("readJobsConfig", () => {
   it("defaults to a 15 s poll and a 60 min countdown window", () => {
@@ -28,10 +34,35 @@ describe("readJobsConfig", () => {
     });
   });
 
-  it.each(["0", "-5", "2.5", "abc", "15s"])("refuses a poll of %j", (pollSeconds) => {
-    expect(() => readJobsConfig({ pollSeconds, etaCloseMinutes: undefined })).toThrow(
-      "EXPO_PUBLIC_JOB_POLL_SECONDS must be a positive whole number",
-    );
+  // A poll is optional tuning: a bad value never stops the app (#481 r1).
+  it.each(["0", "-5", "2.5", "abc", "15s", "3601", "Infinity", "NaN", " "])(
+    "falls back to the 15 s poll for %j",
+    (pollSeconds) => {
+      expect(readJobsConfig({ pollSeconds, etaCloseMinutes: undefined })).toEqual({
+        pollMs: 15_000,
+        etaCloseMinutes: 60,
+      });
+    },
+  );
+
+  it("takes a poll up to an hour, and falls back above it", () => {
+    expect(pollIntervalMs(String(MAX_POLL_SECONDS), 15)).toBe(3_600_000);
+    expect(pollIntervalMs(String(MAX_POLL_SECONDS + 1), 15)).toBe(15_000);
+    expect(pollIntervalMs(" 20 ", 15)).toBe(20_000);
+  });
+
+  it("loads with a bad poll set, on the default", () => {
+    const saved = process.env.EXPO_PUBLIC_JOB_POLL_SECONDS;
+    process.env.EXPO_PUBLIC_JOB_POLL_SECONDS = "bad";
+    try {
+      jest.isolateModules(() => {
+        const { jobsConfig } = jest.requireActual<typeof import("../config")>("../config");
+        expect(jobsConfig.pollMs).toBe(15_000);
+      });
+    } finally {
+      if (saved === undefined) delete process.env.EXPO_PUBLIC_JOB_POLL_SECONDS;
+      else process.env.EXPO_PUBLIC_JOB_POLL_SECONDS = saved;
+    }
   });
 
   it.each(["0", "-1", "0.5", "soon"])("refuses a countdown window of %j", (etaCloseMinutes) => {

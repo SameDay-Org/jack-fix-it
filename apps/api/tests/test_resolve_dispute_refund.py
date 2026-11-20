@@ -23,6 +23,7 @@ from app.integrations.stripe_refunds import FoundRefunds, RefundFacts, get_strip
 from app.modules.audit.models import AuditLog
 from app.modules.disputes.models import DisputeStatus
 from app.modules.payments.models import Payment, Refund, RefundStatus
+from app.modules.payments.refunds import REFUND_REFUSED_CODES
 from app.modules.payments.transfer_tasks import release_confirmed_jobs
 from app.modules.payments.transfers import ReleaseOutcome, TransferConfig, TransferService
 from app.modules.users.models import User
@@ -956,3 +957,82 @@ async def test_a_late_refund_of_the_abandoned_attempt_or_of_no_attempt_still_hol
     )
     alarms = [r for r in caplog.records if r.getMessage() == expected]
     assert [(r.levelno, r.__dict__["payout_held"]) for r in alarms] == [(logging.ERROR, "true")] * 2
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "api_key_expired",  # authentication (401)
+        "secret_key_required",  # permission (403)
+        "parameter_invalid_integer",  # parameter validation (400)
+        "idempotency_key_in_use",  # an idempotency conflict
+        "resource_missing",  # any other 4xx code outside the refusal list
+        None,  # no code at all
+    ],
+)
+async def test_a_retry_create_refused_before_it_was_evaluated_never_makes_it_abandonable(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    refunds: FakeStripeRefunds,
+    settings: Settings,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    code: str | None,
+) -> None:
+    """#450 round 4. The first create is made at Stripe but its answer is lost. The retry's
+    listing does not show it yet, so the retry creates, and Stripe refuses THAT create with a
+    code that says nothing about the refund (REFUND_REFUSED_CODES holds none of them). The row
+    stays uncertain, the repair refuses to abandon it, and the same decision's next retry finds
+    the first refund and carries on with it: one refund at Stripe, never abandoned."""
+    case = await disputed(db_session, world)
+    refunds.lost_answers = 1
+    assert (await resolve(db_client, world, case, "refund")).status_code == 503
+    list_refunds = refunds.list_refunds
+
+    async def not_listed_yet(payment_intent_id: str) -> FoundRefunds:
+        return FoundRefunds(refunds=(), complete=True)
+
+    monkeypatch.setattr(refunds, "list_refunds", not_listed_yet)
+    refunds.errors["create"] = [StripeRejectedError(code=code)]
+    assert (await resolve(db_client, world, case, "refund")).status_code == 502
+
+    [row] = await refund_rows(db_session, case)
+    assert (row.status, row.attempts, row.last_error_definitive) == (
+        RefundStatus.FAILED,
+        2,
+        False,
+    )
+    status, terminal = await abandon(db_session, settings, refunds, case, caplog)
+    assert status == 1
+    assert "is not final" in terminal.text
+    assert await abandon_rows(db_session, case) == []
+
+    monkeypatch.setattr(refunds, "list_refunds", list_refunds)
+    third = await resolve(db_client, world, case, "refund")
+
+    assert third.status_code == 200, third.text
+    [row] = await refund_rows(db_session, case)
+    assert row.status is RefundStatus.CREATED
+    assert len(refunds.refunds) == 1
+
+
+@pytest.mark.parametrize("code", sorted(REFUND_REFUSED_CODES))
+async def test_a_create_refused_with_a_refusal_code_is_definitive(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    refunds: FakeStripeRefunds,
+    code: str,
+) -> None:
+    case = await disputed(db_session, world)
+    refunds.errors["create"] = [StripeRejectedError(code=code)]
+
+    assert (await resolve(db_client, world, case, "refund")).status_code == 502
+
+    [row] = await refund_rows(db_session, case)
+    assert (row.status, row.last_error_code, row.last_error_definitive) == (
+        RefundStatus.FAILED,
+        code,
+        True,
+    )

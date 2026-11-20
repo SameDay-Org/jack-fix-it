@@ -19,9 +19,9 @@ export type MediaPickerProps = {
 
 /**
  * Photos (and videos, for request media) attached to something: an empty state that says what to
- * add, one row per file with its progress and actions, how many fit, and the Add button, which
- * asks "Camera or library" in a sheet first. A refused camera shows the settings notice right
- * above the button that asked for it.
+ * add, one row per file with its progress and actions, how many fit, and the Add button (an
+ * outline: the form around it owns the primary action), which asks "Camera or library" in a sheet
+ * first. A refused camera shows the settings notice right above the button that asked for it.
  */
 export function MediaPicker({ upload, sourceSheet, testID }: MediaPickerProps) {
   const { t } = useTranslation();
@@ -65,7 +65,9 @@ export function MediaPicker({ upload, sourceSheet, testID }: MediaPickerProps) {
         label={t(
           items.length > 0 ? "media.addMore" : acceptsVideo ? "media.addMedia" : "media.add",
         )}
-        variant={items.length === 0 ? "primary" : "secondary"}
+        // Always the outline: the picker sits in a form whose own button (Continue, Send report)
+        // is the screen's one primary action, and attaching is optional there (#477).
+        variant="secondary"
         disabled={full}
         loading={adding}
         onPress={() => void add()}

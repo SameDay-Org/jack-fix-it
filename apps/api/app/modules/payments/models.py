@@ -172,6 +172,18 @@ class Transfer(IdTimestampsMixin, Base):
     # until then, so the need for it outlives a failed or cancelled read (#416 r2).
     reversal_check_tried_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reversal_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The initiation boundary (#450 round 4): when the current attempt passed its last hold
+    # check, under the job's lock, right before the create. NULL until then; cleared when a new
+    # attempt starts. A late refund that finds it set (or the transfer made) cannot stop the
+    # create any more: it flags the transfer instead.
+    create_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When an attempt first crossed the boundary (#450 round 5): from then on Stripe may hold a
+    # transfer of this job, whatever later attempts do. Never cleared, by a retry, a failed
+    # lookup or a new attempt's start: the late refund's flag reads it.
+    create_may_have_been_issued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When a late refund found this transfer issued, or possibly issued: staff reverse it by
+    # hand (docs/stripe-money.md). Never cleared by the code.
+    needs_reversal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RefundStatus(StrEnum):

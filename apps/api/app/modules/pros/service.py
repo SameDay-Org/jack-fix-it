@@ -21,6 +21,7 @@ from app.config import Settings
 from app.integrations.storage import Storage
 from app.modules.categories.schemas import CategorySummary
 from app.modules.categories.service import CategoryService
+from app.modules.dispatch.kicks import RedispatchKick
 from app.modules.pros.errors import (
     InvalidCategoryError,
     InvalidMediaError,
@@ -44,6 +45,14 @@ class DispatchCandidate:
     pro_id: uuid.UUID
     user_id: uuid.UUID
     rating_avg: Decimal | None  # NULL until the first review
+
+
+@dataclass(frozen=True)
+class ProCoverage:
+    """What a pro that receives requests covers: its categories and service areas (#478)."""
+
+    category_ids: tuple[uuid.UUID, ...]
+    service_area_ids: tuple[uuid.UUID, ...]
 
 
 @dataclass(frozen=True)
@@ -271,6 +280,17 @@ class ProService:
             for pro_id, user_id, rating_avg, jobs_count, years, status in rows
         }
 
+    async def request_coverage(self, pro_id: uuid.UUID) -> ProCoverage | None:
+        """The profile's categories and service areas when it receives requests (approved,
+        payouts enabled: context doc section 5), for the re-dispatch after it may have become
+        eligible (#478); None otherwise."""
+        if not await self._profiles.receives_requests(pro_id):
+            return None
+        return ProCoverage(
+            tuple(await self._profiles.category_ids(pro_id)),
+            tuple(await self._profiles.service_area_ids(pro_id)),
+        )
+
     async def dispatch_candidates(
         self, category_id: uuid.UUID, service_area_ids: Collection[uuid.UUID]
     ) -> list[DispatchCandidate]:
@@ -305,6 +325,7 @@ class ProProfileService:
         service_areas: ServiceAreaService,
         storage: Storage,
         config: ProProfileConfig,
+        kick: RedispatchKick,
     ) -> None:
         self._session = session
         self._profiles = ProProfileRepository(session)
@@ -312,6 +333,7 @@ class ProProfileService:
         self._service_areas = service_areas
         self._storage = storage
         self._config = config
+        self._kick = kick
 
     async def get_own(self, user: UserAccount) -> ProProfileOut:
         """The caller's profile, created empty (pending) on the first call."""
@@ -358,6 +380,9 @@ class ProProfileService:
         logger.info(
             "pro_profile_updated", extra={"user_id": str(user.id), "fields": sorted(fields)}
         )
+        if fields & {"category_ids", "service_area_ids"}:
+            # Committed: requests no pro could take may be this pro's now (#478).
+            await self._kick.after_commit(profile.id, "coverage_changed")
         return await self._out(profile)
 
     async def _ensure(self, user: UserAccount, *, lock: bool) -> tuple[bool, ProProfile]:

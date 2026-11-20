@@ -230,6 +230,20 @@ describe("YourJobs", () => {
     expect(screen.queryByTestId("your-jobs-loading")).toBeNull();
   });
 
+  it("mounts the empty card fresh, so it is never announced as the placeholder (#470)", async () => {
+    const held = deferred<ProJobPage>();
+    jest.mocked(apiGet).mockReturnValueOnce(held.promise);
+    await renderWithQuery(<YourJobs />);
+    const loading = screen.getByTestId("your-jobs-loading");
+
+    await act(async () => held.resolve(jobPage([])));
+    const empty = await screen.findByTestId("your-jobs-empty");
+    // A reused view would keep the placeholder's contentDescription on Android.
+    expect(empty).not.toBe(loading);
+    expect(empty.props.accessibilityLabel).toBeUndefined();
+    expect(empty.props.accessibilityRole).toBeUndefined();
+  });
+
   it("offers Try again after a failure, which asks again and then shows the jobs", async () => {
     jest.mocked(apiGet).mockRejectedValueOnce(new NetworkError(false));
     await renderWithQuery(<YourJobs />);

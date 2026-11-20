@@ -106,6 +106,7 @@ from app.integrations.storage import StorageProvider
 from app.modules.cancellations.reader import CancellationReader
 from app.modules.categories.service import CategoryService
 from app.modules.chat.service import ChatUnreadReader
+from app.modules.disputes.outcomes import DisputeOutcome, DisputeResolution, dispute_outcomes
 from app.modules.jobs.confirmation import confirm_by
 from app.modules.jobs.errors import (
     AfterPhotosProcessingError,
@@ -135,7 +136,7 @@ from app.modules.jobs.schemas import (
     ProJobPage,
 )
 from app.modules.jobs.service import JobStateMachine
-from app.modules.jobs.transitions import CUSTOMER_STATUS
+from app.modules.jobs.transitions import customer_status_of
 from app.modules.media.safe_status import MediaSafeStatus
 from app.modules.notifications.events import (
     push_job_checked_in,
@@ -248,10 +249,13 @@ class JobExecutionService:
         photos = await self._photos.of_jobs([job.id])
         unread = await self._chat.unread_counts([job.id], user.id)
         shows_code = job.status is JobStatus.ON_THE_WAY and job.checked_in_at is None
+        outcome = (await dispute_outcomes(self._session, [job.id])).get(job.id)
         return CustomerJob(
             id=job.id,
             status=job.status,
-            customer_status=CUSTOMER_STATUS[job.status],
+            customer_status=customer_status_of(
+                job.status, dispute_resolved=outcome is not None and outcome.resolved
+            ),
             scheduled_start_at=starts[job.quote_id],
             pro=QuotePro(
                 id=card.pro_id,
@@ -275,6 +279,8 @@ class JobExecutionService:
             cancellation=await self._cancellations.for_customer(job.id)
             if job.status is JobStatus.CANCELLED
             else None,
+            dispute_status=None if outcome is None else outcome.status,
+            dispute_resolution=None if outcome is None else outcome.resolution,
             unread_messages=unread[job.id],
         )
 
@@ -579,6 +585,9 @@ class JobExecutionService:
         cancellations = await self._cancellations.for_pro(
             [job.id for job in jobs if job.status is JobStatus.CANCELLED]
         )
+        outcomes = await dispute_outcomes(
+            self._session, [job.id for job in jobs if job.status in _MAY_HAVE_A_DISPUTE]
+        )
         photos: dict[uuid.UUID, list[JobPhoto]] = {job.id: [] for job in jobs}
         for photo in await self._photos.of_jobs(list(photos)):
             photos[photo.job_id].append(photo)
@@ -621,12 +630,32 @@ class JobExecutionService:
                     confirm_by=confirm_by(job, self._config.auto_confirm_after),
                     photos=self._signer.for_pro(photos[job.id]),
                     pro_payout_cents=job.pro_payout_cents,
+                    pro_receives_cents=_pro_receives(job, outcomes.get(job.id)),
                     payout=_payout(job, payouts),
                     cancellation=cancellations.get(job.id),
                     unread_messages=unread[job.id],
                 )
             )
         return items
+
+
+# The statuses a job with a reported problem can be in (#75, #76): only theirs are read.
+_MAY_HAVE_A_DISPUTE: Final = frozenset({JobStatus.DISPUTED, JobStatus.PAID_OUT, JobStatus.REFUNDED})
+
+
+def _pro_receives(job: Job, outcome: DisputeOutcome | None) -> int:
+    """What the pro will actually receive (#488): see ProJob.pro_receives_cents. A dispute
+    resolved with a full refund moves its job to refunded with the resolution (#76), so the
+    job's status answers for it."""
+    if job.status in (JobStatus.CANCELLED, JobStatus.REFUNDED):
+        return 0
+    if (
+        outcome is not None
+        and outcome.resolved
+        and outcome.resolution is DisputeResolution.PARTIAL_RELEASE
+    ):
+        return outcome.pro_release_cents or 0
+    return job.pro_payout_cents
 
 
 def _payout(job: Job, payouts: Mapping[uuid.UUID, PayoutStatus | None]) -> JobPayout | None:

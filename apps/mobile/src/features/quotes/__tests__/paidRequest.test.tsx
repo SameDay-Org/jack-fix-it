@@ -248,7 +248,8 @@ describe("a paid request says it is booked once (#324)", () => {
 
   it.each([
     ["cancelled", "This job was cancelled", false],
-    ["refunded", "This job was cancelled", false],
+    // A report resolved with the payment back: not a cancelled job (#472).
+    ["refunded", "Your report was resolved", false],
     ["confirmed", "Job confirmed", true],
   ] as const)(
     "once the job is %s nothing says booked: the notice says where it ended",
@@ -352,7 +353,8 @@ describe("the notifications pre-prompt sits under Paid, and says nothing about b
 
   it.each([
     ["cancelled", "This job was cancelled", false],
-    ["refunded", "This job was cancelled", false],
+    // A report resolved with the payment back: not a cancelled job (#472).
+    ["refunded", "Your report was resolved", false],
     ["confirmed", "Job confirmed", true],
   ] as const)("once the job is %s, the pre-prompt goes with Paid", async (status, title, shown) => {
     await askable();

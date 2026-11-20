@@ -18,6 +18,7 @@ import {
   type IdCardShareHandle,
 } from "@/components/ui";
 import { cx } from "@/components/ui/cx";
+import { useMyProProfile } from "@/features/pro-profile";
 import { formatMonth } from "@/features/quotes/format";
 // The stat alone: the rest of reviews (its drafts) loads with the rating screen.
 import { useRatingStat, type RatingStat } from "@/features/reviews/ratingStat";
@@ -66,6 +67,9 @@ function AccountContent({ user, focused }: { user: SessionUser; focused: boolean
   const [titleWrappedAt, setTitleWrappedAt] = useState<string | null>(null);
   const compactShare = fontScale > COMPACT_SHARE_SCALE || titleWrappedAt === fit;
   const card = cardDetails(user);
+  // The seal only on the platform's word: a pro whose verification was approved.
+  const verified = useMyProProfile().data?.verification_status === "approved";
+  const memberSince = formatMonth(user.member_since);
   useFreshPhoto(user, focused);
 
   const focus = useCardFocus({ bottomRoom: inset + HINT_ROOM, screenFocused: focused });
@@ -200,6 +204,8 @@ function AccountContent({ user, focused }: { user: SessionUser; focused: boolean
                 {...card}
                 width={cardWidth}
                 interactive={inFocus && focused}
+                verified={verified}
+                memberSince={memberSince}
                 testID="account-card"
               />
             </View>
@@ -236,6 +242,8 @@ function AccountContent({ user, focused }: { user: SessionUser; focused: boolean
         state={card.state}
         photoUri={card.photoUri}
         publicCode={card.publicCode}
+        verified={verified}
+        memberSince={memberSince}
         photoTimeoutMs={apiConfig.timeoutMs}
         testID="account-share-render"
       />
