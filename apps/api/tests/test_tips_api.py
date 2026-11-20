@@ -1540,3 +1540,46 @@ async def test_a_late_success_flagged_before_the_create_holds_the_create(
     row = await tip_row(db_session, job)
     assert row is not None
     assert row.late_success_at is not None
+
+
+PERCENT_18 = {"choice": "percent", "percent": 18}
+
+
+async def test_a_lost_create_is_never_recovered_as_an_earlier_attempts_canceled_intent(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+) -> None:
+    """#510 round 2 (the Vault, N2): attempt 2's create is lost and Stripe never made it; the
+    search shows only attempt 1's intent, canceled. The search's recovery adopts only an
+    intent of the current attempt: 409 tip_needs_review, nothing changed, no create."""
+    job = await confirmed(db_session, world)
+    assert (await choose(db_client, world, job, PERCENT_12)).status_code == 200
+    first_row = await tip_row(db_session, job)
+    assert first_row is not None
+    first = first_row.stripe_payment_intent_id
+    stripe_fake.lost_answers = 1
+    assert (await choose(db_client, world, job, PERCENT_18)).status_code == 503
+    # Stripe never made attempt 2's intent: only attempt 1's canceled one names the tip.
+    for intent in [i for i in stripe_fake.tip_facts if i != first]:
+        del stripe_fake.tip_facts[intent]
+    stripe_fake.intents_by_key.clear()
+    await set_tip(
+        db_session,
+        job,
+        payment_intent_requested_at=datetime.now(UTC) - RECONCILE - timedelta(minutes=1),
+    )
+    creates = len(stripe_fake.intent_calls)
+
+    response = await choose(db_client, world, job, PERCENT_18)
+
+    tip = await tip_row(db_session, job)
+    assert tip is not None
+    assert (response.status_code, code(response)) == (409, NEEDS_REVIEW)
+    assert (tip.attempt, tip.status, tip.stripe_payment_intent_id) == (
+        2,
+        TipStatus.REQUIRES_PAYMENT,
+        None,
+    )
+    assert len(stripe_fake.intent_calls) == creates
