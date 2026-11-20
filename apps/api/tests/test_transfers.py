@@ -67,7 +67,7 @@ from app.modules.users.types import UserRole
 from app.modules.webhooks.events import AfterCommit, StripeEvent
 from app.modules.webhooks.handlers import handler_for
 from tests.conftest import make_settings
-from tests.helpers import as_status_writer
+from tests.helpers import as_status_writer, mentions_number
 from tests.job_world import (
     FEE,
     PAYOUT,
@@ -87,7 +87,10 @@ NOW = datetime(2030, 2, 1, 12, 0, tzinfo=UTC)
 # Stripe objects the fake makes; none may reach a log.
 ACCOUNT = "acct_probe68destination"
 CHARGE = "ch_probe68charge"
-LEAKS = (ACCOUNT, CHARGE, "tr_probe68", str(PAYOUT), "probe-secret-text-68")
+LEAKS = (ACCOUNT, CHARGE, "tr_probe68", "probe-secret-text-68")
+# Amounts are matched as numbers of their own (mentions_number), never as digits inside a log
+# record's created or relativeCreated time: 17000 and 16900 both turned up there (#448).
+AMOUNT_LEAKS = (PAYOUT,)
 
 
 @dataclass
@@ -285,10 +288,33 @@ async def transfer_of(session: AsyncSession, job_id: uuid.UUID) -> Transfer | No
     return (await session.scalars(statement)).one_or_none()
 
 
-def assert_no_leak(caplog: pytest.LogCaptureFixture) -> None:
-    rendered = caplog.text + "".join(str(r.__dict__) for r in caplog.records)
+def rendered_logs(caplog: pytest.LogCaptureFixture) -> str:
+    return caplog.text + "".join(str(r.__dict__) for r in caplog.records)
+
+
+def assert_no_leak(caplog: pytest.LogCaptureFixture, *amounts: int) -> None:
+    rendered = rendered_logs(caplog)
     for leak in LEAKS:
         assert leak not in rendered, leak
+    for amount in (*AMOUNT_LEAKS, *amounts):
+        assert not mentions_number(rendered, amount), amount
+
+
+def test_the_leak_check_reads_amounts_not_clock_digits(caplog: pytest.LogCaptureFixture) -> None:
+    """#448: a record logged 817000.3 ms after the process began, or at 1795169002.5 s, holds
+    17000 and 16900 among its digits; neither is an amount. One logged as a field is."""
+    clock_only = logging.LogRecord(
+        "probe", logging.INFO, __file__, 1, "transfer_created", None, None
+    )
+    clock_only.created, clock_only.relativeCreated = 1795169002.5441103, 817000.3294944763
+    caplog.records.append(clock_only)
+    assert_no_leak(caplog, PAYOUT - 100)
+
+    leaking = logging.LogRecord("probe", logging.INFO, __file__, 1, "transfer_created", None, None)
+    leaking.amount_cents = PAYOUT
+    caplog.records.append(leaking)
+    with pytest.raises(AssertionError):
+        assert_no_leak(caplog)
 
 
 # The release itself.
@@ -554,8 +580,7 @@ async def test_a_payout_that_does_not_match_the_payment_is_never_sent(
         "transfer_amount_mismatch"
     ]
     # Ids only: neither amount.
-    assert_no_leak(caplog)
-    assert str(PAYOUT - 100) not in caplog.text + str([r.__dict__ for r in caplog.records])
+    assert_no_leak(caplog, PAYOUT - 100)
 
 
 async def test_a_job_without_a_succeeded_payment_is_never_sent(
