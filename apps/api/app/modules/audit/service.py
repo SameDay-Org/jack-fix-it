@@ -98,7 +98,15 @@ class AuditService:
         share-locked until the caller's transaction ends, as active_admin: a staff member
         demoted or suspended since they were authenticated is seen, and cannot be demoted
         before the commit of what this guards (#82)."""
-        return _active_staff(await self._users.get_current_shared(user_id))
+        return await self.current_staff(user_id) is not None
+
+    async def current_staff(self, user_id: uuid.UUID) -> UserAccount | None:
+        """The user's account when they are an active agent or admin as last committed, read
+        now and share-locked until the caller's transaction ends (as active_staff); None for
+        anyone else. Its role is the one to decide with: the role a token was issued with can
+        be older than a demotion committed since (#499 round 1)."""
+        account = await self._users.get_current_shared(user_id)
+        return account if _active_staff(account) else None
 
     async def active_admin(self, user_id: uuid.UUID) -> bool:
         """Whether the user is an active admin as last committed, read now and share-locked
