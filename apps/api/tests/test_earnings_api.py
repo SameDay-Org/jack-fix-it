@@ -583,3 +583,34 @@ async def test_a_tip_is_the_pros_and_counted_by_its_own_transfer(
         "paid_cents": 6_006 + 700,
         "currency": "usd",
     }
+
+
+async def test_a_tip_held_for_staff_reads_on_hold_and_one_waiting_for_the_pro_pending(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    """#518 round 1 (the Vault, N2): a tip staff hold (any hold code but the pro's own waits)
+    is on hold in the pro's earnings, as a reversed one is; one waiting for the pro's payout
+    setup or approval is still on its way (pending)."""
+    held = {
+        "job_refunded_or_disputed": 100,
+        "tip_late_success": 200,
+        "tip_transfer_refused": 300,
+        "payouts_not_enabled": 400,
+        "pro_not_approved": 500,
+    }
+    for index, (code, cents) in enumerate(held.items()):
+        job = await earning_job(
+            db_session, world, JobStatus.CONFIRMED, T0 - timedelta(days=index), 1_000
+        )
+        await add_tip(db_session, world, job, cents, TipTransferStatus.HELD)
+        await db_session.execute(
+            update(Tip).where(Tip.job_id == job).values(transfer_last_error_code=code)
+        )
+
+    response = await db_client.get(PATH, headers=world.pro.headers)
+
+    assert response.status_code == 200, response.text
+    summary = response.json()["summary"]
+    assert summary["on_hold_cents"] == 100 + 200 + 300
+    # The jobs' own payouts are on their way too (5 x 1,000), beside the waiting tips.
+    assert summary["pending_cents"] == 5 * 1_000 + 400 + 500

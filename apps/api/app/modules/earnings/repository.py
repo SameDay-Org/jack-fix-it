@@ -78,10 +78,12 @@ class _Sources:
         )
 
     def tip_status(self) -> ColumnElement[str]:
-        """A tip's status, by its own transfer: reversed by Stripe is on hold (staff look), made
-        is paid, anything else is on its way."""
+        """A tip's status, by its own transfer: reversed by Stripe, or held for staff, is on
+        hold (staff look), made is paid, anything else (waiting for the pro's payout setup or
+        approval included) is on its way."""
         return case(
             (self.tips.c.tip_reversed.is_(True), EarningStatus.ON_HOLD.value),
+            (self.tips.c.tip_held_for_staff.is_(True), EarningStatus.ON_HOLD.value),
             (self.tips.c.tip_made.is_(True), EarningStatus.PAID.value),
             else_=EarningStatus.ON_THE_WAY.value,
         )

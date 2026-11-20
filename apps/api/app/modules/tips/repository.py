@@ -3,13 +3,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Final
 
-from sqlalchemy import ColumnElement, Subquery, func, or_, select, update
+from sqlalchemy import ColumnElement, Subquery, and_, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.tips.models import (
     TIP_TRANSFER_MADE,
     UNPAID_STATUSES,
+    WAITING_CODES,
     Tip,
     TipChoice,
     TipRequest,
@@ -521,7 +522,8 @@ class TipTransferRepository:
     def payout_facts() -> Subquery:
         """Each succeeded tip's job (`job_id`), amount (`tip_cents`), whether Stripe made its
         transfer (`tip_made`: created or paid) and whether it was reversed since
-        (`tip_reversed`), for the pro's earnings. Never a Stripe id."""
+        (`tip_reversed`) or is held for staff (`tip_held_for_staff`: a hold code other than the
+        pro's own waits), for the pro's earnings. Never a Stripe id."""
         return (
             select(
                 Tip.job_id.label("job_id"),
@@ -530,6 +532,11 @@ class TipTransferRepository:
                     "tip_made"
                 ),
                 (Tip.transfer_status == TipTransferStatus.REVERSED).label("tip_reversed"),
+                # Held for staff (any hold code but the pro's own waits): on hold, not pending.
+                and_(
+                    Tip.transfer_status == TipTransferStatus.HELD,
+                    Tip.transfer_last_error_code.not_in(WAITING_CODES),
+                ).label("tip_held_for_staff"),
             )
             .where(Tip.status == TipStatus.SUCCEEDED)
             .subquery()

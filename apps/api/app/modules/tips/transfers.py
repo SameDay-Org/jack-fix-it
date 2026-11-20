@@ -86,7 +86,15 @@ from app.modules.payments.service import transfer_group
 from app.modules.payments.transfers import ReversalCheckOutcome, TransferConfig
 from app.modules.pros.service import ProService
 from app.modules.tips.intents import mismatches
-from app.modules.tips.models import TIP_TRANSFER_MADE, Tip, TipStatus, TipTransferStatus
+from app.modules.tips.models import (
+    PAYOUTS_NOT_ENABLED,
+    PRO_NOT_APPROVED,
+    TIP_TRANSFER_MADE,
+    WAITING_CODES,
+    Tip,
+    TipStatus,
+    TipTransferStatus,
+)
 from app.modules.tips.repository import TipRepository, TipTransferRepository
 from app.modules.tips.transfer_webhooks import record_tip_transfer_reversal
 from app.modules.users.service import UserService
@@ -94,10 +102,8 @@ from app.modules.users.service import UserService
 logger = logging.getLogger(__name__)
 
 # transfer_last_error_code values of ours, beside Stripe's own codes (64 characters at most).
-# Waiting for the pro: the sweep tries the tip again once they can be paid out.
-PAYOUTS_NOT_ENABLED: Final = "payouts_not_enabled"
-PRO_NOT_APPROVED: Final = "pro_not_approved"
-WAITING_CODES: Final = frozenset({PAYOUTS_NOT_ENABLED, PRO_NOT_APPROVED})
+# Waiting for the pro (PAYOUTS_NOT_ENABLED, PRO_NOT_APPROVED, WAITING_CODES: tips/models.py):
+# the sweep tries the tip again once they can be paid out.
 _WAIT_LOGS: Final = {
     PAYOUTS_NOT_ENABLED: "tip_transfer_payouts_not_enabled",
     PRO_NOT_APPROVED: "tip_transfer_pro_not_approved",

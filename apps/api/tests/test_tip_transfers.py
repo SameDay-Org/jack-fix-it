@@ -26,7 +26,14 @@ from app.modules.payments.service import transfer_group
 from app.modules.payments.transfers import ReleaseOutcome, ReversalCheckOutcome, TransferService
 from app.modules.pros.models import ProProfile, ProVerificationStatus
 from app.modules.tips import transfers as tip_transfers
-from app.modules.tips.models import Tip, TipChoice, TipStatus, TipTransferStatus
+from app.modules.tips.models import (
+    PAYOUTS_NOT_ENABLED,
+    PRO_NOT_APPROVED,
+    Tip,
+    TipChoice,
+    TipStatus,
+    TipTransferStatus,
+)
 from app.modules.tips.transfer_tasks import (
     check_tip_transfer_reversals,
     release_succeeded_tips,
@@ -35,8 +42,6 @@ from app.modules.tips.transfer_tasks import (
 from app.modules.tips.transfers import (
     JOB_REFUNDED_OR_DISPUTED,
     LATE_SUCCESS,
-    PAYOUTS_NOT_ENABLED,
-    PRO_NOT_APPROVED,
     TIP_CHARGE_NOT_PAYABLE,
     TIP_TRANSFER_NEEDS_REVIEW,
     TIP_TRANSFER_REFUSED,
@@ -931,3 +936,80 @@ async def test_one_tips_error_never_stops_the_sweep(
     assert [create["metadata"]["tip_id"] for create in stripe.creates] == [str(second)]
     [summary] = [r for r in caplog.records if r.message == "tip_transfers_released"]
     assert summary.__dict__["outcomes"] == {"errored": 1, "created": 1}
+
+
+# The two money gates of _staff_reason (#518 round 1: the Vault's N1, the Gatekeeper's blocker):
+# a tip is never sent for a job that is not confirmed, nor to a pro who is not the job's.
+
+
+async def test_a_tip_naming_another_pro_than_the_jobs_is_never_sent(
+    db_session: AsyncSession,
+    world: JobWorld,
+    payments: FakeStripePayments,
+    stripe: FakeStripeTransfers,
+    clock: Clock,
+) -> None:
+    tip_id, _, _ = await committed_tip(db_session, world, payments)
+    await db_session.execute(
+        update(ProProfile)
+        .where(ProProfile.id == world.other_pro.profile_id)
+        .values(stripe_account_id="acct_other_pro_518", payouts_enabled=True)
+    )
+    await db_session.execute(
+        update(Tip).where(Tip.id == tip_id).values(pro_id=world.other_pro.profile_id)
+    )
+    await db_session.commit()
+
+    outcome = await service(db_session, payments, stripe, clock).release(tip_id)
+
+    assert outcome is TipTransferOutcome.NEEDS_REVIEW
+    assert stripe.creates == []
+    assert payments.tip_charge_reads == []
+    assert tip_id not in await service(db_session, payments, stripe, clock).due(10_000)
+
+
+@pytest.mark.parametrize(
+    "status",
+    [JobStatus.DISPUTED, JobStatus.REFUNDED, JobStatus.CANCELLED, JobStatus.COMPLETED],
+)
+async def test_a_job_that_is_not_confirmed_never_sends_its_tip(
+    db_session: AsyncSession,
+    world: JobWorld,
+    payments: FakeStripePayments,
+    stripe: FakeStripeTransfers,
+    clock: Clock,
+    status: JobStatus,
+) -> None:
+    """The job's reader gives no confirmed time to a job that is not (or no longer)
+    confirmed: its tip is held for staff with job_not_confirmed, and nothing is sent."""
+    job = await make_job(db_session, world, status, confirmed_at=NOW - timedelta(hours=2))
+    await add_payment(db_session, world, job)
+    tip = Tip(
+        job_id=job.id,
+        request_id=job.request_id,
+        customer_id=world.customer.id,
+        pro_id=world.pro.profile_id,
+        choice=TipChoice.CUSTOM,
+        amount_cents=TIP,
+        currency="usd",
+        status=TipStatus.SUCCEEDED,
+        succeeded_at=NOW - timedelta(hours=1),
+        stripe_payment_intent_id=f"pi_notconfirmed{uuid.uuid4().hex[:8]}",
+        attempt=1,
+    )
+    db_session.add(tip)
+    await db_session.flush()
+    tip_id = tip.id
+    await db_session.commit()
+
+    outcome = await service(db_session, payments, stripe, clock).release(tip_id)
+
+    assert outcome is TipTransferOutcome.NEEDS_REVIEW
+    assert stripe.creates == []
+    assert payments.tip_charge_reads == []
+    row = await tip_row(db_session, tip_id)
+    assert (row.transfer_status, row.transfer_last_error_code) == (
+        TipTransferStatus.HELD,
+        "job_not_confirmed",
+    )
+    assert tip_id not in await service(db_session, payments, stripe, clock).due(10_000)

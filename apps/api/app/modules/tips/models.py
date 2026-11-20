@@ -63,6 +63,14 @@ class TipTransferStatus(StrEnum):
     REVERSED = "reversed"
 
 
+# transfer_last_error_code values of a held tip that waits for the pro: the sweep tries it
+# again once they can be paid out (tips/transfers.py). Every other hold code is staff's: never
+# tried again by itself, and on hold in the pro's earnings (#518 round 1, the Vault's N2).
+PAYOUTS_NOT_ENABLED: Final = "payouts_not_enabled"
+PRO_NOT_APPROVED: Final = "pro_not_approved"
+WAITING_CODES: Final = frozenset({PAYOUTS_NOT_ENABLED, PRO_NOT_APPROVED})
+
+
 # Statuses of a tip transfer Stripe made: the row holds its id, and nothing creates another.
 TIP_TRANSFER_MADE: Final = frozenset({TipTransferStatus.CREATED, TipTransferStatus.REVERSED})
 

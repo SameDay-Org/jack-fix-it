@@ -17,8 +17,8 @@
   job's move to paid_out).
 - Tips (#273 PR A2): `tip_cents` is the job's succeeded tip, all of it the pro's (0 when
   none), beside the job's own amount. The summary counts each tip by its own transfer, never
-  the job's: pending while the tip's transfer is not made, paid once Stripe made it, on hold
-  once Stripe reversed it.
+  the job's: pending while the tip's transfer is not made (waiting for the pro's payout setup
+  included), paid once Stripe made it, on hold once Stripe reversed it or staff hold it.
 - Summary: each status's total over all the pro's jobs and their tips (pending_cents is
   on_the_way); the items of every page add up to it (amount_cents and tip_cents).
 - Order: newest completion first, then by job id; the cursor carries both, so equal times page
