@@ -19,6 +19,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 TABLE = "tips"
+REQUESTS = "tip_requests"
 UNPAID_WHERE = "status IN ('requires_payment', 'failed') AND stripe_payment_intent_id IS NOT NULL"
 
 
@@ -71,6 +72,8 @@ def upgrade() -> None:
         sa.Column("transfer_last_error_code", sa.String(length=64), nullable=True),
         sa.Column("transfer_requested_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("receipt_emailed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("create_refused_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("late_success_at", sa.DateTime(timezone=True), nullable=True),
         *_timestamps(),
         sa.CheckConstraint(
             "choice IN ('none', 'percent', 'custom')", name=op.f("ck_tips_tip_choice")
@@ -141,10 +144,37 @@ def upgrade() -> None:
         postgresql_where=sa.text(UNPAID_WHERE),
     )
 
+    # A choice made with an Idempotency-Key (#510 round 1): a replay answers it again.
+    op.create_table(
+        REQUESTS,
+        sa.Column("id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False),
+        sa.Column("job_id", sa.Uuid(), nullable=False),
+        sa.Column("customer_id", sa.Uuid(), nullable=False),
+        sa.Column("idempotency_key", sa.Uuid(), nullable=False),
+        sa.Column("fingerprint", sa.String(length=64), nullable=False),
+        sa.Column("attempt", sa.Integer(), nullable=True),
+        *_timestamps(),
+        sa.ForeignKeyConstraint(["job_id"], ["jobs.id"], name=op.f("fk_tip_requests_job_id_jobs")),
+        sa.ForeignKeyConstraint(
+            ["customer_id"], ["users.id"], name=op.f("fk_tip_requests_customer_id_users")
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_tip_requests")),
+    )
+    op.create_index(op.f("ix_tip_requests_job_id"), REQUESTS, ["job_id"], unique=False)
+    op.create_index(
+        "uq_tip_requests_customer_id_idempotency_key",
+        REQUESTS,
+        ["customer_id", "idempotency_key"],
+        unique=True,
+    )
+
 
 def downgrade() -> None:
-    # Drops the table and every tip in it, paid ones included (their money stays in Stripe).
-    # Take a backup first on any database that holds real ones.
+    # Drops the tables and every tip in them, paid ones included (their money stays in
+    # Stripe). Take a backup first on any database that holds real ones.
+    op.drop_index("uq_tip_requests_customer_id_idempotency_key", table_name=REQUESTS)
+    op.drop_index(op.f("ix_tip_requests_job_id"), table_name=REQUESTS)
+    op.drop_table(REQUESTS)
     op.drop_index(
         "ix_tips_unpaid_requested_at", table_name=TABLE, postgresql_where=sa.text(UNPAID_WHERE)
     )

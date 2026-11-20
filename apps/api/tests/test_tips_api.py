@@ -6,6 +6,7 @@ from settings. The job world's price (20,000) and tax (1,400) differ, so a tip t
 total with tax shows.
 """
 
+import dataclasses
 import json
 import logging
 import uuid
@@ -21,14 +22,15 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.integrations.stripe_errors import StripeUnavailableError
+from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.modules.jobs.models import Job, JobStatus
+from app.modules.tips.intents import tip_cancel_idempotency_key
 from app.modules.tips.models import Tip, TipStatus
-from app.modules.tips.service import tip_cancel_idempotency_key
 from app.modules.users.models import User
 from app.money import tip_amount
 from app.observability import JsonFormatter
-from tests.conftest import make_settings
+from app.rate_limit import RateLimitResult, get_rate_limiter
+from tests.conftest import InMemoryRateLimiter, make_settings
 from tests.job_world import (
     JobWorld,
     build_world,
@@ -143,9 +145,18 @@ def tip_path(job: JobRef) -> str:
 
 
 async def choose(
-    client: httpx.AsyncClient, world: JobWorld, job: JobRef, body: object
+    client: httpx.AsyncClient,
+    world: JobWorld,
+    job: JobRef,
+    body: object,
+    *,
+    key: uuid.UUID | None = None,
+    headers: dict[str, str] | None = None,
 ) -> httpx.Response:
-    return await client.post(tip_path(job), json=body, headers=world.customer.headers)
+    sent = {**(headers or world.customer.headers)}
+    if key is not None:
+        sent["Idempotency-Key"] = str(key)
+    return await client.post(tip_path(job), json=body, headers=sent)
 
 
 async def job_view(client: httpx.AsyncClient, world: JobWorld, job: JobRef) -> dict[str, Any]:
@@ -173,6 +184,7 @@ def code(response: httpx.Response) -> str:
 
 
 PERCENT_12 = {"choice": "percent", "percent": 12}
+NEEDS_REVIEW = "tip_needs_review"
 
 
 # The amount and the settings
@@ -832,16 +844,14 @@ async def test_a_change_waits_while_a_create_may_still_answer(
     assert len(stripe_fake.intent_calls) == 1
 
 
-async def test_a_create_lost_past_the_reconcile_window_moves_to_a_new_attempt(
+async def test_a_create_lost_past_the_window_is_found_again_and_kept(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
     world: JobWorld,
     stripe_fake: FakeStripePayments,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Stripe may have forgotten the key; the lost intent's secret never reached anyone, so it
-    can never be paid, and the tip asks for a new one."""
-    caplog.set_level(logging.INFO)
+    """#510 round 1 (Vault B1): Stripe may have forgotten the key, so the intent is found by
+    its metadata, checked and adopted: the same attempt, no second intent."""
     job = await confirmed(db_session, world)
     stripe_fake.lost_answers = 1
     await choose(db_client, world, job, PERCENT_12)
@@ -856,12 +866,323 @@ async def test_a_create_lost_past_the_reconcile_window_moves_to_a_new_attempt(
     assert response.status_code == 200, response.text
     row = await tip_row(db_session, job)
     assert row is not None
+    [made] = stripe_fake.intents_by_key.values()
+    assert (row.attempt, row.stripe_payment_intent_id) == (1, made)
+    assert response.json()["sheet"]["payment_intent_client_secret"] == (
+        stripe_fake.intents[made].client_secret
+    )
+    assert stripe_fake.tip_searches == [row.id]
+    assert len(stripe_fake.intents) == 1
+
+
+@pytest.mark.parametrize("search", ["empty", "incomplete", "foreign_job"])
+async def test_a_create_lost_past_the_window_that_stripe_cannot_place_stays_blocked(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+    caplog: pytest.LogCaptureFixture,
+    search: str,
+) -> None:
+    """Never a replacement on age alone: until Stripe shows the intent, the tip waits for
+    staff (409 tip_needs_review), every choice alike, and nothing is created or canceled."""
+    job = await confirmed(db_session, world)
+    stripe_fake.lost_answers = 1
+    await choose(db_client, world, job, PERCENT_12)
+    await set_tip(
+        db_session,
+        job,
+        payment_intent_requested_at=datetime.now(UTC) - RECONCILE - timedelta(minutes=1),
+    )
+    [made] = stripe_fake.intents_by_key.values()
+    if search == "empty":
+        stripe_fake.tip_facts.clear()
+    elif search == "incomplete":
+        stripe_fake.search_complete = False
+    else:
+        stripe_fake.tip_facts[made] = dataclasses.replace(
+            stripe_fake.tip_facts[made], job_id=str(uuid.uuid4())
+        )
+
+    answers = [
+        await choose(db_client, world, job, body)
+        for body in (PERCENT_12, {"choice": "custom", "amount_cents": 1_000}, {"choice": "none"})
+    ]
+
+    assert [(r.status_code, code(r)) for r in answers] == [(409, NEEDS_REVIEW)] * 3
+    row = await tip_row(db_session, job)
+    assert row is not None
+    assert (row.attempt, row.stripe_payment_intent_id, row.status) == (
+        1,
+        None,
+        TipStatus.REQUIRES_PAYMENT,
+    )
+    assert len(stripe_fake.intent_calls) == 1
+    assert stripe_fake.cancels == []
+    assert [r.message for r in caplog.records].count("tip_intent_unresolved") == 3
+
+
+async def test_a_found_intent_stripe_canceled_lets_a_new_attempt_start(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+) -> None:
+    job = await confirmed(db_session, world)
+    stripe_fake.lost_answers = 1
+    await choose(db_client, world, job, PERCENT_12)
+    await set_tip(
+        db_session,
+        job,
+        payment_intent_requested_at=datetime.now(UTC) - RECONCILE - timedelta(minutes=1),
+    )
+    [made] = stripe_fake.intents_by_key.values()
+    stripe_fake.tip_statuses[made] = "canceled"
+
+    response = await choose(db_client, world, job, PERCENT_12)
+
+    assert response.status_code == 200, response.text
+    row = await tip_row(db_session, job)
+    assert row is not None
     assert row.attempt == 2
     assert [call["idempotency_key"] for call in stripe_fake.intent_calls] == [
         f"tip:{row.id}:1",
         f"tip:{row.id}:2",
     ]
-    assert [r.message for r in caplog.records].count("tip_intent_lost_new_attempt") == 1
+
+
+@pytest.mark.parametrize(
+    ("code_sent", "attempt_after"),
+    [("amount_too_small", 2), ("parameter_unknown", 1), ("api_key_expired", 1)],
+)
+async def test_only_a_definitive_create_refusal_lets_a_new_attempt_start(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+    code_sent: str,
+    attempt_after: int,
+) -> None:
+    """A refusal of the shared kind (an explicit list of codes) proves nothing was made under
+    the key: the next choice asks for a new attempt. Any other refusal says nothing: the next
+    choice sends the same key again."""
+    job = await confirmed(db_session, world)
+    stripe_fake.errors["create_payment_intent"] = StripeRejectedError(
+        request_id="req_x", code=code_sent
+    )
+    refused = await choose(db_client, world, job, PERCENT_12)
+    del stripe_fake.errors["create_payment_intent"]
+
+    retried = await choose(db_client, world, job, PERCENT_12)
+
+    assert (refused.status_code, code(refused)) == (502, "payments_error")
+    assert retried.status_code == 200, retried.text
+    row = await tip_row(db_session, job)
+    assert row is not None
+    assert row.attempt == attempt_after
+    assert stripe_fake.intent_calls[-1]["idempotency_key"] == f"tip:{row.id}:{attempt_after}"
+
+
+async def test_a_tip_flagged_for_a_late_success_takes_no_choice(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+) -> None:
+    job = await confirmed(db_session, world)
+    await choose(db_client, world, job, PERCENT_12)
+    await set_tip(db_session, job, late_success_at=func.now())
+
+    answers = [
+        await choose(db_client, world, job, body) for body in (PERCENT_12, {"choice": "none"})
+    ]
+
+    assert [(r.status_code, code(r)) for r in answers] == [(409, NEEDS_REVIEW)] * 2
+    assert len(stripe_fake.intent_calls) == 1
+    assert stripe_fake.cancels == []
+
+
+# --- The Idempotency-Key (#510 round 1, Gatekeeper B1) --------------------------------------
+
+
+async def test_a_replayed_no_tip_never_cancels_a_newer_choice(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+) -> None:
+    """The Gatekeeper's history: "No tip" with key A, a percent with key B, then A again."""
+    job = await confirmed(db_session, world)
+    key_a, key_b = uuid.uuid4(), uuid.uuid4()
+
+    declined = await choose(db_client, world, job, {"choice": "none"}, key=key_a)
+    paid = await choose(db_client, world, job, PERCENT_12, key=key_b)
+    replay_a = await choose(db_client, world, job, {"choice": "none"}, key=key_a)
+    replay_b = await choose(db_client, world, job, PERCENT_12, key=key_b)
+
+    assert [r.status_code for r in (declined, paid, replay_a, replay_b)] == [200] * 4
+    # A's replay shows the tip as it is now and changes nothing: no cancel, no sheet.
+    assert replay_a.json()["sheet"] is None
+    assert replay_a.json()["tip"]["status"] == "requires_payment"
+    assert stripe_fake.cancels == []
+    # B's replay shows B's own sheet again: the same intent, no second one.
+    secret = "payment_intent_client_secret"
+    assert replay_b.json()["sheet"][secret] == paid.json()["sheet"][secret]
+    assert len(stripe_fake.intent_calls) == 1
+    row = await tip_row(db_session, job)
+    assert row is not None
+    assert (row.status, row.attempt, row.percent) == (TipStatus.REQUIRES_PAYMENT, 1, 12)
+
+
+async def test_a_replay_after_the_tip_succeeded_answers_the_tip(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+) -> None:
+    job = await confirmed(db_session, world)
+    key = uuid.uuid4()
+    await choose(db_client, world, job, PERCENT_12, key=key)
+    await set_tip(db_session, job, status=TipStatus.SUCCEEDED, succeeded_at=func.now())
+
+    replay = await choose(db_client, world, job, PERCENT_12, key=key)
+    unkeyed = await choose(db_client, world, job, PERCENT_12)
+
+    assert replay.status_code == 200, replay.text
+    assert (replay.json()["tip"]["status"], replay.json()["sheet"]) == ("succeeded", None)
+    # Without the key it is a new choice: the tip is paid.
+    assert (unkeyed.status_code, code(unkeyed)) == (409, ALREADY_PAID)
+
+
+async def test_a_key_reused_with_another_body_or_job_is_refused(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+) -> None:
+    job = await confirmed(db_session, world)
+    other_job = await confirmed(db_session, world)
+    key = uuid.uuid4()
+    await choose(db_client, world, job, PERCENT_12, key=key)
+
+    other_body = await choose(db_client, world, job, {"choice": "none"}, key=key)
+    other_job_answer = await choose(db_client, world, other_job, PERCENT_12, key=key)
+
+    for answer in (other_body, other_job_answer):
+        assert (answer.status_code, code(answer)) == (409, "idempotency_key_reused")
+    assert await tip_row(db_session, other_job) is None
+    assert stripe_fake.cancels == []
+    assert len(stripe_fake.intent_calls) == 1
+
+
+async def test_a_keyed_choice_that_failed_is_done_by_its_retry(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+) -> None:
+    """A choice that failed records nothing: its retry with the same key does the work."""
+    job = await confirmed(db_session, world)
+    key = uuid.uuid4()
+    stripe_fake.errors["create_customer_session"] = StripeUnavailableError(request_id="req_x")
+    failed = await choose(db_client, world, job, PERCENT_12, key=key)
+    del stripe_fake.errors["create_customer_session"]
+
+    retried = await choose(db_client, world, job, PERCENT_12, key=key)
+
+    assert (failed.status_code, code(failed)) == (503, "payments_unavailable")
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["sheet"] is not None
+    assert len(stripe_fake.intent_calls) == 1
+
+
+async def test_another_customer_s_key_is_just_a_new_key(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+) -> None:
+    job = await confirmed(db_session, world)
+    key = uuid.uuid4()
+    await choose(db_client, world, job, PERCENT_12, key=key)
+
+    other = await choose(
+        db_client, world, job, PERCENT_12, key=key, headers=world.other_customer.headers
+    )
+
+    assert (other.status_code, other.json()) == (404, NOT_FOUND)
+
+
+# --- The rate limit (#510 round 1, Vault B3) ------------------------------------------------
+
+
+class DenyingLimiter:
+    """Refuses every hit, and records each."""
+
+    def __init__(self) -> None:
+        self.hits: list[tuple[str, str, int, int]] = []
+
+    async def hit(
+        self, scope: str, identifier: str, *, limit: int, window_seconds: int
+    ) -> RateLimitResult:
+        self.hits.append((scope, identifier, limit, window_seconds))
+        return RateLimitResult(allowed=False, retry_after_seconds=9)
+
+
+async def test_a_refused_hit_stops_the_choice_before_stripe(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+    settings: Settings,
+) -> None:
+    limiter = DenyingLimiter()
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    job = await confirmed(db_session, world)
+
+    response = await choose(db_client, world, job, PERCENT_12, key=uuid.uuid4())
+
+    assert (response.status_code, code(response)) == (429, "rate_limited")
+    assert response.headers["retry-after"] == "9"
+    assert response.headers["cache-control"] == "no-store"
+    assert limiter.hits == [
+        (
+            "tip_choice",
+            str(world.customer.id),
+            settings.tip_choice_limit,
+            settings.tip_choice_window_seconds,
+        )
+    ]
+    assert (stripe_fake.intent_calls, stripe_fake.customer_sessions) == ([], [])
+    assert await tip_row(db_session, job) is None
+
+
+async def test_choices_are_limited_per_customer_and_replays_count(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+) -> None:
+    limiter = InMemoryRateLimiter(clock=lambda: 1_000_000.0)
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    job = await confirmed(db_session, world)
+    key = uuid.uuid4()
+    limit = 3
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(app.state.settings, "tip_choice_limit", limit)
+        answers = [
+            await choose(db_client, world, job, PERCENT_12, key=key) for _ in range(limit + 1)
+        ]
+        other = await choose(
+            db_client, world, job, PERCENT_12, headers=world.other_customer.headers
+        )
+
+    assert [r.status_code for r in answers] == [200] * limit + [429]
+    # Another customer has their own count (the job is not theirs: 404, never 429).
+    assert other.status_code == 404
 
 
 async def test_stripe_unavailable_on_the_cancel_changes_nothing(

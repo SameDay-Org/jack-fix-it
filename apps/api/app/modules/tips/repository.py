@@ -7,7 +7,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.tips.models import UNPAID_STATUSES, Tip, TipChoice, TipStatus
+from app.modules.tips.models import UNPAID_STATUSES, Tip, TipChoice, TipRequest, TipStatus
 
 # The columns a choice writes: what the customer chose and the amount it comes to.
 _NO_TIP: Final = {"choice": TipChoice.NONE, "percent": None, "amount_cents": 0}
@@ -103,6 +103,7 @@ class TipRepository:
                 status=TipStatus.DECLINED,
                 stripe_payment_intent_id=None,
                 payment_intent_requested_at=None,
+                create_refused_at=None,
             )
         )
 
@@ -123,6 +124,69 @@ class TipRepository:
                 attempt=Tip.attempt + 1,
                 stripe_payment_intent_id=None,
                 payment_intent_requested_at=None,
+                create_refused_at=None,
+            )
+        )
+
+    async def mark_create_refused(self, tip_id: uuid.UUID, attempt: int) -> None:
+        """Stripe refused this attempt's create for good: no PaymentIntent exists under its
+        key. The caller holds the lock and commits."""
+        await self._session.execute(
+            update(Tip)
+            .where(
+                Tip.id == tip_id,
+                Tip.attempt == attempt,
+                Tip.stripe_payment_intent_id.is_(None),
+            )
+            .values(create_refused_at=func.now())
+        )
+
+    async def flag_late_success(self, tip_id: uuid.UUID) -> bool:
+        """An earlier attempt's PaymentIntent succeeded: flagged once, for staff. False when it
+        already was. The caller holds the lock."""
+        result = await self._session.execute(
+            update(Tip)
+            .where(Tip.id == tip_id, Tip.late_success_at.is_(None))
+            .values(late_success_at=func.now())
+        )
+        return bool(result.rowcount)  # type: ignore[attr-defined]  # CursorResult of an UPDATE
+
+    async def request_by_key(
+        self, customer_id: uuid.UUID, idempotency_key: uuid.UUID
+    ) -> TipRequest | None:
+        """The customer's choice made with this key, if any."""
+        statement = (
+            select(TipRequest)
+            .where(
+                TipRequest.customer_id == customer_id,
+                TipRequest.idempotency_key == idempotency_key,
+            )
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def add_request(
+        self,
+        *,
+        job_id: uuid.UUID,
+        customer_id: uuid.UUID,
+        idempotency_key: uuid.UUID,
+        fingerprint: str,
+        attempt: int | None,
+    ) -> None:
+        """Records a choice made with a key, unless the key is recorded (a concurrent call with
+        the same key and body made it too: the first record stands)."""
+        await self._session.execute(
+            insert(TipRequest)
+            .values(
+                job_id=job_id,
+                customer_id=customer_id,
+                idempotency_key=idempotency_key,
+                fingerprint=fingerprint,
+                attempt=attempt,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[TipRequest.customer_id, TipRequest.idempotency_key]
             )
         )
 

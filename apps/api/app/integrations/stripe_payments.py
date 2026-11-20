@@ -35,6 +35,7 @@ messages.
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import cache
 from typing import Protocol
 
 import stripe
@@ -52,7 +53,7 @@ from stripe.params import (
     CustomerSessionCreateParamsComponentsMobilePaymentElementFeatures as SheetFeatures,
 )
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.integrations.stripe_errors import StripeRejectedError, raise_typed
 
 # Stripe's statuses of a PaymentIntent that no sheet can confirm again (the payment's own status
@@ -122,6 +123,33 @@ class CardFacts:
 
 
 @dataclass(frozen=True)
+class TipIntentFacts:
+    """A PaymentIntent as Stripe holds it now, for a tip (#510 round 1): what its row is checked
+    against before anything is stored or settled, and its current status. The metadata fields
+    are the create's own (kind, tip_id, job_id, attempt), None when absent. `failed`: Stripe
+    holds a last payment error (a charge that failed; the intent can be confirmed again)."""
+
+    payment_intent_id: str
+    amount_cents: int
+    currency: str
+    customer_id: str | None
+    status: str
+    failed: bool
+    kind: str | None
+    tip_id: str | None
+    job_id: str | None
+    attempt: str | None
+
+
+@dataclass(frozen=True)
+class FoundTipIntents:
+    """The PaymentIntents whose metadata names a tip; `complete`: no further page."""
+
+    intents: tuple[TipIntentFacts, ...]
+    complete: bool
+
+
+@dataclass(frozen=True)
 class FoundPaymentIntents:
     """The PaymentIntents whose metadata names a payment. `complete`: the search returned every
     match (no further page)."""
@@ -179,6 +207,15 @@ class StripePayments(Protocol):
     async def card_of(self, payment_intent_id: str) -> CardFacts | None:
         """The card the intent's latest charge was paid with (#62); None when it has no
         charge or the charge was not paid with a card."""
+        ...
+
+    async def tip_intent(self, payment_intent_id: str) -> TipIntentFacts:
+        """The PaymentIntent as Stripe holds it now (#510 round 1): never an event's copy."""
+        ...
+
+    async def search_tip_intents(self, tip_id: uuid.UUID) -> FoundTipIntents:
+        """The platform's PaymentIntents whose metadata tip_id is `tip_id` (Stripe Search:
+        eventually consistent, so a recent intent may be missing)."""
         ...
 
 
@@ -346,6 +383,28 @@ class StripePaymentsClient:
             raise_typed(error)
         return _card(intent)
 
+    async def tip_intent(self, payment_intent_id: str) -> TipIntentFacts:
+        try:
+            intent = await self._client.v1.payment_intents.retrieve_async(payment_intent_id)
+        except stripe.StripeError as error:
+            raise_typed(error)
+        return _tip_facts(intent)
+
+    async def search_tip_intents(self, tip_id: uuid.UUID) -> FoundTipIntents:
+        # A UUID: nothing in it needs quoting in the query.
+        params: PaymentIntentSearchParams = {
+            "query": f"metadata['tip_id']:'{tip_id}'",
+            "limit": PAYMENT_INTENT_SEARCH_LIMIT,
+        }
+        try:
+            page = await self._client.v1.payment_intents.search_async(params=params)
+        except stripe.StripeError as error:
+            raise_typed(error)
+        return FoundTipIntents(
+            intents=tuple(_tip_facts(intent) for intent in page.data),
+            complete=not page.has_more,
+        )
+
 
 def _card(intent: stripe.PaymentIntent) -> CardFacts | None:
     """The card of the intent's expanded latest charge, read defensively: anything missing is
@@ -362,6 +421,29 @@ def _card(intent: stripe.PaymentIntent) -> CardFacts | None:
         brand=brand if isinstance(brand, str) else None,
         last4=last4 if isinstance(last4, str) and len(last4) == 4 and last4.isdigit() else None,
         wallet=wallet if isinstance(wallet, str) else None,
+    )
+
+
+def _tip_facts(intent: stripe.PaymentIntent) -> TipIntentFacts:
+    customer = intent.customer
+    customer_id = customer if isinstance(customer, str) or customer is None else customer.id
+    metadata = intent.metadata
+
+    def named(key: str) -> str | None:
+        value = metadata[key] if metadata is not None and key in metadata else None
+        return value if isinstance(value, str) else None
+
+    return TipIntentFacts(
+        payment_intent_id=intent.id,
+        amount_cents=intent.amount,
+        currency=intent.currency,
+        customer_id=customer_id,
+        status=intent.status,
+        failed=getattr(intent, "last_payment_error", None) is not None,
+        kind=named(INTENT_KIND_KEY),
+        tip_id=named("tip_id"),
+        job_id=named("job_id"),
+        attempt=named("attempt"),
     )
 
 
@@ -396,6 +478,17 @@ def _facts(intent: stripe.PaymentIntent) -> PaymentIntentFacts:
 def _request_id(resource: stripe.StripeObject) -> str | None:
     response = resource.last_response
     return response.request_id if response else None
+
+
+@cache
+def worker_stripe_payments() -> StripePayments | None:
+    """The worker's client: one per process, built on first use. The tip event handler
+    (tips.webhooks) reads the PaymentIntent with it. None without STRIPE_SECRET_KEY: the event
+    is then run again later. Tests register a handler bound to a fake instead."""
+    settings = get_settings()
+    if settings.stripe_secret_key is None:
+        return None
+    return StripePaymentsClient.from_settings(settings)
 
 
 def get_stripe_payments(request: Request) -> StripePayments | None:

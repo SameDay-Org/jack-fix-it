@@ -31,9 +31,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.integrations.stripe_errors import StripeCallError
 from app.integrations.stripe_payments import StripePayments
+from app.modules.tips.intents import tip_cancel_idempotency_key
 from app.modules.tips.models import UNPAID_STATUSES
 from app.modules.tips.repository import TipRepository
-from app.modules.tips.service import tip_cancel_idempotency_key
 
 logger = logging.getLogger(__name__)
 

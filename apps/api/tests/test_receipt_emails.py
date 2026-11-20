@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.integrations.email import EmailUnavailableError
 from app.integrations.stripe_errors import StripeUnavailableError
-from app.integrations.stripe_payments import CardFacts
+from app.integrations.stripe_payments import CardFacts, TipIntentFacts
 from app.modules.jobs.models import Job, JobStatus
 from app.modules.payments.models import Payment
 from app.modules.payments.reconciliation import JobBooked
@@ -30,9 +30,9 @@ from app.modules.payments.webhook_handlers import announce
 from app.modules.receipts.email_copy import COPY, money, payment_method
 from app.modules.receipts.tasks import send_payment_receipt, send_tip_receipt
 from app.modules.tips.models import Tip, TipChoice, TipStatus
+from app.modules.tips.webhooks import tip_event_handler
 from app.modules.users.models import User
 from app.modules.webhooks.events import AfterCommit
-from app.modules.webhooks.handlers import handler_for
 from tests.conftest import make_settings
 from tests.job_world import FEE, LINE1, LINE2, PAYOUT, PRICE, TAX, JobWorld, build_world, make_job
 from tests.test_password_reset_api import FakeSender
@@ -47,11 +47,23 @@ TIP: Final = 1_250
 CUSTOMER: Final = "cus_r62receipts"
 
 
-def tip_event(tip: Tip, intent: str) -> Any:
-    """The tip's payment_intent.succeeded, as the tip webhook tests build it."""
-    return tip_event_of(
-        "payment_intent.succeeded", tip, intent=intent, amount=TIP, customer=CUSTOMER
+def stripe_holds_tip(stripe: FakeStripePayments, tip: Tip, intent: str) -> None:
+    """Stripe holds the tip's intent, succeeded: what the tip handler reads (#510 round 1)."""
+    stripe.add_tip_intent(
+        TipIntentFacts(
+            payment_intent_id=intent,
+            amount_cents=TIP,
+            currency="usd",
+            customer_id=CUSTOMER,
+            status="succeeded",
+            failed=False,
+            kind="tip",
+            tip_id=str(tip.id),
+            job_id=str(tip.job_id),
+            attempt=str(tip.attempt),
+        )
     )
+    stripe.tip_statuses[intent] = "succeeded"
 
 
 @pytest.fixture
@@ -418,13 +430,13 @@ async def test_a_tip_that_succeeds_queues_its_receipt_once(
         .values(status=TipStatus.REQUIRES_PAYMENT, succeeded_at=None)
     )
     assert tip.stripe_payment_intent_id is not None
-    queue = RecordingQueue()
+    queue, stripe = RecordingQueue(), FakeStripePayments()
+    stripe_holds_tip(stripe, tip, tip.stripe_payment_intent_id)
+    handler = tip_event_handler(lambda: stripe)
 
     for _ in range(2):  # Stripe sends the event again: nothing more is queued
         after = AfterCommit()
-        event = tip_event(tip, tip.stripe_payment_intent_id)
-        handler = handler_for("payment_intent.succeeded")
-        assert handler is not None
+        event = tip_event_of("payment_intent.succeeded", intent=tip.stripe_payment_intent_id)
         await handler(db_session, event, after)
         for action in after.actions:
             await action(queue, 1.0)

@@ -11,6 +11,7 @@ from sqlalchemy import (
     Index,
     SmallInteger,
     String,
+    Uuid,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -130,3 +131,36 @@ class Tip(IdTimestampsMixin, Base):
     transfer_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # When the tip's receipt email was sent (#62).
     receipt_emailed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # #510 round 1: Stripe refused the current attempt's create for good (a code of
+    # TIP_CREATE_REFUSED_CODES): no PaymentIntent was made under its key, so the next choice
+    # may ask for a new one. NULL otherwise; a new attempt clears it.
+    create_refused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # #510 round 1: Stripe showed an EARLIER attempt's PaymentIntent succeeded (money no
+    # attempt of the tip holds). Set once, for staff: the tip takes no new choice from then on,
+    # and its current attempt was canceled when it still could be.
+    late_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TipRequest(IdTimestampsMixin, Base):
+    """A choice made with an Idempotency-Key (#510 round 1): the key, the body's fingerprint
+    and what it settled, so a replay of it answers it again and changes nothing. Keys are the
+    customer's own (unique per customer); a key belongs to one job and one body."""
+
+    __tablename__ = "tip_requests"
+    __table_args__ = (
+        Index(
+            "uq_tip_requests_customer_id_idempotency_key",
+            "customer_id",
+            "idempotency_key",
+            unique=True,
+        ),
+    )
+
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"), index=True)
+    customer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(Uuid())
+    # SHA-256 (hex) of the body (app.idempotency.body_fingerprint).
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    # The tip's attempt the choice settled: its PaymentIntent is the one a replay shows again.
+    # NULL for "No tip".
+    attempt: Mapped[int | None]

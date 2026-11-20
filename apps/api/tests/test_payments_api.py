@@ -2,6 +2,7 @@
 accepted (D11.1, #58). Never calls Stripe: a fake replaces the wrapper, except where the real
 wrapper runs on a mock transport to prove what reaches Sentry."""
 
+import dataclasses
 import json
 import logging
 import uuid
@@ -27,10 +28,12 @@ from app.integrations.stripe_payments import (
     CardFacts,
     CreatedCustomer,
     FoundPaymentIntents,
+    FoundTipIntents,
     PaymentIntentFacts,
     PaymentIntentState,
     StripePayments,
     StripePaymentsClient,
+    TipIntentFacts,
     get_stripe_payments,
 )
 from app.modules.payments.models import Payment, PaymentStatus
@@ -165,6 +168,15 @@ class FakeStripePayments:
     # The card each PaymentIntent was paid with, as card_of reads it (#62); none by default.
     cards: dict[str, CardFacts] = field(default_factory=dict)
     card_reads: list[str] = field(default_factory=list)
+    # Tip intents (#510 round 1), as tip_intent and search_tip_intents read them: what each
+    # create sent, by PaymentIntent id. `tip_statuses` is Stripe's status of one intent (else
+    # `intent_status`; an accepted cancel makes it canceled), `failed_intents` the ones with a
+    # last payment error. `tip_reads` records every read.
+    tip_facts: dict[str, TipIntentFacts] = field(default_factory=dict)
+    tip_statuses: dict[str, str] = field(default_factory=dict)
+    failed_intents: set[str] = field(default_factory=set)
+    tip_reads: list[str] = field(default_factory=list)
+    tip_searches: list[uuid.UUID] = field(default_factory=list)
 
     def add_intent(self, facts: PaymentIntentFacts) -> None:
         """An intent Stripe holds that no create of this run answered with."""
@@ -231,6 +243,20 @@ class FakeStripePayments:
                 customer_id=customer_id,
                 payment_id=dict(metadata).get("payment_id"),
             )
+            sent = dict(metadata)
+            if sent.get("kind") == "tip":
+                self.tip_facts[intent_id] = TipIntentFacts(
+                    payment_intent_id=intent_id,
+                    amount_cents=amount_cents,
+                    currency=currency,
+                    customer_id=customer_id,
+                    status=self.intent_status,
+                    failed=False,
+                    kind="tip",
+                    tip_id=sent.get("tip_id"),
+                    job_id=sent.get("job_id"),
+                    attempt=sent.get("attempt"),
+                )
         if self.lost_answers:
             self.lost_answers -= 1
             raise StripeUnavailableError(request_id="req_fake_lost")
@@ -281,6 +307,8 @@ class FakeStripePayments:
         if self.on_cancel_intent is not None:
             await self.on_cancel_intent()
         self.cancels.append((payment_intent_id, idempotency_key))
+        if not self.cancel_refused:
+            self.tip_statuses[payment_intent_id] = "canceled"
         return not self.cancel_refused
 
     async def card_of(self, payment_intent_id: str) -> CardFacts | None:
@@ -288,6 +316,35 @@ class FakeStripePayments:
             raise self.errors["card_of"]
         self.card_reads.append(payment_intent_id)
         return self.cards.get(payment_intent_id)
+
+    def tip_now(self, facts: TipIntentFacts) -> TipIntentFacts:
+        """The intent as Stripe holds it now: its status and its last payment error."""
+        intent = facts.payment_intent_id
+        return dataclasses.replace(
+            facts,
+            status=self.tip_statuses.get(intent, self.intent_status),
+            failed=intent in self.failed_intents,
+        )
+
+    def add_tip_intent(self, facts: TipIntentFacts) -> None:
+        """A tip intent Stripe holds that no create of this run answered with."""
+        self.tip_facts[facts.payment_intent_id] = facts
+
+    async def tip_intent(self, payment_intent_id: str) -> TipIntentFacts:
+        if "tip_intent" in self.errors:
+            raise self.errors["tip_intent"]
+        self.tip_reads.append(payment_intent_id)
+        facts = self.tip_facts.get(payment_intent_id)
+        if facts is None:
+            raise StripeRejectedError(request_id="req_fake_missing", code="resource_missing")
+        return self.tip_now(facts)
+
+    async def search_tip_intents(self, tip_id: uuid.UUID) -> FoundTipIntents:
+        if "search_tip_intents" in self.errors:
+            raise self.errors["search_tip_intents"]
+        self.tip_searches.append(tip_id)
+        found = tuple(self.tip_now(f) for f in self.tip_facts.values() if f.tip_id == str(tip_id))
+        return FoundTipIntents(intents=found, complete=self.search_complete)
 
 
 def _fake_stripe(request: Request) -> StripePayments:

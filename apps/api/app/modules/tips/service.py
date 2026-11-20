@@ -15,8 +15,18 @@ TIP_MIN_CENTS and the maximum, TIP_MAX_PERCENT of the price capped at TIP_MAX_CE
 tip_amount_out_of_range). The options the job's view offers are the same numbers, so the app
 computes none. No tax on a tip, and the platform absorbs the card fee: the tip is charged as is.
 
+A choice sent with an Idempotency-Key (#510 round 1) is answered again by every repeat of the
+key, before anything of the tip is touched: the tip as it is now, and the Payment Sheet of the
+attempt it settled while that attempt is still the one to pay. A repeat never cancels, creates
+or changes anything, whatever was chosen since. The same key with another body, or on another
+job, is 409 idempotency_key_reused. A key is recorded once its choice is settled, so the retry
+of a choice that failed does the work. Every choice, repeats included, counts against
+TIP_CHOICE_LIMIT per customer (router.py), before any Stripe call.
+
 The choice, on the tip's row lock (one row per job, created by the first choice):
 - succeeded: 409 tip_already_paid; processing: 409 tip_in_progress. Nothing else changes;
+- a tip flagged because an earlier attempt took money (late_success_at, webhooks.py): 409
+  tip_needs_review, until staff look;
 - "No tip": declined;
 - the same amount as the current attempt, still to pay (requires_payment, or failed: Stripe
   keeps a failed PaymentIntent payable, so it is confirmed again): the same PaymentIntent;
@@ -28,9 +38,14 @@ The choice, on the tip's row lock (one row per job, created by the first choice)
   time, and a sheet the app still holds for an earlier amount cannot charge it. A create sent
   for the current attempt with no answer stored: 409 tip_in_progress for any change within
   STRIPE_PAYMENT_INTENT_RECONCILE_AFTER_SECONDS (the same choice sends the same key again and
-  Stripe replays it); past that window Stripe may have forgotten the key, and since the
-  intent's client secret never reached anyone it can never be paid, so the tip moves to a new
-  attempt (a warning with ids).
+  Stripe replays it). Past that window Stripe may have forgotten the key: the intent is found
+  by Stripe's search on the tip's metadata, and the one intent of this attempt that is this
+  tip's (job, customer, currency, amount) is adopted, then handled as any stored intent. None,
+  several, or a search with another page: 409 tip_needs_review and an ERROR for staff, nothing
+  changed. Never a new attempt on age alone (#510 round 1).
+- a create Stripe refused for good (TIP_CREATE_REFUSED_CODES, an explicit list: nothing was
+  made under the key): the next choice makes a new attempt. Any other refusal says nothing,
+  and the next choice sends the same key again.
 Each attempt's PaymentIntent is created as the job payment's is (payments/service.py), on the
 platform account: the tip, usd, the customer's Stripe Customer, automatic payment methods
 without redirects, automatic capture, transfer_group `request:<request id>`, description "Tip",
@@ -57,10 +72,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Final
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, is_publishable_key
 from app.errors import NotFoundError
+from app.idempotency import body_fingerprint, same_body
 from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.integrations.stripe_payments import (
     INTENT_KIND_KEY,
@@ -78,9 +95,17 @@ from app.modules.requests.service import CustomerRequestReader
 from app.modules.tips.errors import (
     TipAlreadyPaidError,
     TipAmountOutOfRangeError,
+    TipIdempotencyKeyReusedError,
     TipInProgressError,
+    TipNeedsReviewError,
     TipNotAvailableError,
     TipPercentNotOfferedError,
+)
+from app.modules.tips.intents import (
+    mismatches,
+    status_of,
+    tip_cancel_idempotency_key,
+    tip_payment_intent_idempotency_key,
 )
 from app.modules.tips.models import UNPAID_STATUSES, Tip, TipChoice, TipStatus
 from app.modules.tips.repository import NewTip, TipRepository
@@ -101,20 +126,19 @@ _PAID: Final = "succeeded"
 _NOT_PAYABLE: Final = frozenset({"processing", "canceled"})
 # Rounds of the choice's lock: a cancel in Stripe, the change, then the kept attempt. More only
 # when another call of the same tip changed it meanwhile: that call answers 409 instead.
-_CHOICE_ROUNDS: Final = 4
-
-
-def tip_payment_intent_idempotency_key(tip_id: uuid.UUID, attempt: int) -> str:
-    """The same key for every create of this attempt's PaymentIntent (AGENTS.md "Money")."""
-    return f"tip:{tip_id}:{attempt}"
-
-
-def tip_cancel_idempotency_key(tip_id: uuid.UUID, attempt: int, version: datetime) -> str:
-    """The key to cancel the attempt's PaymentIntent, versioned by the tip's updated_at as the
-    payment's cancel is (payments/service.py): Stripe keeps a refusal under a key for 24 h, so
-    once the tip changes (its charge failed) the next cancel gets a key of its own."""
-    micros = (version - datetime(1970, 1, 1, tzinfo=UTC)) // timedelta(microseconds=1)
-    return f"tip_cancel:{tip_id}:{attempt}:{micros}"
+_CHOICE_ROUNDS: Final = 5
+# Stripe's codes for a PaymentIntent create it refused for good: nothing was made under the
+# key, so the next choice may ask for a new attempt (#510 round 1, the shared rule of
+# payments.refunds.REFUND_REFUSED_CODES: an explicit list, any other refusal says nothing).
+# The codes of stripe-python 16.1.0, each in https://docs.stripe.com/error-codes.
+TIP_CREATE_REFUSED_CODES: Final = frozenset(
+    {
+        # "The specified amount is less than the minimum amount allowed."
+        "amount_too_small",
+        # "The specified amount is greater than the maximum amount allowed."
+        "amount_too_large",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -266,52 +290,133 @@ class TipService:
         self._users = UserService(session)
 
     async def choose(
-        self, user: UserAccount, request_id: uuid.UUID, body: NoTipIn | PercentTipIn | CustomTipIn
+        self,
+        user: UserAccount,
+        request_id: uuid.UUID,
+        body: NoTipIn | PercentTipIn | CustomTipIn,
+        idempotency_key: uuid.UUID | None = None,
     ) -> TipCreateOut:
         """The customer's choice for the tip of their job (see the module doc). Ends every
         transaction it opens."""
-        facts = await self._tippable(user, request_id)
+        facts = await self._own_job(user, request_id)
+        fingerprint = None if idempotency_key is None else body_fingerprint(body)
+        if idempotency_key is not None and fingerprint is not None:
+            stored = await self._tips.request_by_key(user.id, idempotency_key)
+            if stored is not None:
+                # A replay: answered before anything of the tip is touched (#510 round 1).
+                if stored.job_id != facts.job_id or not same_body(stored.fingerprint, fingerprint):
+                    await self._session.commit()
+                    logger.info("tip_idempotency_key_reused", extra={"job_id": str(facts.job_id)})
+                    raise TipIdempotencyKeyReusedError
+                return await self._replay(user, facts, stored.attempt)
+        self._in_window(facts)
         wanted = wanted_tip(body, facts.price_cents, self._config)
         if wanted.choice is TipChoice.NONE:
             await self._settle_choice(facts, wanted)
+            await self._remember(user, facts, idempotency_key, fingerprint, None)
             return TipCreateOut(tip=await self._view(facts), sheet=None)
         stripe, publishable_key = self._require_stripe()
         record = await self._settle_choice(facts, wanted)
         customer_id = await self._customer(stripe, user, record)
         intent = await self._payment_intent(stripe, record, customer_id)
+        sheet = await self._sheet(stripe, publishable_key, record, customer_id, intent)
+        await self._remember(user, facts, idempotency_key, fingerprint, record.attempt)
+        return TipCreateOut(tip=await self._view(facts), sheet=sheet)
+
+    async def _sheet(
+        self,
+        stripe: StripePayments,
+        publishable_key: str,
+        record: TipRecord,
+        customer_id: str,
+        intent: PaymentIntentState,
+    ) -> PaymentSheetOut:
         async with self._stripe_call(record, "create_customer_session"):
             customer_session_client_secret = await stripe.create_customer_session(customer_id)
         # Deprecated (#253c): for app builds before the CustomerSession, one release.
         async with self._stripe_call(record, "create_ephemeral_key"):
             ephemeral_key_secret = await stripe.create_ephemeral_key(customer_id)
         logger.info("tip_sheet_issued", extra=record.ids)
-        return TipCreateOut(
-            tip=await self._view(facts),
-            sheet=PaymentSheetOut(
-                payment_intent_client_secret=intent.client_secret,
-                customer_id=customer_id,
-                customer_session_client_secret=customer_session_client_secret,
-                ephemeral_key_secret=ephemeral_key_secret,
-                publishable_key=publishable_key,
-                amount_cents=record.amount_cents,
-                tax_cents=TIP_TAX_CENTS,
-                customer_total_cents=record.amount_cents + TIP_TAX_CENTS,
-                currency=record.currency,
-            ),
+        return PaymentSheetOut(
+            payment_intent_client_secret=intent.client_secret,
+            customer_id=customer_id,
+            customer_session_client_secret=customer_session_client_secret,
+            ephemeral_key_secret=ephemeral_key_secret,
+            publishable_key=publishable_key,
+            amount_cents=record.amount_cents,
+            tax_cents=TIP_TAX_CENTS,
+            customer_total_cents=record.amount_cents + TIP_TAX_CENTS,
+            currency=record.currency,
         )
 
-    async def _tippable(self, user: UserAccount, request_id: uuid.UUID) -> JobTipFacts:
-        """The job of the caller's own request (else 404), inside its tip window (else 409)."""
+    async def _remember(
+        self,
+        user: UserAccount,
+        facts: JobTipFacts,
+        idempotency_key: uuid.UUID | None,
+        fingerprint: str | None,
+        attempt: int | None,
+    ) -> None:
+        """Records a keyed choice once it is settled: a replay answers it again (#510 round
+        1). A choice that failed records nothing, so its retry with the key does the work."""
+        if idempotency_key is None or fingerprint is None:
+            return
+        await self._tips.add_request(
+            job_id=facts.job_id,
+            customer_id=user.id,
+            idempotency_key=idempotency_key,
+            fingerprint=fingerprint,
+            attempt=attempt,
+        )
+        await self._session.commit()
+
+    async def _replay(
+        self, user: UserAccount, facts: JobTipFacts, attempt: int | None
+    ) -> TipCreateOut:
+        """What a keyed choice answers again: the tip as it is now, and the Payment Sheet of
+        the attempt it settled while that attempt is still the one to pay. It never cancels,
+        creates or changes anything (#510 round 1)."""
+        view = await self._view(facts)
+        tip = await self._tips.get_by_job(facts.job_id)
+        await self._session.commit()
+        if (
+            attempt is None
+            or tip is None
+            or tip.attempt != attempt
+            or tip.status not in UNPAID_STATUSES
+            or tip.stripe_payment_intent_id is None
+            or tip.late_success_at is not None
+        ):
+            logger.info("tip_choice_replayed", extra={"job_id": str(facts.job_id)})
+            return TipCreateOut(tip=view, sheet=None)
+        stripe, publishable_key = self._require_stripe()
+        record = _record(tip)
+        intent_id = tip.stripe_payment_intent_id
+        customer_id = await self._customer(stripe, user, record)
+        async with self._stripe_call(record, "retrieve_payment_intent"):
+            intent = await stripe.retrieve_payment_intent(intent_id)
+        if intent.status == _PAID or intent.status in _NOT_PAYABLE:
+            logger.info("tip_choice_replayed", extra=record.ids)
+            return TipCreateOut(tip=view, sheet=None)
+        logger.info("tip_choice_replayed", extra=record.ids)
+        sheet = await self._sheet(stripe, publishable_key, record, customer_id, intent)
+        return TipCreateOut(tip=view, sheet=sheet)
+
+    async def _own_job(self, user: UserAccount, request_id: uuid.UUID) -> JobTipFacts:
+        """The job of the caller's own request; 404 for anyone else's, and while it has none."""
         await self._customer_requests.own_status(user, request_id)
         facts = await self._jobs.of_customer_request(user.id, request_id)
         if facts is None:
             raise NotFoundError
+        return facts
+
+    def _in_window(self, facts: JobTipFacts) -> None:
+        """409 tip_not_available unless the job takes a tip now."""
         if (
             facts.confirmed_at is None
             or datetime.now(UTC) >= facts.confirmed_at + self._config.window
         ):
             raise TipNotAvailableError
-        return facts
 
     async def _view(self, facts: JobTipFacts) -> TipOut:
         if facts.confirmed_at is None:  # pragma: no cover - _tippable refused it
@@ -364,13 +469,20 @@ class TipService:
             if tip.status is TipStatus.PROCESSING:
                 await self._session.rollback()
                 raise TipInProgressError
+            if tip.late_success_at is not None:
+                # An earlier attempt took money no attempt holds: staff first (#510 round 1).
+                await self._session.rollback()
+                raise TipNeedsReviewError
             if wanted.choice is TipChoice.NONE and tip.status is TipStatus.DECLINED:
                 await self._session.commit()
                 return record
             intent_id = tip.stripe_payment_intent_id
             payable = tip.status in UNPAID_STATUSES
+            # Stripe refused the attempt's create for good: nothing exists under its key.
+            refused = intent_id is None and tip.create_refused_at is not None
             lost = (
                 intent_id is None
+                and not refused
                 and tip.payment_intent_requested_at is not None
                 and datetime.now(UTC) - tip.payment_intent_requested_at
                 >= self._config.intent_reconcile_after
@@ -380,25 +492,35 @@ class TipService:
                 wanted.percent,
                 wanted.amount_cents,
             )
-            if payable and same and not lost:
+            if payable and same and not lost and not refused:
                 if tip.status is TipStatus.FAILED and intent_id is not None:
                     await self._tips.retry_failed(tip.id, intent_id)
                 await self._session.commit()
                 return record
-            if payable and intent_id is None and tip.payment_intent_requested_at and not lost:
+            if (
+                payable
+                and intent_id is None
+                and tip.payment_intent_requested_at
+                and not lost
+                and not refused
+            ):
                 # A create of this attempt may still answer: its intent could be paid.
                 await self._session.rollback()
                 logger.info("tip_change_waits_for_create", extra=record.ids)
                 raise TipInProgressError
+            if payable and lost:
+                # Stripe may have forgotten the key: the intent is found by its metadata and
+                # adopted, never replaced on age alone (#510 round 1).
+                await self._session.commit()  # no lock over the search
+                await self._recover(record)
+                continue
             if payable and intent_id is not None and intent_id != canceled:
                 version = tip.updated_at
                 await self._session.commit()  # no lock over the Stripe calls
                 canceled = await self._cancel(record, intent_id, version)
                 continue
             # Nothing of the tip can be paid: declined, canceled, an intent this call saw
-            # canceled, an attempt never sent, or one lost long ago.
-            if lost:
-                logger.warning("tip_intent_lost_new_attempt", extra=record.ids)
+            # canceled, an attempt never sent, or one whose create Stripe refused for good.
             if wanted.choice is TipChoice.NONE:
                 await self._tips.decline(tip.id)
             else:
@@ -410,6 +532,63 @@ class TipService:
         # Another call of the same tip kept changing it: this one stops.
         logger.warning("tip_choice_contended", extra={"job_id": str(facts.job_id)})
         raise TipInProgressError
+
+    async def _recover(self, record: TipRecord) -> None:
+        """The current attempt's lost create, found again: Stripe's search by the tip's
+        metadata must show exactly one intent of this attempt that is this tip's (kind, job,
+        customer, currency, amount). It is stored on the locked row, and an intent Stripe shows
+        canceled lets the next round make a new attempt. Anything else (none, more than one, an
+        incomplete search): 409 tip_needs_review, an ERROR for staff, nothing changed."""
+        stripe = self._stripe
+        if stripe is None:
+            logger.warning("payments_stripe_not_configured")
+            raise PaymentsNotConfiguredError
+        customer = await self._users.stripe_customer_id(record.customer_id)
+        await self._session.commit()
+        async with self._stripe_call(record, "search_tip_intents"):
+            found = await stripe.search_tip_intents(record.id)
+        mine = [
+            facts
+            for facts in found.intents
+            if facts.attempt == str(record.attempt)
+            and not mismatches(
+                facts,
+                tip_id=record.id,
+                job_id=record.job_id,
+                attempt=record.attempt,
+                amount_cents=record.amount_cents,
+                currency=record.currency,
+                stripe_customer_id=customer,
+            )
+        ]
+        if not found.complete or len(mine) != 1:
+            logger.error(
+                "tip_intent_unresolved",
+                extra={**record.ids, "found": len(found.intents), "matching": len(mine)},
+            )
+            raise TipNeedsReviewError
+        [facts] = mine
+        tip = await self._tips.get_by_job_for_update(record.job_id)
+        if tip is None or tip.attempt != record.attempt or tip.stripe_payment_intent_id:
+            await self._session.rollback()
+            raise TipInProgressError  # another call settled it meanwhile
+        try:
+            async with self._session.begin_nested():
+                stored = await self._tips.set_payment_intent_if_missing(
+                    tip.id, record.attempt, facts.payment_intent_id
+                )
+        except IntegrityError:
+            stored = False  # another tip holds this intent: staff look
+        if not stored:
+            await self._session.rollback()
+            logger.error("tip_intent_unresolved", extra={**record.ids, "found": 1, "matching": 0})
+            raise TipNeedsReviewError
+        if status_of(facts) is TipStatus.CANCELED and tip.status in UNPAID_STATUSES:
+            await self._tips.move_status(
+                tip.id, facts.payment_intent_id, tip.status, TipStatus.CANCELED
+            )
+        await self._session.commit()
+        logger.warning("tip_payment_intent_adopted", extra=record.ids)
 
     async def _cancel(self, record: TipRecord, intent_id: str, version: datetime) -> str:
         """Cancels the tip's PaymentIntent in Stripe before a change; returns its id once
@@ -459,22 +638,33 @@ class TipService:
             tip = await self._locked_attempt(record)
             intent_id = tip.stripe_payment_intent_id
         if intent_id is None:
-            async with self._stripe_call(record, "create_payment_intent"):
-                intent = await stripe.create_payment_intent(
-                    # From the locked row, never from the request.
-                    amount_cents=tip.amount_cents,
-                    currency=tip.currency,
-                    customer_id=customer_id,
-                    transfer_group=transfer_group(tip.request_id),
-                    metadata={
-                        INTENT_KIND_KEY: TIP_INTENT_KIND,
-                        "tip_id": str(tip.id),
-                        "job_id": str(tip.job_id),
-                        "attempt": str(tip.attempt),
-                    },
-                    description=TIP_DESCRIPTION,
-                    idempotency_key=tip_payment_intent_idempotency_key(tip.id, tip.attempt),
-                )
+            refused: str | None = None
+            try:
+                async with self._stripe_call(record, "create_payment_intent"):
+                    try:
+                        intent = await stripe.create_payment_intent(
+                            # From the locked row, never from the request.
+                            amount_cents=tip.amount_cents,
+                            currency=tip.currency,
+                            customer_id=customer_id,
+                            transfer_group=transfer_group(tip.request_id),
+                            metadata={
+                                INTENT_KIND_KEY: TIP_INTENT_KIND,
+                                "tip_id": str(tip.id),
+                                "job_id": str(tip.job_id),
+                                "attempt": str(tip.attempt),
+                            },
+                            description=TIP_DESCRIPTION,
+                            idempotency_key=tip_payment_intent_idempotency_key(tip.id, tip.attempt),
+                        )
+                    except StripeRejectedError as error:
+                        if error.code in TIP_CREATE_REFUSED_CODES:
+                            refused = error.code
+                        raise
+            except PaymentsProviderError:
+                if refused is not None:
+                    await self._mark_refused(record, refused)
+                raise
             stored = await self._tips.set_payment_intent_if_missing(
                 tip.id, record.attempt, intent.payment_intent_id
             )
@@ -501,6 +691,15 @@ class TipService:
             )
             raise TipInProgressError
         return intent
+
+    async def _mark_refused(self, record: TipRecord, code: str) -> None:
+        """Stripe refused the attempt's create for good: recorded on the row, so the next
+        choice makes a new attempt (the same key would get the same refusal)."""
+        tip = await self._tips.get_by_job_for_update(record.job_id)
+        if tip is not None and tip.attempt == record.attempt:
+            await self._tips.mark_create_refused(tip.id, record.attempt)
+        await self._session.commit()
+        logger.error("tip_create_refused", extra={**record.ids, "stripe_code": code})
 
     async def _customer(self, stripe: StripePayments, user: UserAccount, record: TipRecord) -> str:
         """The customer's Stripe Customer id: the stored one (their job's payment made it),

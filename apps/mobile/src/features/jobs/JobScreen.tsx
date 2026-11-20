@@ -8,6 +8,9 @@ import { apiGet, SessionExpiredError, useSessionGeneration } from "@/api";
 import { Button, Milestones, Screen, showToast, Skeleton, TextSkeleton } from "@/components/ui";
 import { announce } from "@/components/ui/focus";
 import { ChatEntry } from "@/features/chat";
+import { cancelJobHref, mayCancel } from "@/features/cancellation/api";
+import { CancelEntry } from "@/features/cancellation/CancelEntry";
+import { CancellationStatus } from "@/features/cancellation/CancellationStatus";
 import { hasReport, ReportStatus } from "@/features/disputes/ReportStatus";
 import { useRefreshExpiredMedia } from "@/features/opportunities/useOpportunity";
 import { isUuid, useGuardedPush } from "@/features/quotes/navigation";
@@ -73,7 +76,9 @@ const jobProfileHref = (requestId: string, quoteId: string) => ({
  * cancelling is not built yet, so nothing here offers it. Once the pro marks the job done the
  * screen turns to checking the work and confirming it, or reporting a problem (`FinishedJob` with
  * its `ConfirmDock`, #66, #75), then to the confirmed job (`ConfirmedJob`). A reported job shows
- * its report and where it stands (`ReportStatus`).
+ * its report and where it stands (`ReportStatus`). Until the work starts the customer may cancel
+ * it, as the API's preview allows (`CancelEntry`, #69); a cancelled job shows where its money
+ * stands (`CancellationStatus`).
  */
 export function JobScreen() {
   const { t } = useTranslation();
@@ -369,7 +374,15 @@ function JobContent({ job, requestId, updatedAt, refetch, text, now }: JobConten
             status={job.status}
             unread={job.unread_messages}
           />
+          {mayCancel(job.status) ? (
+            <CancelEntry
+              job={job}
+              updatedAt={updatedAt}
+              onPress={() => push(cancelJobHref(requestId))}
+            />
+          ) : null}
         </View>
+        {job.cancellation ? <CancellationStatus cancellation={job.cancellation} /> : null}
         {hasReport(job) ? <ReportStatus job={job} /> : null}
         <PaidRow job={job} />
         <JobPhotos photos={job.photos} updatedAt={updatedAt} refetch={refetch} />
