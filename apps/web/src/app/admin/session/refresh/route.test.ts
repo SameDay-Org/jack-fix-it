@@ -47,12 +47,13 @@ afterEach(() => {
 });
 
 /** The request carries exactly the cookies in the jar (what the browser sent). */
-async function visit(site: string | null): Promise<string> {
+async function visit(site: string | null, query = ""): Promise<string> {
   const headers = new Headers();
   if (site !== null) headers.set("sec-fetch-site", site);
   const sent = [...cookies.values].map(([name, value]) => `${name}=${value}`).join("; ");
   if (sent) headers.set("cookie", sent);
-  const request = new NextRequest("http://web.test.invalid/admin/session/refresh", { headers });
+  const url = `http://web.test.invalid/admin/session/refresh${query}`;
+  const request = new NextRequest(url, { headers });
   try {
     await GET(request);
   } catch (signal) {
@@ -102,5 +103,45 @@ describe("GET /admin/session/refresh", () => {
 
     expect(await visit(null)).toBe(PANEL_PATH);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  describe("a busy API (#530)", () => {
+    const busy = (wait: string) => () =>
+      Response.json(
+        { error: { code: "rate_limited" } },
+        { status: 429, headers: { "Retry-After": wait } },
+      );
+
+    beforeEach(() => {
+      cookies.reset({
+        [SESSION_COOKIE]: MARKER,
+        [ACCESS_COOKIE]: bound("at-1"),
+        [REFRESH_COOKIE]: bound("rt-1"),
+      });
+    });
+
+    it("keeps the session and shows the busy page, with the short wait for its one retry", async () => {
+      fetchMock.mockImplementation(routeFetch({ "/v1/auth/refresh": busy("4") }));
+
+      expect(await visit("same-origin", "?next=%2Fadmin%2Fkpis")).toBe(
+        "/admin/session/busy?next=%2Fadmin%2Fkpis&wait=4",
+      );
+      expect(cookies.sets).toEqual([]);
+      expect(cookies.deletes).toEqual([]);
+    });
+
+    it("gives the retry itself no other retry: never a loop", async () => {
+      fetchMock.mockImplementation(routeFetch({ "/v1/auth/refresh": busy("4") }));
+
+      expect(await visit("same-origin", "?next=%2Fadmin%2Fkpis&retried=1")).toBe(
+        "/admin/session/busy?next=%2Fadmin%2Fkpis",
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("gives no retry for a wait longer than 5 seconds", async () => {
+      fetchMock.mockImplementation(routeFetch({ "/v1/auth/refresh": busy("6") }));
+
+      expect(await visit("same-origin")).toBe("/admin/session/busy");
+    });
   });
 });
