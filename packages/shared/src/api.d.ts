@@ -1731,6 +1731,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/jobs/{job_id}/cancel-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What cancelling my job now would cost
+         * @description The fee kept and the refund given back if the customer cancels now, computed on the
+         *     server: free before the pro taps On my way; after it (on the way or arrived) a share of the
+         *     job price is kept and the rest of the payment, tax included, is refunded. Show it before
+         *     the customer confirms, and send its fee_cents back as expected_fee_cents.
+         */
+        get: operations["cancel_preview_v1_jobs__job_id__cancel_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel my job
+         * @description The customer cancels their scheduled or on-the-way job. The job and its request are
+         *     cancelled; the refund (the payment minus the fee, if any) goes back to the original payment
+         *     method through Stripe, made by the server: refund_status says where it stands. The pro is
+         *     notified. A job is cancelled once: sending again returns that cancellation (200).
+         */
+        post: operations["cancel_job_v1_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pros/me/jobs/{job_id}/dispute": {
         parameters: {
             query?: never;
@@ -2041,6 +2087,99 @@ export interface components {
          * @enum {string}
          */
         BucketFilter: "problems" | "urgent" | "new" | "waiting_customer" | "waiting_pro" | "quote_ready" | "scheduled_today" | "all";
+        /**
+         * CancelParty
+         * @description Who cancelled the job: its customer or its pro.
+         * @enum {string}
+         */
+        CancelParty: "customer" | "pro";
+        /** CancelPreviewOut */
+        CancelPreviewOut: {
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /** @description scheduled or on_the_way: still cancellable. */
+            job_status: components["schemas"]["JobStatus"];
+            /**
+             * Fee Applies
+             * @description The pro tapped On my way (or arrived): cancelling now costs a fee.
+             */
+            fee_applies: boolean;
+            /**
+             * Fee Bps
+             * @description The fee's rate once the pro is on the way, in basis points of the job price (1500 = 15%), from the server's setting: for the rule line, whether or not it applies now (fee_applies).
+             */
+            fee_bps: number;
+            /**
+             * Customer Total Cents
+             * @description What the customer paid, tax included.
+             */
+            customer_total_cents: number;
+            /**
+             * Fee Cents
+             * @description What cancelling now keeps: 0 before On my way.
+             */
+            fee_cents: number;
+            /**
+             * Refund Cents
+             * @description What cancelling now gives back: total minus fee.
+             */
+            refund_cents: number;
+            /**
+             * Currency
+             * @example usd
+             */
+            currency: string;
+        };
+        /**
+         * CancelReason
+         * @description Why, as the cancelling side picks it (#69): the customer's first four, the pro's last
+         *     three, and `other` for both.
+         * @enum {string}
+         */
+        CancelReason: "changed_my_mind" | "found_another_pro" | "pro_late" | "other" | "cannot_make_it" | "customer_unreachable" | "scope_changed";
+        /**
+         * CancelRefundState
+         * @description A cancelled job's refund in plain terms, as its customer is told.
+         * @enum {string}
+         */
+        CancelRefundState: "none" | "pending" | "succeeded" | "failed";
+        /** CancellationOut */
+        CancellationOut: {
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /** @description cancelled. */
+            job_status: components["schemas"]["JobStatus"];
+            cancelled_by: components["schemas"]["CancelParty"];
+            reason_code: components["schemas"]["CancelReason"];
+            /**
+             * Fee Cents
+             * @description Kept by the platform: 0 when cancelled before On my way.
+             */
+            fee_cents: number;
+            /**
+             * Refund Cents
+             * @description Given back to the original payment method.
+             */
+            refund_cents: number;
+            /**
+             * Currency
+             * @example usd
+             */
+            currency: string;
+            /** @description none: nothing to give back. pending: on its way (Stripe has not said the money is back yet). succeeded: Stripe says it is back on the payment method. failed: it did not go through; our team looks into it. */
+            refund_status: components["schemas"]["CancelRefundState"];
+            /**
+             * Cancelled At
+             * Format: date-time
+             */
+            cancelled_at: string;
+        };
         /**
          * CardCustomer
          * @description Who to call. PII: the card alone carries it.
@@ -2411,6 +2550,26 @@ export interface components {
             id: string;
             assigned_agent: components["schemas"]["QueueAgent"] | null;
         };
+        /** CustomerCancelIn */
+        CustomerCancelIn: {
+            reason_code: components["schemas"]["CustomerCancelReason"];
+            /**
+             * Note
+             * @description Optional, plain text. Contact details are masked before it is stored; only the masked text is kept, for staff.
+             */
+            note?: string | null;
+            /**
+             * Expected Fee Cents
+             * @description The fee_cents the preview showed. When given and cancelling now costs another fee (the pro set off since), nothing changes: 409 cancel_fee_changed. Never used as an amount.
+             */
+            expected_fee_cents?: number | null;
+        };
+        /**
+         * CustomerCancelReason
+         * @description Why the customer cancels: the reasons their app offers.
+         * @enum {string}
+         */
+        CustomerCancelReason: "changed_my_mind" | "found_another_pro" | "pro_late" | "other";
         /**
          * CustomerDisputeOut
          * @description The customer's own report, its description as stored (masked). Their photos show as
@@ -2526,11 +2685,43 @@ export interface components {
             dispute_status?: components["schemas"]["DisputeStatus"] | null;
             /** @description How an admin resolved it (released, partial_release, refunded); null while open or without a report. */
             dispute_resolution?: components["schemas"]["DisputeResolution"] | null;
+            /** @description Set once the job was cancelled (#69): who, why, when, the fee, the refund and where the refund stands. Always sent (null before a cancel); optional in the schema so clients built before #69 keep compiling. */
+            cancellation?: components["schemas"]["CustomerJobCancellation"] | null;
             /**
              * Unread Messages
              * @description The pro's chat messages the customer has not marked read (#71).
              */
             unread_messages: number;
+        };
+        /**
+         * CustomerJobCancellation
+         * @description The cancellation of the customer's job, as their job view shows it.
+         */
+        CustomerJobCancellation: {
+            cancelled_by: components["schemas"]["CancelParty"];
+            reason_code: components["schemas"]["CancelReason"];
+            /**
+             * Cancelled At
+             * Format: date-time
+             */
+            cancelled_at: string;
+            /**
+             * Customer Total Cents
+             * @description What the customer paid, tax included: the fee plus the refund, as the cancellation split it (frozen with it).
+             */
+            customer_total_cents: number;
+            /**
+             * Fee Cents
+             * @description Kept by the platform: 0 when cancelled before On my way.
+             */
+            fee_cents: number;
+            /**
+             * Refund Cents
+             * @description Given back to the original payment method.
+             */
+            refund_cents: number;
+            /** @description none, pending, succeeded or failed, as on the cancel's answer. */
+            refund_status: components["schemas"]["CancelRefundState"];
         };
         /**
          * CustomerJobPhotos
@@ -3935,6 +4126,8 @@ export interface components {
              * @description What the pro will actually receive for this job (#488): the full payout normally and while a reported problem is open (under review); once an admin resolved it, the full payout for a release, the released part for a partial, 0 for a refund; 0 for a cancelled or refunded job. pro_payout_cents stays the quote's frozen payout. Always sent; optional in the schema so older clients keep compiling.
              */
             pro_receives_cents?: number | null;
+            /** @description Set once the job was cancelled (#69): who, why and when. Always sent (null before a cancel); optional in the schema so clients built before #69 keep compiling. */
+            cancellation?: components["schemas"]["ProJobCancellation"] | null;
             /** @description The transfer of that amount to the pro's account: null until the job is confirmed (and for a job that was never confirmed, or whose transfer was reversed). */
             payout: components["schemas"]["JobPayout"] | null;
             /**
@@ -3942,6 +4135,20 @@ export interface components {
              * @description The customer's chat messages the pro has not marked read (#71).
              */
             unread_messages: number;
+        };
+        /**
+         * ProJobCancellation
+         * @description The cancellation of the pro's job, as their job view shows it: who, why and when; never
+         *     the money or the note.
+         */
+        ProJobCancellation: {
+            cancelled_by: components["schemas"]["CancelParty"];
+            reason_code: components["schemas"]["CancelReason"];
+            /**
+             * Cancelled At
+             * Format: date-time
+             */
+            cancelled_at: string;
         };
         /** ProJobPage */
         ProJobPage: {
@@ -4717,6 +4924,11 @@ export interface components {
             /** Description */
             description: string;
             address: components["schemas"]["AddressOut"];
+            /**
+             * Address Id
+             * @description The customer's own address the request uses (#69: Request again offers it when it is still in their address book). Always set; optional in the schema so clients built before #69 keep compiling.
+             */
+            address_id?: string | null;
             /** Preferred Date */
             preferred_date: string | null;
             /** @description Set whenever preferred_date is; null without one. */
@@ -11255,6 +11467,165 @@ export interface operations {
             };
             /** @description validation_error: an unknown reason_code; a description blank, longer than 2000 characters, holding a NUL, or empty once invisible characters are dropped; photo_keys that are not the caller's own dispute_photo uploads, issued too long ago, repeated, already attached to a report, or more than DISPUTE_PHOTO_MAX_COUNT; an unknown field; a job_id or an Idempotency-Key that is not a UUID. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancel_preview_v1_jobs__job_id__cancel_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CancelPreviewOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers cancel here (a pro's own cancel is separate). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the customer. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description cancel_not_allowed: the work started, or the job is done, confirmed, paid out, disputed or refunded (the message names its status): report a problem instead; cancel_needs_review: the job's payment needs a look by staff first. Nothing is written. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a job_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many previews or cancels by this customer in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancel_job_v1_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description A UUID the app makes once per cancel and sends again with every retry of it. A retry answers 200 with the cancellation as it is now and writes nothing; the same key with another body, or on another job, answers 409 idempotency_key_reused. With or without it, a job is cancelled once. */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerCancelIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CancellationOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers cancel here (a pro's own cancel is separate). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the customer. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description cancel_not_allowed: the work started, or the job is done, confirmed, paid out, disputed or refunded (the message names its status): report a problem instead; cancel_needs_review: the job's payment needs a look by staff first; cancel_fee_changed: expected_fee_cents differs from the fee cancelling now costs (the pro set off since the preview); idempotency_key_reused: the caller already used this Idempotency-Key with a different body or on another job. Nothing was changed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an unknown or a pro's reason_code; a note longer than 500 characters, holding a NUL, or empty once invisible characters are dropped; a negative expected_fee_cents; an unknown field (an amount above all); a job_id or an Idempotency-Key that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many previews or cancels by this customer in the window; Retry-After says when to try again. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

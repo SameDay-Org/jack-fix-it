@@ -1073,6 +1073,7 @@ async def test_customer_job_view_unchanged_keys(
         "customer_total_cents",
         "dispute_status",
         "dispute_resolution",
+        "cancellation",
         "unread_messages",
     ]
     assert list(body["photos"]) == ["before", "after", "pending"]

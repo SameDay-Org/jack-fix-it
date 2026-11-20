@@ -129,6 +129,29 @@ class AuditService:
             reason=reason,
         )
 
+    async def record_party_action(
+        self,
+        actor_id: uuid.UUID,
+        action: AuditAction,
+        entity: AuditEntity,
+        before: AuditState,
+        after: AuditState,
+    ) -> None:
+        """Adds the row of a money action a job's own customer or pro took on it (#69: a
+        cancel, with the refund and the fee it decides) to the caller's transaction and flushes
+        it, so a failure surfaces before the caller commits the change it describes. No role
+        check here: the caller proved, under the job's lock, that `actor_id` is that party.
+        Ids, statuses, amounts and codes only: never their free text."""
+        await self._audit.add(
+            actor_user_id=actor_id,
+            action=action.value,
+            entity_type=entity.type.value,
+            entity_id=entity.id,
+            before=before,
+            after=after,
+            reason=None,
+        )
+
     async def record_staff_action(
         self,
         actor_id: uuid.UUID,

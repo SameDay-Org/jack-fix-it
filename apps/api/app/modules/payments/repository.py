@@ -81,6 +81,11 @@ class PaymentRepository:
         row = (await self._session.execute(statement)).one_or_none()
         return None if row is None else (row.id, row.request_id, row.quote_id)
 
+    async def intent_of(self, payment_id: uuid.UUID) -> str | None:
+        """The payment's PaymentIntent id, as last committed; None without one."""
+        statement = select(Payment.stripe_payment_intent_id).where(Payment.id == payment_id)
+        return await self._session.scalar(statement)
+
     async def succeeded_of_quote(self, quote_id: uuid.UUID) -> Payment | None:
         """The quote's payment that succeeded: the one its job was created from (#61), so
         the one its transfer pays from (#68). At most one (a quote has one live payment, and
@@ -524,6 +529,78 @@ class RefundRepository:
             .returning(Refund.id)
         )
         return (await self._session.scalar(statement)) is not None
+
+    async def by_key(self, key: str) -> Refund | None:
+        """The row with this idempotency key (unique), unlocked, read as last committed."""
+        statement = (
+            select(Refund)
+            .where(Refund.idempotency_key == key)
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def by_key_for_update(self, key: str) -> Refund | None:
+        """The row with this idempotency key, locked until the transaction ends, read as last
+        committed."""
+        statement = (
+            select(Refund)
+            .where(Refund.idempotency_key == key)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
+    async def due_cancel_refunds(
+        self, key_prefix: str, needs_review_code: str, tried_before: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """The job of each cancellation refund (#69: no dispute, its key under `key_prefix`)
+        the worker still has something to learn about, last looked at before `tried_before`,
+        least recently first:
+        - no Stripe refund stored, not refused for good, not for staff (`needs_review_code`):
+          left without Stripe's answer since its latest try (or its creation, before the
+          first);
+        - a Stripe refund stored that Stripe had not finished (neither succeeded, failed nor
+          canceled) when the row was last written (updated_at: every read of it writes the
+          row). Its event may never come, or may have come before the id was stored, so it is
+          read again (#489 round 1)."""
+        held = Refund.stripe_refund_id.is_not(None)
+        since = case(
+            (held, Refund.updated_at),
+            else_=func.coalesce(Refund.requested_at, Refund.created_at),
+        )
+        not_made = and_(
+            Refund.stripe_refund_id.is_(None),
+            Refund.status.in_(REFUND_NOT_MADE),
+            Refund.last_error_definitive.is_(False),
+            Refund.last_error_code.is_distinct_from(needs_review_code),
+        )
+        unfinished = and_(
+            held,
+            or_(
+                Refund.stripe_status.is_(None),
+                Refund.stripe_status.not_in([STRIPE_REFUND_SUCCEEDED, *STRIPE_REFUND_DEAD]),
+            ),
+        )
+        statement = (
+            select(Refund.job_id)
+            .where(
+                Refund.dispute_id.is_(None),
+                Refund.idempotency_key.startswith(key_prefix, autoescape=True),
+                or_(not_made, unfinished),
+                since < tried_before,
+            )
+            .order_by(since, Refund.id)
+            .limit(limit)
+        )
+        return list(await self._session.scalars(statement))
+
+    async def touch(self, refund_id: uuid.UUID) -> None:
+        """Marks the row as looked at now (updated_at), nothing else: a held refund whose read
+        failed waits the stuck window before the sweep reads it again, like one that was
+        read."""
+        await self._session.execute(
+            update(Refund).where(Refund.id == refund_id).values(updated_at=func.now())
+        )
 
     async def add(self, refund: Refund) -> Refund:
         """Inserts the row now (flush), so a second row under the key surfaces here."""

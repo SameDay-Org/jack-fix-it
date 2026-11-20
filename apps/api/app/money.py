@@ -1,4 +1,5 @@
-"""How a price splits between the pro and the platform (#246; Cesar, 2026-10-29).
+"""How a price splits between the pro and the platform (#246; Cesar, 2026-10-29), and a
+cancelled job's payment between the fee kept and the refund (#69).
 
 The one place the split is computed, so a quote's displayed payout and the amounts a job
 freezes at payment (#58, #61) cannot drift. Integer cents only: the platform fee is the amount
@@ -14,6 +15,11 @@ BPS_DENOMINATOR: Final = 10_000  # basis points in a whole
 class Split(NamedTuple):
     pro_payout_cents: int
     platform_fee_cents: int
+
+
+class CancellationSplit(NamedTuple):
+    fee_cents: int
+    refund_cents: int
 
 
 def split_amount(amount_cents: int, take_rate_bps: int) -> Split:
@@ -51,3 +57,27 @@ def partial_refund_cents(
         raise ValueError("need 0 < pro_release_cents < pro_payout_cents <= customer_total_cents")
     withheld = pro_payout_cents - pro_release_cents
     return (2 * customer_total_cents * withheld + pro_payout_cents) // (2 * pro_payout_cents)
+
+
+def cancellation_split(
+    customer_total_cents: int, job_price_cents: int, fee_bps: int
+) -> CancellationSplit:
+    """A cancelled job's payment, split between the fee the platform keeps and the refund
+    (#69; Cesar, 2026-10-29).
+
+    The fee is `fee_bps` of the job price (the quote's amount, before tax: the base the take
+    rate uses), rounded half up to the cent as split_amount rounds the platform fee; 0 bps is a
+    free cancel. The refund is the rest of what the customer paid, tax included:
+
+        fee = job_price_cents * fee_bps / 10,000 (half up)
+        refund = customer_total_cents - fee
+
+    so the two add up to the customer's total exactly, and the refund is never negative.
+    """
+    for value in (customer_total_cents, job_price_cents, fee_bps):
+        if type(value) is not int:
+            raise ValueError("amounts must be integers")
+    if not 0 < job_price_cents <= customer_total_cents:
+        raise ValueError("need 0 < job_price_cents <= customer_total_cents")
+    fee = split_amount(job_price_cents, fee_bps).platform_fee_cents
+    return CancellationSplit(fee_cents=fee, refund_cents=customer_total_cents - fee)
