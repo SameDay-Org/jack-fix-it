@@ -4,10 +4,22 @@ them (ADR 0003); the ops services do."""
 import uuid
 from datetime import datetime
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import ColumnElement, and_, func, or_, select, true, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.ops.models import RequestFollowup, RequestNote
+from app.modules.users.types import UserAccount, UserRole
+
+
+def followups_visible_to(viewer: UserAccount) -> ColumnElement[bool]:
+    """The follow-ups a staff member may read (#499 round 1): an admin every one, an agent
+    only those assigned to them (an agent can schedule one for no one else). Every
+    follow-up read goes through it, the request's card and the follow-ups list alike, so
+    the two cannot drift. `viewer` is the account as this transaction read it, never the
+    role a token was issued with."""
+    if viewer.role is UserRole.ADMIN:
+        return true()
+    return RequestFollowup.assigned_to == viewer.id
 
 
 class NoteRepository:
@@ -62,11 +74,11 @@ class FollowupRepository:
         )
         return (await self._session.scalar(statement)) is not None
 
-    async def of_request(self, request_id: uuid.UUID) -> list[RequestFollowup]:
-        """The request's follow-ups, by due time."""
+    async def of_request(self, request_id: uuid.UUID, viewer: UserAccount) -> list[RequestFollowup]:
+        """The request's follow-ups `viewer` may read (followups_visible_to), by due time."""
         statement = (
             select(RequestFollowup)
-            .where(RequestFollowup.request_id == request_id)
+            .where(RequestFollowup.request_id == request_id, followups_visible_to(viewer))
             .order_by(RequestFollowup.due_at, RequestFollowup.id)
             .execution_options(populate_existing=True)
         )
@@ -84,14 +96,18 @@ class FollowupRepository:
     async def open_due(
         self,
         assigned_to: uuid.UUID,
+        viewer: UserAccount,
         due_before: datetime | None,
         after: tuple[datetime, uuid.UUID] | None,
         limit: int,
     ) -> list[RequestFollowup]:
-        """The staff member's follow-ups not done, due before `due_before` (None: any time),
-        by due time then id, after the cursor's (due_at, id) when given; at most `limit`."""
+        """The staff member's follow-ups not done that `viewer` may read
+        (followups_visible_to), due before `due_before` (None: any time), by due time then
+        id, after the cursor's (due_at, id) when given; at most `limit`."""
         statement = select(RequestFollowup).where(
-            RequestFollowup.assigned_to == assigned_to, RequestFollowup.done_at.is_(None)
+            RequestFollowup.assigned_to == assigned_to,
+            RequestFollowup.done_at.is_(None),
+            followups_visible_to(viewer),
         )
         if due_before is not None:
             statement = statement.where(RequestFollowup.due_at < due_before)
