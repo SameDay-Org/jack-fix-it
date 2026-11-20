@@ -1,3 +1,4 @@
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { router, unstable_useIsNavigating, useScrollToTop } from "expo-router";
 import {
   useCallback,
@@ -11,9 +12,10 @@ import {
 import { useTranslation } from "react-i18next";
 import { FlatList, RefreshControl, View } from "react-native";
 
-import { SessionExpiredError } from "@/api";
+import { isCurrentGeneration, SessionExpiredError, useSessionGeneration } from "@/api";
 import { showToast } from "@/components/ui";
 import { useCategories } from "@/features/home/useCategories";
+import { customerJobQueryOptions, jobHref } from "@/features/jobs/api";
 import { RetryNotice } from "@/features/opportunities/RetryNotice";
 import { useRefetchOnReturn, useSettledError } from "@/features/quotes/useRequestQuotes";
 import { tokens } from "@/theme";
@@ -174,8 +176,16 @@ export function RequestList({ header, empty, testID = "request-list" }: RequestL
 /**
  * Opens a request. A second tap before it is up opens nothing: the router queues a push and the
  * list stays tappable until it lands. Once the router is idle again a row opens again.
+ *
+ * A cancelled request whose job was booked opens on that job (#545): the cancel, where its money
+ * stands and, after a pro's cancel, the way to a new request are there. Its quotes are not: the
+ * API lists none once a request is cancelled. The job is asked first (the job screen's own query,
+ * so it opens with it); with none (cancelled before anyone was hired) or no answer, the request
+ * opens as any other.
  */
 function useOpenRequest() {
+  const client = useQueryClient();
+  const generation = useSessionGeneration();
   const opening = useRef(false);
   const navigating = unstable_useIsNavigating();
 
@@ -183,11 +193,34 @@ function useOpenRequest() {
     if (!navigating) opening.current = false;
   }, [navigating]);
 
-  return useCallback((request: RequestSummary) => {
-    if (opening.current) return;
-    opening.current = true;
-    router.push({ pathname: "/requests/[id]", params: { id: request.id } });
-  }, []);
+  const open = useCallback(
+    async (request: RequestSummary) => {
+      if (opening.current) return;
+      opening.current = true;
+      const booked =
+        request.status === "cancelled" && (await hasJob(client, request.id, generation));
+      // The session that asked may be over by the answer: its screens went with it.
+      if (!isCurrentGeneration(generation)) {
+        opening.current = false;
+        return;
+      }
+      router.push(
+        booked ? jobHref(request.id) : { pathname: "/requests/[id]", params: { id: request.id } },
+      );
+    },
+    [client, generation],
+  );
+  return useCallback((request: RequestSummary) => void open(request), [open]);
+}
+
+/** Whether the request's job answers, from the cache or asked now; false on a 404 or no answer. */
+async function hasJob(client: QueryClient, requestId: string, generation: number) {
+  try {
+    await client.fetchQuery(customerJobQueryOptions(requestId, generation));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Row-shaped placeholders, read as one "Loading your requests" progress indicator. */
