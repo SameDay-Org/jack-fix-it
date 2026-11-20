@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { uuid } from "expo";
 import * as Haptics from "expo-haptics";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -27,10 +28,13 @@ export type TipSelection = { kind: "percent"; percent: number } | { kind: "custo
 
 /**
  * Why a tip did not go through, said calmly with "Try again" and "No tip": `declined` (the sheet
- * or the card refused it, or the API reported it failed), `offline` (no answer), `generic` (any
- * other failure). A failed tip never touches the job: it stays confirmed.
+ * or the card refused it, or the API reported it failed), `offline` (no answer), `rateLimited`
+ * (too many choices in a short time), `inProgress` (its payment, or another change of it, is under
+ * way), `generic` (any other failure). `needsReview`: support has to look at the tip first, so the
+ * card offers no choice. A failed tip never touches the job: it stays confirmed.
  */
-export type TipFailure = "declined" | "offline" | "generic";
+export type TipFailure =
+  "declined" | "offline" | "rateLimited" | "inProgress" | "needsReview" | "generic";
 
 /** Where the custom amount stands: nothing wrong, not an amount, or outside the bounds. */
 export type CustomProblem = "invalid" | "outOfRange" | null;
@@ -60,6 +64,45 @@ export type TipState = {
 /** The API's last word on a tip: nothing is in flight once it is one of these. */
 const SETTLED: ReadonlySet<TipOut["status"]> = new Set(["succeeded", "failed", "declined"]);
 
+/** Whether a failed send may not have been settled, so its retry carries the same key. */
+function undecided(error: unknown): boolean {
+  return (
+    error instanceof NetworkError ||
+    (error instanceof ApiError && (error.status === 429 || error.status >= 500))
+  );
+}
+
+/** What the card says about a send that failed; null when the job's refreshed answer says it. */
+function failureOf(error: unknown, choice: TipCreate): TipFailure | null {
+  if (error instanceof NetworkError) return "offline";
+  if (!(error instanceof ApiError)) return "generic";
+  if (error.status === 429) return "rateLimited";
+  if (error.status === 422) return choice.choice === "custom" ? null : "generic";
+  if (error.status !== 409) return "generic";
+  switch (error.code) {
+    case TIP_ERRORS.notAvailable:
+    case TIP_ERRORS.alreadyPaid:
+      return null;
+    case TIP_ERRORS.inProgress:
+      return "inProgress";
+    case TIP_ERRORS.needsReview:
+      return "needsReview";
+    default:
+      return "generic";
+  }
+}
+
+/** Whether the job is asked for again after a refusal: its tip moved on the server meanwhile. */
+function refreshes(error: ApiError, choice: TipCreate): boolean {
+  if (error.status === 422) return choice.choice === "percent";
+  return (
+    error.status === 409 &&
+    (error.code === TIP_ERRORS.notAvailable ||
+      error.code === TIP_ERRORS.alreadyPaid ||
+      error.code === TIP_ERRORS.inProgress)
+  );
+}
+
 /** The amount a selection pays: a preset's comes from the server, a custom one is as typed. */
 function selectedCents(tip: TipOut, selection: TipSelection | null, custom: string): number | null {
   if (selection === null) return null;
@@ -88,6 +131,8 @@ export function useTip(requestId: string, job: CustomerJob): TipState {
   const [localFailure, setLocalFailure] = useState<TipFailure | null>(null);
   // When the sheet took a payment: the wait for the API's answer starts there.
   const [paidAt, setPaidAt] = useState<number | null>(null);
+  // The Idempotency-Key of the last choice sent, kept while its answer may still be unknown.
+  const sentKey = useRef<{ body: string; key: string } | null>(null);
   const mounted = useRef(true);
   useEffect(
     () => () => {
@@ -141,8 +186,14 @@ export function useTip(requestId: string, job: CustomerJob): TipState {
     setLocalFailure(null);
     setPaidAt(null);
     announced.current = false;
+    const body = JSON.stringify(choice);
+    const kept = sentKey.current;
+    const idempotencyKey = kept?.body === body ? kept.key : uuid.v4();
+    sentKey.current = { body, key: idempotencyKey };
     try {
-      const answer = await sendTip(requestId, choice, started);
+      const answer = await sendTip(requestId, choice, { generation: started, idempotencyKey });
+      // Answered: the next send is a new choice, with a new key.
+      sentKey.current = null;
       if (!current()) return;
       rememberTip(queryClient, requestId, started, answer.tip);
       if (!answer.sheet) return;
@@ -158,18 +209,16 @@ export function useTip(requestId: string, job: CustomerJob): TipState {
         setLocalFailure("declined");
       }
     } catch (error) {
+      if (!undecided(error)) sentKey.current = null;
       if (!current()) return;
-      if (error instanceof ApiError && error.status === 422) {
-        setCustomProblem("outOfRange");
-      } else if (
-        error instanceof ApiError &&
-        error.status === 409 &&
-        (error.code === TIP_ERRORS.notAvailable || error.code === TIP_ERRORS.alreadyPaid)
-      ) {
-        // The window closed or a tip landed meanwhile: the job's answer says which.
+      setLocalFailure(failureOf(error, choice));
+      if (error instanceof ApiError && refreshes(error, choice)) {
+        // The window closed, a tip landed or is under way, or the presets changed meanwhile: the
+        // job's answer says which.
         refreshCustomerJob(queryClient, requestId, started);
-      } else {
-        setLocalFailure(error instanceof NetworkError ? "offline" : "generic");
+      }
+      if (error instanceof ApiError && error.status === 422 && choice.choice === "custom") {
+        setCustomProblem("outOfRange");
       }
     } finally {
       release();

@@ -14,6 +14,9 @@ const DONE_ICON = 20;
 const FAILURE_KEYS = {
   declined: "tips.failed",
   offline: "tips.offline",
+  rateLimited: "tips.rateLimited",
+  inProgress: "tips.inProgress",
+  needsReview: "tips.needsReview",
   generic: "tips.generic",
 } as const satisfies Record<TipFailure, string>;
 
@@ -21,7 +24,8 @@ const FAILURE_KEYS = {
  * The tip at confirmation (#273), between the confirmation and the rating: "Add a tip for Dan?",
  * a radio group of No tip, the server's presets with their amounts, and Custom, then "Tip $12.50"
  * through Stripe's Payment Sheet. Optional and calm: nothing is preselected, a failure keeps the
- * job confirmed and offers Try again or No tip, and once decided the card is one line.
+ * job confirmed and offers Try again or No tip, and once decided the card is one line. A tip
+ * support has to look at first offers no choice at all, only the note.
  */
 export function TipCard({ requestId, job }: { requestId: string; job: CustomerJob }) {
   const { t } = useTranslation();
@@ -57,6 +61,8 @@ export function TipCard({ requestId, job }: { requestId: string; job: CustomerJo
   if (!tip.can_tip) return null;
 
   const busy = phase !== "idle";
+  // Every choice is refused until support looks at the tip: the card says so and offers none.
+  const locked = failure === "needsReview";
   const custom = selection?.kind === "custom";
   const { min_cents: min, max_cents: max } = tip.options;
   return (
@@ -68,37 +74,39 @@ export function TipCard({ requestId, job }: { requestId: string; job: CustomerJo
           </Text>
           <Text className="text-callout text-gray-500">{t("tips.body", { name })}</Text>
         </View>
-        <View
-          accessibilityRole="radiogroup"
-          accessibilityLabel={t("tips.group")}
-          className="flex-row flex-wrap gap-2"
-          testID="tip-options"
-        >
-          <Chip label={t("tips.none")} onPress={state.skip} disabled={busy} testID="tip-none" />
-          {tip.options.presets.map((preset) => (
+        {locked ? null : (
+          <View
+            accessibilityRole="radiogroup"
+            accessibilityLabel={t("tips.group")}
+            className="flex-row flex-wrap gap-2"
+            testID="tip-options"
+          >
+            <Chip label={t("tips.none")} onPress={state.skip} disabled={busy} testID="tip-none" />
+            {tip.options.presets.map((preset) => (
+              <Chip
+                key={preset.percent}
+                label={t("tips.percent", {
+                  percent: preset.percent,
+                  amount: money(preset.amount_cents),
+                })}
+                selected={selection?.kind === "percent" && selection.percent === preset.percent}
+                selectionRole="radio"
+                onPress={() => state.select({ kind: "percent", percent: preset.percent })}
+                disabled={busy}
+                testID={`tip-percent-${preset.percent}`}
+              />
+            ))}
             <Chip
-              key={preset.percent}
-              label={t("tips.percent", {
-                percent: preset.percent,
-                amount: money(preset.amount_cents),
-              })}
-              selected={selection?.kind === "percent" && selection.percent === preset.percent}
+              label={t("tips.custom")}
+              selected={custom}
               selectionRole="radio"
-              onPress={() => state.select({ kind: "percent", percent: preset.percent })}
+              onPress={() => state.select({ kind: "custom" })}
               disabled={busy}
-              testID={`tip-percent-${preset.percent}`}
+              testID="tip-custom"
             />
-          ))}
-          <Chip
-            label={t("tips.custom")}
-            selected={custom}
-            selectionRole="radio"
-            onPress={() => state.select({ kind: "custom" })}
-            disabled={busy}
-            testID="tip-custom"
-          />
-        </View>
-        {custom ? (
+          </View>
+        )}
+        {custom && !locked ? (
           <Input
             label={t("tips.customLabel")}
             value={state.custom}
@@ -118,12 +126,16 @@ export function TipCard({ requestId, job }: { requestId: string; job: CustomerJo
           />
         ) : null}
         {failure ? (
-          <Notice tone="danger" title={t(FAILURE_KEYS[failure])} testID="tip-failed" />
+          <Notice
+            tone={locked ? "info" : "danger"}
+            title={t(FAILURE_KEYS[failure])}
+            testID="tip-failed"
+          />
         ) : null}
         {phase === "delayed" ? (
           <Notice tone="info" title={t("tips.delayed")} testID="tip-delayed" />
         ) : null}
-        {selection ? (
+        {selection && !locked ? (
           <Button
             label={
               amountCents === null

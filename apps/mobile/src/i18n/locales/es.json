@@ -2227,6 +2227,9 @@
     "failed": "La propina no se procesó. Tu trabajo sigue confirmado.",
     "offline": "Estás sin conexión. Tu trabajo sigue confirmado; intenta la propina de nuevo cuando vuelvas.",
     "generic": "Algo salió mal con la propina. Tu trabajo sigue confirmado.",
-    "delayed": "Seguimos confirmando tu propina. Aparecerá aquí pronto."
+    "delayed": "Seguimos confirmando tu propina. Aparecerá aquí pronto.",
+    "rateLimited": "Demasiados intentos en poco tiempo. Espera un momento y vuelve a intentarlo. Tu trabajo sigue confirmado.",
+    "inProgress": "Esta propina ya se está procesando. Aparecerá aquí pronto.",
+    "needsReview": "Nuestro equipo de soporte está revisando esta propina. Tu trabajo sigue confirmado; no necesitas hacer nada."
   }
 }

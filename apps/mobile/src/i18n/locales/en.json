@@ -2227,6 +2227,9 @@
     "failed": "The tip didn't go through. Your job is still confirmed.",
     "offline": "You're offline. Your job is still confirmed; try the tip again when you're back online.",
     "generic": "Something went wrong with the tip. Your job is still confirmed.",
-    "delayed": "We're still confirming your tip. It shows here soon."
+    "delayed": "We're still confirming your tip. It shows here soon.",
+    "rateLimited": "Too many tries in a short time. Wait a moment, then try again. Your job is still confirmed.",
+    "inProgress": "This tip is already being processed. It shows here soon.",
+    "needsReview": "Our support team is checking this tip. Your job is still confirmed; you don't need to do anything."
   }
 }

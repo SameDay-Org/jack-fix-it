@@ -116,6 +116,10 @@ const tick = () =>
 const chip = (name: string) => screen.getByRole("radio", { name });
 const payButton = () => screen.getByTestId("tip-pay");
 const tipCalls = () => jest.mocked(apiPost).mock.calls.filter(([path]) => path === TIP_PATH);
+/** The Idempotency-Key each tip call carried, in order. */
+const sentKeys = () =>
+  tipCalls().map((call) => (call[2] as { idempotencyKey?: string } | undefined)?.idempotencyKey);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 beforeEach(() => {
   jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] });
@@ -170,7 +174,12 @@ describe("TipCard (#273)", () => {
       [
         TIP_PATH,
         { choice: "percent", percent: 10 },
-        { auth: true, generation: 1, params: { request_id: REQUEST_ID } },
+        {
+          auth: true,
+          generation: 1,
+          idempotencyKey: expect.stringMatching(UUID),
+          params: { request_id: REQUEST_ID },
+        },
       ],
     ]);
     expect(jest.mocked(openPaymentSheet).mock.calls[0]?.[0]).toBe(SHEET);
@@ -298,6 +307,94 @@ describe("TipCard (#273)", () => {
     await waitFor(() => expect(reads()).toBeGreaterThan(before));
     await waitFor(() => expect(screen.queryByTestId("tip-card")).toBeNull());
     expect(screen.queryByTestId("tip-failed")).toBeNull();
+  });
+
+  it("a retry of an unanswered choice carries its key again; an answer or a new choice gets a new one", async () => {
+    await renderCard();
+    jest.mocked(apiPost).mockRejectedValueOnce(new NetworkError(false));
+    jest.mocked(apiPost).mockResolvedValue({
+      tip: tipOut({ status: "requires_payment" }),
+      sheet: SHEET,
+    } as never);
+    jest.mocked(openPaymentSheet).mockResolvedValue({ kind: "failed", reason: "failed" });
+
+    await act(async () => fireEvent.press(chip("10% · $9.99")));
+    await act(async () => fireEvent.press(payButton())); // no answer
+    await act(async () => fireEvent.press(payButton())); // its retry: answered, the card refused
+    await act(async () => fireEvent.press(payButton())); // Try again: a new attempt
+    await act(async () => fireEvent.press(chip("5% · $9.01")));
+    await act(async () => fireEvent.press(payButton())); // another choice
+
+    const [first, retry, again, other] = sentKeys();
+    expect(first).toMatch(UUID);
+    expect(retry).toBe(first);
+    expect(again).toMatch(UUID);
+    expect(again).not.toBe(first);
+    expect(other).toMatch(UUID);
+    expect(new Set([first, again, other]).size).toBe(3);
+  });
+
+  it("too many tries says wait, keeps the choice, and the retry carries the same key", async () => {
+    await renderCard();
+    jest.mocked(apiPost).mockRejectedValue(new ApiError(429, "rate_limited"));
+
+    await act(async () => fireEvent.press(chip("10% · $9.99")));
+    await act(async () => fireEvent.press(payButton()));
+
+    expect(screen.getByTestId("tip-failed")).toHaveTextContent(
+      "Too many tries in a short time. Wait a moment, then try again. Your job is still confirmed.",
+    );
+    expect(payButton().props.accessibilityState).toMatchObject({ disabled: false });
+    await act(async () => fireEvent.press(payButton()));
+    const [first, retry] = sentKeys();
+    expect(retry).toBe(first);
+  });
+
+  it("a tip support must look at first says so and offers no choice", async () => {
+    await renderCard();
+    jest.mocked(apiPost).mockRejectedValue(new ApiError(409, "tip_needs_review"));
+
+    await act(async () => fireEvent.press(chip("10% · $9.99")));
+    await act(async () => fireEvent.press(payButton()));
+
+    expect(screen.getByTestId("tip-failed")).toHaveTextContent(
+      "Our support team is checking this tip. Your job is still confirmed; you don't need to do anything.",
+    );
+    expect(screen.queryByTestId("tip-options")).toBeNull();
+    expect(screen.queryByTestId("tip-pay")).toBeNull();
+    expect(screen.queryByRole("button", { name: "No tip" })).toBeNull();
+    expect(tipCalls()).toHaveLength(1);
+  });
+
+  it("a tip already under way asks for the job again and says it shows soon", async () => {
+    await renderCard();
+    jest.mocked(apiPost).mockRejectedValue(new ApiError(409, "tip_in_progress"));
+    const reads = () => jest.mocked(apiGet).mock.calls.length;
+    const before = reads();
+
+    await act(async () => fireEvent.press(chip("10% · $9.99")));
+    await act(async () => fireEvent.press(payButton()));
+
+    await waitFor(() => expect(reads()).toBeGreaterThan(before));
+    expect(screen.getByTestId("tip-failed")).toHaveTextContent(
+      "This tip is already being processed. It shows here soon.",
+    );
+  });
+
+  it("a key the server says was used for another choice is dropped: the next try has a new one", async () => {
+    await renderCard();
+    jest.mocked(apiPost).mockRejectedValue(new ApiError(409, "idempotency_key_reused"));
+
+    await act(async () => fireEvent.press(chip("10% · $9.99")));
+    await act(async () => fireEvent.press(payButton()));
+    expect(screen.getByTestId("tip-failed")).toHaveTextContent(
+      "Something went wrong with the tip. Your job is still confirmed.",
+    );
+    await act(async () => fireEvent.press(payButton()));
+
+    const [first, next] = sentKeys();
+    expect(next).toMatch(UUID);
+    expect(next).not.toBe(first);
   });
 
   it("a tip paid before shows as a record, not a question", async () => {
