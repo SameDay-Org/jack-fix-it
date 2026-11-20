@@ -13,6 +13,7 @@ import os
 import shutil
 import struct
 import subprocess
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -623,3 +624,250 @@ async def test_opus_audio_declared_as_quicktime_is_written_as_mp4(
 
     assert (safe.content_type, safe.extension) == ("video/mp4", ".mp4")
     assert video_kinds(tools, safe.path) == [("video", "h264"), ("audio", "opus")]
+
+
+# SEI user data (#182): a drone or a dashcam can write its GPS inside the video bitstream, in a
+# user data SEI of each frame, which a remux copies unless it is dropped.
+
+SEI_GPS = "GPS 12.3456 -65.4321 fixture"  # a marker, no real place
+SEI_UUID = "086f3693-b7b3-4f2c-9653-21492feee5b8"
+USER_DATA_UNREGISTERED, USER_DATA_T35, MASTERING_DISPLAY = 5, 4, 137
+HEVC_VPS, HEVC_PREFIX_SEI, HEVC_SUFFIX_SEI = 32, 39, 40
+
+
+def require_encoder(tools: Tools, encoder: str) -> None:
+    """The encoder in this ffmpeg build. In CI its absence is a failure, not a skip."""
+    listed = subprocess.run(  # noqa: S603 - fixed arguments, test fixture
+        [tools.ffmpeg, "-hide_banner", "-encoders"], check=True, capture_output=True, text=True
+    ).stdout
+    if any(line.split()[1:2] == [encoder] for line in listed.splitlines() if line.strip()):
+        return
+    if os.environ.get("CI") == "true":
+        pytest.fail(f"ffmpeg has no {encoder} encoder; the #182 fixtures need it")
+    pytest.skip(f"this ffmpeg has no {encoder} encoder")
+
+
+def user_data_frames(tools: Tools, path: Path) -> int:
+    """How many decoded frames ffprobe reports user data SEI side data on."""
+    command = [
+        tools.ffprobe, "-v", "error", "-select_streams", "v:0", "-show_frames",
+        "-show_entries", "frame_side_data=side_data_type", "-of", "json", str(path),
+    ]  # fmt: skip
+    result = subprocess.run(  # noqa: S603 - fixed arguments, test fixture
+        command, check=True, capture_output=True, text=True
+    )
+    frames = json.loads(result.stdout).get("frames", [])
+    return sum(
+        any(
+            "User Data" in side.get("side_data_type", "")
+            for side in frame.get("side_data_list", [])
+        )
+        for frame in frames
+    )
+
+
+def frame_count(tools: Tools, path: Path) -> int:
+    command = [
+        tools.ffprobe, "-v", "error", "-count_frames", "-select_streams", "v:0",
+        "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", str(path),
+    ]  # fmt: skip
+    result = subprocess.run(  # noqa: S603 - fixed arguments, test fixture
+        command, check=True, capture_output=True, text=True
+    )
+    return int(result.stdout.strip())
+
+
+def make_h264_with_sei_gps(tools: Tools, path: Path, container: str) -> None:
+    """H.264 and AAC, with ffmpeg's h264_metadata writing the marker in a user data SEI."""
+    run_ffmpeg(
+        tools, "-f", "lavfi", "-i", "testsrc=duration=1:size=64x48:rate=10",
+        "-f", "lavfi", "-i", "sine=duration=1",
+        "-c:v", "libx264", "-bsf:v", f"h264_metadata=sei_user_data={SEI_UUID}+{SEI_GPS}",
+        "-c:a", "aac", "-shortest", "-f", container, str(path),
+    )  # fmt: skip
+
+
+def escaped(rbsp: bytes) -> bytes:
+    """The payload as a NAL unit carries it: 0x03 after two zero bytes before 0x00 to 0x03."""
+    out, zeros = bytearray(), 0
+    for byte in rbsp:
+        if zeros >= 2 and byte <= 3:
+            out.append(3)
+            zeros = 0
+        out.append(byte)
+        zeros = zeros + 1 if byte == 0 else 0
+    return bytes(out)
+
+
+def sei_number(value: int) -> bytes:
+    return b"\xff" * (value // 255) + bytes([value % 255])
+
+
+def hevc_sei(*messages: tuple[int, bytes], nal_type: int = HEVC_PREFIX_SEI) -> bytes:
+    """An HEVC SEI NAL unit (header, escaped messages, trailing bits), without a start code."""
+    body = b"".join(sei_number(kind) + sei_number(len(data)) + data for kind, data in messages)
+    return bytes([nal_type << 1, 1]) + escaped(body + b"\x80")
+
+
+def with_sei_before_each_picture(stream: bytes, sei: bytes) -> bytes:
+    """An HEVC Annex B stream with `sei` before the first slice of every picture."""
+    starts = [i for i in range(len(stream) - 2) if stream[i : i + 3] == b"\x00\x00\x01"]
+    out = bytearray()
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(stream)
+        unit = (
+            stream[start + 3 : end].rstrip(b"\x00") if end != len(stream) else stream[start + 3 :]
+        )
+        nal_type = (unit[0] >> 1) & 0x3F
+        if nal_type < 32 and unit[2] & 0x80:  # a slice that starts its picture
+            out += b"\x00\x00\x00\x01" + sei
+        out += b"\x00\x00\x00\x01" + unit
+    return bytes(out)
+
+
+def make_hevc_with_sei_gps(tools: Tools, path: Path, tmp_path: Path) -> None:
+    """HEVC with the marker in a user data SEI of every frame (in the packets, not in hvcC).
+    ffmpeg writes no such SEI into HEVC, so it is inserted here into the elementary stream.
+    x265's own settings SEI is off (info=0), and no B-frames (the elementary stream carries no
+    timestamps, so reordered frames would come back hidden by an edit list)."""
+    require_encoder(tools, "libx265")
+    elementary = tmp_path / "plain.hevc"
+    run_ffmpeg(
+        tools, "-f", "lavfi", "-i", "testsrc=duration=1:size=64x48:rate=10",
+        "-c:v", "libx265", "-x265-params", "log-level=none:info=0:bframes=0",
+        "-f", "hevc", str(elementary),
+    )  # fmt: skip
+    sei = hevc_sei((USER_DATA_UNREGISTERED, uuid.UUID(SEI_UUID).bytes + SEI_GPS.encode()))
+    marked = tmp_path / "marked.hevc"
+    marked.write_bytes(with_sei_before_each_picture(elementary.read_bytes(), sei))
+    run_ffmpeg(
+        tools, "-f", "hevc", "-framerate", "10", "-i", str(marked),
+        "-c", "copy", "-tag:v", "hvc1", "-f", "mp4", str(path),
+    )  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("content_type", "container"), [("video/mp4", "mp4"), ("video/quicktime", "mov")]
+)
+async def test_gps_in_h264_user_data_is_removed(
+    tmp_path: Path, workdir: Path, tools: Tools, content_type: str, container: str
+) -> None:
+    source = tmp_path / "original"
+    make_h264_with_sei_gps(tools, source, container)
+    assert SEI_GPS.encode() in source.read_bytes()  # the fixture does carry it
+    assert user_data_frames(tools, source) > 0
+
+    safe = await sanitize(source, content_type, workdir, CONFIG)
+
+    copied = safe.path.read_bytes()
+    assert SEI_GPS.encode() not in copied
+    assert b"x264 - core" not in copied  # the encoder's own user data SEI went too
+    assert user_data_frames(tools, safe.path) == 0
+    assert frame_count(tools, safe.path) == frame_count(tools, source)  # every frame plays
+    assert codecs(probe(tools, safe.path)) == ["h264", "aac"]  # copied, not re-encoded
+
+
+async def test_gps_in_hevc_user_data_is_removed(
+    tmp_path: Path, workdir: Path, tools: Tools
+) -> None:
+    source = tmp_path / "original"
+    make_hevc_with_sei_gps(tools, source, tmp_path)
+    assert source.read_bytes().count(SEI_GPS.encode()) == frame_count(tools, source)
+    assert user_data_frames(tools, source) > 0
+
+    safe = await sanitize(source, "video/mp4", workdir, CONFIG)
+
+    assert SEI_GPS.encode() not in safe.path.read_bytes()
+    assert user_data_frames(tools, safe.path) == 0
+    assert frame_count(tools, safe.path) == frame_count(tools, source)
+    assert codecs(probe(tools, safe.path)) == ["hevc"]
+
+
+async def test_user_data_in_the_hevc_configuration_fails_the_copy(
+    tmp_path: Path, workdir: Path, tools: Tools
+) -> None:
+    # x265 writes its settings as a user data SEI into the decoder configuration (hvcC), which
+    # the SEI filter does not reach: the copy is refused rather than served with it.
+    require_encoder(tools, "libx265")
+    source = tmp_path / "original"
+    run_ffmpeg(
+        tools, "-f", "lavfi", "-i", "testsrc=duration=1:size=64x48:rate=10",
+        "-c:v", "libx265", "-x265-params", "log-level=none", "-tag:v", "hvc1",
+        "-f", "mp4", str(source),
+    )  # fmt: skip
+    assert b"x265 (build" in source.read_bytes()
+
+    with pytest.raises(SanitizeError) as error:
+        await sanitize(source, "video/mp4", workdir, CONFIG)
+
+    assert error.value.reason == SanitizeFailure.METADATA_REMAINS
+
+
+async def test_a_video_codec_without_an_sei_filter_is_not_copied(
+    tmp_path: Path, workdir: Path, tools: Tools
+) -> None:
+    # Allowed by the settings, but the copy has no way to drop its user data: never copied.
+    source = tmp_path / "original"
+    run_ffmpeg(
+        tools, "-f", "lavfi", "-i", "testsrc=duration=1:size=64x48:rate=10",
+        "-c:v", "mpeg4", "-f", "mp4", str(source),
+    )  # fmt: skip
+    config = dataclasses.replace(CONFIG, video_codecs=frozenset({"h264", "hevc", "mpeg4"}))
+
+    with pytest.raises(SanitizeError) as error:
+        await sanitize(source, "video/mp4", workdir, config)
+
+    assert error.value.reason == SanitizeFailure.UNSUPPORTED_CODEC
+    assert not made_a_copy(workdir)
+
+
+def hvcc(*units: bytes, array_type: int | None = None) -> bytes:
+    """An HEVC decoder configuration record: version 1, zeroed fields, one array per unit."""
+    record = bytearray([1, *bytes(21), len(units)])
+    for unit in units:
+        kind = (unit[0] >> 1) & 0x3F if array_type is None else array_type
+        record += bytes([kind]) + (1).to_bytes(2) + len(unit).to_bytes(2) + unit
+    return bytes(record)
+
+
+VPS_UNIT = bytes([HEVC_VPS << 1, 1, 0x0C, 0x01, 0xFF, 0xFF])
+UNREGISTERED = (USER_DATA_UNREGISTERED, uuid.UUID(SEI_UUID).bytes + SEI_GPS.encode())
+
+
+@pytest.mark.parametrize(
+    ("record", "holds"),
+    [
+        pytest.param(b"", False, id="no_record"),
+        pytest.param(hvcc(VPS_UNIT), False, id="parameter_sets_only"),
+        pytest.param(hvcc(VPS_UNIT, hevc_sei((MASTERING_DISPLAY, bytes(24)))), False, id="hdr"),
+        pytest.param(hvcc(hevc_sei((260, b"\x01\x02"))), False, id="type_past_255_not_user_data"),
+        pytest.param(hvcc(hevc_sei(UNREGISTERED)), True, id="unregistered"),
+        pytest.param(hvcc(hevc_sei((USER_DATA_T35, b"\xb5\x00\x31GPS"))), True, id="t35"),
+        pytest.param(hvcc(hevc_sei(UNREGISTERED, nal_type=HEVC_SUFFIX_SEI)), True, id="suffix_sei"),
+        pytest.param(
+            hvcc(hevc_sei((MASTERING_DISPLAY, bytes(300)), UNREGISTERED)),
+            True,
+            id="after_a_long_message",
+        ),
+        pytest.param(
+            # 00 00 01 is carried as 00 00 03 01: read escaped, the first message ends a byte
+            # early and the user data message reads as the end of the unit.
+            hvcc(hevc_sei((MASTERING_DISPLAY, b"\x00\x00\x01"), (USER_DATA_UNREGISTERED, b"GPS!"))),
+            True,
+            id="after_escaped_zero_bytes",
+        ),
+        pytest.param(
+            hvcc(hevc_sei(UNREGISTERED), array_type=HEVC_VPS), True, id="sei_in_another_array"
+        ),
+        pytest.param(hvcc(hevc_sei(UNREGISTERED))[:-4], True, id="truncated"),
+        pytest.param(hvcc(VPS_UNIT) + b"\x00", True, id="trailing_bytes"),
+        pytest.param(bytes([2]) + hvcc(VPS_UNIT)[1:], True, id="another_version"),
+        pytest.param(
+            hvcc(bytes([HEVC_PREFIX_SEI << 1, 1, MASTERING_DISPLAY, 200, 1, 2, 0x80])),
+            True,
+            id="message_past_the_unit",
+        ),
+    ],
+)
+def test_user_data_in_an_hevc_configuration_is_found(record: bytes, holds: bool) -> None:
+    assert sanitize_module.hevc_configuration_holds_user_data(record) is holds

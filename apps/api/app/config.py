@@ -269,7 +269,8 @@ class Settings(BaseSettings):
     ffmpeg_path: str = Field(default="ffmpeg", min_length=1)
     ffprobe_path: str = Field(default="ffprobe", min_length=1)
     # The only video and audio codecs a safe copy may carry (CSV of ffmpeg codec names): a remux
-    # copies the streams as they are, and an image codec (MJPEG, PNG) keeps its EXIF.
+    # copies the streams as they are, and an image codec (MJPEG, PNG) keeps its EXIF. A video
+    # codec also needs a SEI filter in app/modules/media/sanitize.py (h264, hevc), #182.
     media_video_codecs: Annotated[list[str], NoDecode] = Field(default=["h264", "hevc"])
     media_audio_codecs: Annotated[list[str], NoDecode] = Field(default=["aac", "mp3", "opus"])
     # The longest one sanitize job may run (every media of one request), past which ARQ stops it
