@@ -28,6 +28,7 @@ from app.modules.auth.schemas import (
     PhoneVerifyRequest,
 )
 from app.modules.auth.service import AuthConfig, AuthService, authenticate_access_token
+from app.modules.terms.service import TermsConfig, TermsService
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount
 from app.rate_limit import (
@@ -57,8 +58,10 @@ def get_auth_service(
     users: Annotated[UserService, Depends(get_user_service)],
     config: Annotated[AuthConfig, Depends(get_auth_config)],
     storage: Annotated[StorageProvider, Depends(get_storage_provider)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> AuthService:
-    return AuthService(session, users, config, storage)
+    terms = TermsService(session, TermsConfig.from_settings(settings))
+    return AuthService(session, users, config, storage, terms)
 
 
 async def get_current_user(

@@ -188,6 +188,28 @@ them idempotent: they can run twice.
   categories or areas changed), that module queues one `redispatch_for_pro` after its commit
   (`dispatch/kicks.py`, job id `redispatch-pro:<pro id>`); a kick that cannot be queued is
   logged and never fails the change. A request with any row stays with the existing flow.
+- **Account deletion (#97).** `POST /v1/me/delete` (accounts) anonymises the caller's account
+  in place, in one transaction, confirmed with the current password and rate-limited per user;
+  staff are refused (their accounts are made by script). The users row stays (jobs, payments,
+  reviews and the audit log point at it): status `deleted`, email `deleted-<hex>@deleted.invalid`
+  (the real one is free for a new account), no password, phone, names, home or photo, a new card
+  code, every session revoked. Refused with a 409 per reason while something is in flight
+  (accounts.errors); a customer's open requests are cancelled instead. Every module erases its
+  own part in its `erasure.py`, over its own tables; a new table that holds a person's data gets
+  its part there and is caught by `tests/test_account_deletion.py`'s sweep otherwise. Kept
+  untouched: jobs, payments, transfers, refunds, cancellations, disputes, reviews, quotes and the
+  audit log. The shared name readers (`UserService.public_names`, `first_names`, `legal_name`)
+  show "Deleted user". The files' rows go at once; the worker deletes the files from storage and
+  detaches the cards in Stripe (`accounts.cleanup`: a task after the commit and the
+  `retry_account_cleanups` sweep, through the `account_deletions` row), never through the orphan
+  sweep. A request address keeps its city, state and ZIP and loses its street and point
+  (`AddressRepository.erase_for_user`, the one other write `tests/test_address_geocode_guard.py`
+  allows). Ids and counts only in the audit row and the logs.
+- **Terms (#97).** `TERMS_VERSION`, `PRIVACY_VERSION` and `PRO_AGREEMENT_VERSION` name the legal
+  texts in force (the apps hold the texts); unset, nothing of that kind is required. Customers
+  accept terms and privacy, pros also the pro agreement (`terms.types.KINDS_BY_ROLE`).
+  `GET /v1/me/terms`, `POST /v1/me/terms-acceptance` (idempotent per user, kind and version) and
+  `UserOut.terms_required`, which every `UserOut` carries (register, login, refresh, `/me`).
 - **Orphan uploads (#191).** The cron `sweep_orphan_uploads` (`uploads/orphans.py`) lists `u/`
   and deletes uploads older than `ORPHAN_UPLOAD_MIN_AGE_HOURS` that no row references.
   `ORPHAN_UPLOAD_MODE` is `off`, `dry_run` (the default: counts only, in the

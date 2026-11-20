@@ -21,6 +21,16 @@ class UserRole(StrEnum):
 class UserStatus(StrEnum):
     ACTIVE = "active"
     SUSPENDED = "suspended"
+    # The account holder deleted it (#97): anonymised in place, never active again. The row
+    # stays because jobs, payments and the audit log point at it.
+    DELETED = "deleted"
+
+
+# What every other party sees for a deleted account's name (#97), whatever reader they use.
+DELETED_USER_NAME: Final = "Deleted user"
+# What replaces free text a deleted account wrote, or that staff wrote about it (#97), where
+# the row itself stays: a request's description and address line, a support ticket, a note.
+ERASED_TEXT: Final = "Removed when the account was deleted."
 
 
 class Keep(Enum):

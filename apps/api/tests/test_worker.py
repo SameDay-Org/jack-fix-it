@@ -17,6 +17,7 @@ from app.config import Settings, get_settings
 from app.integrations.mapbox import MapboxRouteProvider, UnconfiguredRouteProvider
 from app.integrations.stripe_payments import StripePaymentsClient
 from app.integrations.stripe_transfers import StripeTransfersClient
+from app.modules.accounts.tasks import retry_account_cleanups
 from app.modules.chat.tasks import purge_chat_originals
 from app.modules.dispatch.tasks import dispatch_request, redispatch_stalled_requests
 from app.modules.jobs.tasks import auto_confirm_jobs
@@ -101,6 +102,8 @@ def test_registration_keeps_names_tries_and_timeouts() -> None:
         "release_transfer": (1, None),
         # One run per cancel (#69): the sweep is its retry.
         "refund_cancellation": (1, None),
+        # One run per account deletion (#97): the sweep is its retry.
+        "clean_up_deleted_account": (1, None),
     }
 
 
@@ -177,6 +180,12 @@ def test_cron_jobs_keep_names_cadences_and_timeouts() -> None:
             retry_cancel_refunds,
             every(get_settings().cancel_refund_sweep_minutes),
             get_settings().cancel_refund_sweep_timeout_seconds,
+            1,
+        ),
+        "cron:retry_account_cleanups": (
+            retry_account_cleanups,
+            every(get_settings().account_deletion_sweep_minutes),
+            get_settings().account_deletion_sweep_timeout_seconds,
             1,
         ),
     }

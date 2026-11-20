@@ -1,10 +1,17 @@
 import uuid
 from datetime import UTC, date
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from app.modules.uploads.schemas import PhotoOut
 from app.modules.users.types import UserAccount, UserRole, UserStatus
+
+
+def _without_default(schema: dict[str, Any]) -> None:
+    """Leaves a field's default out of the published schema: openapi-typescript types a field
+    with a default as always present, one without as optional."""
+    schema.pop("default", None)
 
 
 class UserOut(BaseModel):
@@ -30,9 +37,20 @@ class UserOut(BaseModel):
     home_state: str | None = Field(description="A US state or DC code, e.g. FL; null until set.")
     photo: PhotoOut | None = Field(description="The ID photo, a presigned GET; null until set.")
     member_since: date = Field(description="The day (UTC) the account was created.")
+    # Always sent (from_account takes it, without a default); optional in the published schema,
+    # so the apps built before #97 still type-check and an older API reads as not required.
+    terms_required: bool = Field(
+        default=False,
+        description="True while a legal document in force for the account is not accepted in "
+        "its version (GET /v1/me/terms): the app asks for it before anything else (#97). "
+        "Absent from an API older than #97: read it as false.",
+        json_schema_extra=_without_default,
+    )
 
     @classmethod
-    def from_account(cls, account: UserAccount, *, photo: PhotoOut | None) -> "UserOut":
+    def from_account(
+        cls, account: UserAccount, *, photo: PhotoOut | None, terms_required: bool
+    ) -> "UserOut":
         """`photo` is the signed URL of `account.photo_key`, or None when there is no key."""
         return cls(
             id=account.id,
@@ -49,4 +67,5 @@ class UserOut(BaseModel):
             home_state=account.home_state,
             photo=photo,
             member_since=account.created_at.astimezone(UTC).date(),
+            terms_required=terms_required,
         )

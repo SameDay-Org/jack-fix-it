@@ -80,7 +80,9 @@ class Job(IdTimestampsMixin, Base):
 
 
 class JobEvent(IdTimestampsMixin, Base):
-    """Append-only history of a job. Written by the state machine (#60), never updated."""
+    """Append-only history of a job. Written by the state machine (#60), never updated, but
+    for the deletion of the customer's account, which clears the check-in point (#97,
+    jobs.erasure): it locates their home."""
 
     __tablename__ = "job_events"
 

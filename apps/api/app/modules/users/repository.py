@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Collection
 from datetime import datetime
 
-from sqlalchemy import Select, select, update
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.users.models import User
@@ -67,18 +67,42 @@ class UserRepository:
             for row in (await self._session.execute(statement)).all()
         ]
 
+    async def anonymise(
+        self, user_id: uuid.UUID, *, email: str, password_hash: str, public_code: str
+    ) -> None:
+        """Overwrites every personal field of the account in one UPDATE (#97): see
+        UserService.anonymise."""
+        await self._session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(
+                email=email,
+                password_hash=password_hash,
+                public_code=public_code,
+                phone=None,
+                phone_verified_at=None,
+                first_name=None,
+                last_name=None,
+                home_city=None,
+                home_state=None,
+                photo_key=None,
+                status=UserStatus.DELETED,
+                deleted_at=func.now(),
+            )
+        )
+
     async def names(
         self, user_ids: Collection[uuid.UUID]
-    ) -> list[tuple[uuid.UUID, str | None, str | None, str, str | None]]:
-        """(id, first_name, last_name, email, phone) only: the contacts withhold a name that
-        shows one (names.safe_public_name)."""
+    ) -> list[tuple[uuid.UUID, str | None, str | None, str, str | None, UserStatus]]:
+        """(id, first_name, last_name, email, phone, status) only: the contacts withhold a name
+        that shows one (names.safe_public_name), and a deleted account shows no name (#97)."""
         if not user_ids:
             return []
-        statement = select(User.id, User.first_name, User.last_name, User.email, User.phone).where(
-            User.id.in_(user_ids)
-        )
+        statement = select(
+            User.id, User.first_name, User.last_name, User.email, User.phone, User.status
+        ).where(User.id.in_(user_ids))
         return [
-            (row[0], row[1], row[2], row[3], row[4])
+            (row[0], row[1], row[2], row[3], row[4], row[5])
             for row in (await self._session.execute(statement)).all()
         ]
 

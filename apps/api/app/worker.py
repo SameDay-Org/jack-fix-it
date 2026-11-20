@@ -18,6 +18,7 @@ from app.integrations.mapbox import provider_from_settings
 from app.integrations.storage import S3Storage, StorageNotConfiguredError
 from app.integrations.stripe_payments import StripePaymentsClient
 from app.integrations.stripe_transfers import StripeTransfersClient
+from app.modules.accounts.tasks import clean_up_deleted_account, retry_account_cleanups
 from app.modules.addresses.tasks import geocode_address
 from app.modules.chat.tasks import purge_chat_originals
 from app.modules.dispatch.tasks import (
@@ -136,6 +137,9 @@ class WorkerSettings:
         # One run per cancel (#69); it never raises, and the sweep below makes whatever a run
         # could not.
         discarding_result(refund_cancellation, max_tries=1),
+        # One run per account deletion (#97); it never raises, and the sweep below finishes
+        # whatever a run could not.
+        discarding_result(clean_up_deleted_account, max_tries=1),
     )
     # A cron job keeps no result by default (ARQ's cron keep_result is 0); stated anyway.
     cron_jobs = (
@@ -207,6 +211,15 @@ class WorkerSettings:
             retry_cancel_refunds,
             minute=every(get_settings().cancel_refund_sweep_minutes),
             timeout=get_settings().cancel_refund_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        # Deleted accounts' cards and files left (#97): Stripe or the storage unavailable, a
+        # task never queued, a media copy that may still upload.
+        cron(
+            retry_account_cleanups,
+            minute=every(get_settings().account_deletion_sweep_minutes),
+            timeout=get_settings().account_deletion_sweep_timeout_seconds,
             keep_result=0,
             keep_result_forever=False,
         ),

@@ -28,6 +28,7 @@ from app.modules.users.models import User
 from app.modules.users.names import safe_first_name, safe_public_name
 from app.modules.users.repository import UserRepository
 from app.modules.users.types import (
+    DELETED_USER_NAME,
     KEEP,
     ContactPoints,
     Keep,
@@ -87,10 +88,12 @@ class UserService:
         included. The contacts never leave this module, and the full name only through
         `legal_name` (staff's review of a pro)."""
         return {
-            user_id: safe_public_name(
+            user_id: DELETED_USER_NAME
+            if status is UserStatus.DELETED
+            else safe_public_name(
                 first, last, KnownValues(emails=(email,), phones=(phone,) if phone else ())
             )
-            for user_id, first, last, email, phone in await self._users.names(user_ids)
+            for user_id, first, last, email, phone, status in await self._users.names(user_ids)
         }
 
     async def legal_name(self, user_id: uuid.UUID) -> str | None:
@@ -98,7 +101,9 @@ class UserService:
         pro's ID document to the account (#41): the audited staff detail of one pro only,
         never a list and never another user's view. None when the account has neither name."""
         rows = await self._users.names({user_id})
-        parts = [name for _, first, last, _, _ in rows for name in (first, last) if name]
+        if any(status is UserStatus.DELETED for *_, status in rows):
+            return DELETED_USER_NAME
+        parts = [name for _, first, last, _, _, _ in rows for name in (first, last) if name]
         return " ".join(parts) or None
 
     async def active_staff(self) -> list[tuple[uuid.UUID, str | None, UserRole]]:
@@ -120,10 +125,12 @@ class UserService:
         the customer (#63). None when it is missing or shows a contact detail, the user's own
         email and phone included (names.safe_first_name). Never the last name or a contact."""
         return {
-            user_id: safe_first_name(
+            user_id: DELETED_USER_NAME
+            if status is UserStatus.DELETED
+            else safe_first_name(
                 first, KnownValues(emails=(email,), phones=(phone,) if phone else ())
             )
-            for user_id, first, _, email, phone in await self._users.names(user_ids)
+            for user_id, first, _, email, phone, status in await self._users.names(user_ids)
         }
 
     async def get_by_id(self, user_id: uuid.UUID) -> UserAccount | None:
@@ -136,6 +143,49 @@ class UserService:
         commit before the caller does."""
         user = await self._users.get_by_id_for_share(user_id)
         return _to_account(user) if user else None
+
+    async def get_for_update(self, user_id: uuid.UUID) -> UserCredentials | None:
+        """The account and its password hash as last committed, its row locked until the
+        transaction ends: an account deletion (#97) holds it from the password check to the
+        commit, so a second deletion, a login or a password reset of the user waits for it."""
+        user = await self._users.get_by_id_for_update(user_id)
+        if user is None:
+            return None
+        return UserCredentials(account=_to_account(user), password_hash=user.password_hash)
+
+    async def anonymise(self, user_id: uuid.UUID) -> None:
+        """Anonymises the account in place (#97); the caller holds its row (get_for_update) and
+        owns the commit. The row stays: jobs, payments, reviews and the audit log point at it.
+
+        - The email becomes a unique address under the reserved .invalid domain: never
+          deliverable, never typed at a login (NormalizedEmail refuses it), and the real one is
+          free for a new account.
+        - The password hash becomes a value no password matches (verify_password is False).
+        - The phone, names, home city and state and ID photo go; a new public code is drawn,
+          so the old card's code names nobody.
+        - Status deleted, with its time: no login, refresh, access token or reset passes.
+        The Stripe Customer id stays: the payments' reconciliation reads it, and the Customer
+        holds no name or email (payments.service)."""
+        email = f"deleted-{uuid.uuid4().hex}@deleted.invalid"
+        password_hash = f"!deleted-{uuid.uuid4().hex}"
+        for attempt in range(1, public_codes.MAX_TRIES + 1):
+            savepoint = await self._session.begin_nested()
+            try:
+                await self._users.anonymise(
+                    user_id,
+                    email=email,
+                    password_hash=password_hash,
+                    public_code=public_codes.generate_public_code(),
+                )
+            except IntegrityError as exc:
+                await savepoint.rollback()
+                if violated_constraint(exc) == _PUBLIC_CODE_UNIQUE_CONSTRAINT:
+                    logger.warning("public_code_collision", extra={"attempt": attempt})
+                    continue
+                raise
+            await savepoint.commit()
+            return
+        raise PublicCodeExhaustedError
 
     async def get_by_email(self, email: str) -> UserAccount | None:
         """Exact match: emails are stored lowercase, so pass a normalized email."""

@@ -21,6 +21,10 @@ class User(IdTimestampsMixin, Base):
         CheckConstraint(f"public_code ~ '{PUBLIC_CODE_PATTERN}'", name="public_code_crockford"),
         CheckConstraint(home_state_check_sql(), name="home_state_us"),
         CheckConstraint("(home_city IS NULL) = (home_state IS NULL)", name="home_together"),
+        # A deleted account (#97) has its time, and only a deleted one.
+        CheckConstraint(
+            "(status = 'deleted') = (deleted_at IS NOT NULL)", name="deleted_at_status"
+        ),
     )
 
     email: Mapped[str] = mapped_column(String(320), unique=True)
@@ -54,3 +58,5 @@ class User(IdTimestampsMixin, Base):
     # with an idempotency key derived from the user id, then reused; NULL until then. An id
     # on Stripe's side, never logged.
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    # When the account holder deleted the account (#97), with status deleted; NULL otherwise.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

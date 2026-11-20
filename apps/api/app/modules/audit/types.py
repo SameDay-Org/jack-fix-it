@@ -66,6 +66,9 @@ class AuditAction(StrEnum):
     DISPUTE_REFUND_ABANDON_REFUSED = "dispute.refund_abandon_refused"
     # A job cancelled by its own customer or pro (#69): who, from which status, the split.
     JOB_CANCEL = "job.cancel"
+    # The account holder deleted their own account (#97): its role and what the deletion
+    # changed, as counts.
+    ACCOUNT_DELETE = "user.delete"
 
 
 class AuditEntityType(StrEnum):
@@ -76,6 +79,7 @@ class AuditEntityType(StrEnum):
     SUPPORT_TICKET = "support_ticket"
     SERVICE_REQUEST = "service_request"
     DISPUTE = "dispute"
+    USER = "user"
 
 
 @dataclass(frozen=True)

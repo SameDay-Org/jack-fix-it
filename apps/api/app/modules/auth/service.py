@@ -36,6 +36,7 @@ from app.modules.auth.schemas import (
     RegisterRequest,
 )
 from app.modules.pros.service import ProService
+from app.modules.terms.service import TermsService
 from app.modules.uploads.schemas import PhotoOut
 from app.modules.users.schemas import UserOut
 from app.modules.users.service import UserService
@@ -86,11 +87,13 @@ class AuthService:
         users: UserService,
         config: AuthConfig,
         storage: StorageProvider,
+        terms: TermsService,
     ) -> None:
         self._session = session
         self._users = users
         self._refresh_tokens = RefreshTokenRepository(session)
         self._config = config
+        self._terms = terms
         # Called only for an account with an ID photo (#250): the storage is otherwise
         # not needed to sign in.
         self._storage = storage
@@ -111,10 +114,22 @@ class AuthService:
             expires_at=datetime.now(UTC) + timedelta(seconds=ttl),
         )
 
+    async def terms_required(self, account: UserAccount) -> bool:
+        """Whether a legal document in force for the account is not accepted yet (#97). A read:
+        a path that commits asks it before its commit, like prepare_photo (#290)."""
+        return await self._terms.required(account)
+
     @staticmethod
-    def present(account: UserAccount, photo: PhotoOut | None) -> UserOut:
-        """The account as the API shows it, with its photo from prepare_photo. Never raises."""
-        return UserOut.from_account(account, photo=photo)
+    def present(account: UserAccount, photo: PhotoOut | None, terms_required: bool) -> UserOut:
+        """The account as the API shows it, with its photo from prepare_photo and
+        terms_required from terms_required. Never raises."""
+        return UserOut.from_account(account, photo=photo, terms_required=terms_required)
+
+    async def revoke_all_sessions(self, user_id: uuid.UUID) -> None:
+        """Revokes every session of the user in the caller's transaction, which commits (an
+        account deletion, #97): their refresh tokens are refused, and their access tokens at
+        the next request (#161)."""
+        await self._refresh_tokens.revoke_all_for_user(user_id, datetime.now(UTC))
 
     async def register(self, data: RegisterRequest) -> AuthResponse:
         if len(data.password) < self._config.password_min_length:
@@ -149,9 +164,10 @@ class AuthService:
             await ProService(self._session).adopt_photo_if_missing(user.id, account.photo_key)
         # Signed before the commit: a storage failure leaves the update uncommitted (#290).
         photo = self.prepare_photo(account)
+        terms_required = await self.terms_required(account)
         await self._session.commit()
         logger.info("user_updated", extra={"user_id": str(user.id), "fields": sorted(sent)})
-        return self.present(account, photo)
+        return self.present(account, photo, terms_required)
 
     async def login(self, data: LoginRequest) -> AuthResponse:
         credentials = await self._users.get_credentials_by_email(data.email)
@@ -173,6 +189,10 @@ class AuthService:
             logger.info("auth_login_failed", extra={"reason": "changed_during_login"})
             raise InvalidCredentialsError
         user = locked.account
+        if user.status is UserStatus.DELETED:
+            # Unreachable by email (it was replaced, #97); refused like any wrong login anyway.
+            logger.info("auth_login_failed", extra={"reason": "deleted"})
+            raise InvalidCredentialsError
         if user.status is UserStatus.SUSPENDED:
             raise AccountSuspendedError
         if security.password_needs_rehash(stored_hash):
@@ -285,6 +305,7 @@ class AuthService:
         failure must leave the rotation uncommitted, with the presented token unspent (#290).
         """
         photo = self.prepare_photo(user)
+        terms_required = await self.terms_required(user)
         access_token = security.create_access_token(
             user_id=user.id,
             role=user.role,
@@ -295,7 +316,7 @@ class AuthService:
         )
         await self._session.commit()
         return AuthResponse(
-            user=self.present(user, photo),
+            user=self.present(user, photo, terms_required),
             access_token=access_token,
             refresh_token=refresh_token,
             expires_in=self._config.access_token_ttl_seconds,

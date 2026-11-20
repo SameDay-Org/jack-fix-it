@@ -156,7 +156,7 @@ async def logout(
 async def me(user: CurrentUser, auth: Annotated[AuthService, Depends(get_auth_service)]) -> UserOut:
     """The caller's own account, with the ID card fields (#250): the public code, the home
     city and state, the ID photo as a signed URL and the member-since date."""
-    return auth.present(user, auth.prepare_photo(user))
+    return auth.present(user, auth.prepare_photo(user), await auth.terms_required(user))
 
 
 @router.patch(
@@ -255,7 +255,11 @@ async def verify_phone(
     # verifier has consumed the code and the number is committed (#290). Verifying a number
     # never changes the photo, so the prepared one presents the verified account.
     photo = auth.prepare_photo(user)
-    return auth.present(await phones.verify_code(user, data.phone, data.code), photo)
+    # Read first too: the role, which decides it, never changes here.
+    terms_required = await auth.terms_required(user)
+    return auth.present(
+        await phones.verify_code(user, data.phone, data.code), photo, terms_required
+    )
 
 
 @router.post(
