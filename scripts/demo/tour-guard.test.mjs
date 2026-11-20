@@ -9,10 +9,11 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import dgram from "node:dgram";
+import dns from "node:dns";
 import { existsSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
-import { tmpdir } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -471,4 +472,269 @@ test("Node's proxy settings never send the guard's traffic to another host", asy
   } finally {
     child.kill();
   }
+});
+
+// ---- Names and addresses (round 2, B2): a resolver never decides where an allowed name goes. ----
+
+const listenAt = (server, host, port) =>
+  new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, host, resolve);
+  });
+
+const closeServer = (server) => {
+  server.closeAllConnections();
+  return new Promise((resolve) => server.close(resolve));
+};
+
+/** A server that counts its TCP connections and records its requests: a sink. */
+function sink(answer = "") {
+  const seen = { connections: 0, requests: [] };
+  const server = http.createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    seen.requests.push({ path: request.url, canary: body.includes(CANARY) });
+    response.writeHead(200, { "content-type": "text/plain" }).end(answer);
+  });
+  server.on("connection", () => (seen.connections += 1));
+  return { server, seen };
+}
+
+/** An address of this machine that is not loopback, or another loopback address when it has
+ * none: either way, not one `localhost` may go to. */
+const strayAddress = () =>
+  Object.values(networkInterfaces())
+    .flat()
+    .find((entry) => entry?.family === "IPv4" && !entry.internal)?.address ?? "127.0.0.2";
+
+/** Makes this process's resolver answer `localhost` with `address` (both of Node's APIs, as a
+ * hosts file would), recording each time it is asked. */
+function misresolve(address) {
+  const asked = [];
+  const saved = { lookup: dns.lookup, promised: dns.promises.lookup };
+  dns.lookup = function lookup(host, options, callback) {
+    if (host !== "localhost") return saved.lookup.apply(this, arguments);
+    asked.push(host);
+    const done = typeof options === "function" ? options : callback;
+    const all = typeof options === "object" && options?.all;
+    process.nextTick(() => (all ? done(null, [{ address, family: 4 }]) : done(null, address, 4)));
+  };
+  dns.promises.lookup = async (host, options) => {
+    if (host !== "localhost") return saved.promised(host, options);
+    asked.push(host);
+    return options?.all ? [{ address, family: 4 }] : { address, family: 4 };
+  };
+  return {
+    asked,
+    restore: () => {
+      dns.lookup = saved.lookup;
+      dns.promises.lookup = saved.promised;
+    },
+  };
+}
+
+/** A request for `url` through `proxy` (a POST of `body` when given): its status and text. */
+function throughProxy(proxy, url, body) {
+  const { port } = new URL(proxy.url);
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        path: url,
+        method: body === undefined ? "GET" : "POST",
+        headers: { host: new URL(url).host },
+        agent: false,
+      },
+      (answer) => {
+        let text = "";
+        answer.on("data", (chunk) => (text += chunk));
+        answer.on("end", () => resolve({ status: answer.statusCode, text }));
+      },
+    );
+    request.on("error", reject);
+    request.end(body);
+  });
+}
+
+/** A tunnel to `authority` asked of `proxy`: the status line it answers, or "closed". */
+function tunnelThrough(proxy, authority) {
+  const { port } = new URL(proxy.url);
+  return new Promise((resolve) => {
+    let seen = "";
+    const socket = net.connect(Number(port), "127.0.0.1", () =>
+      socket.write(`CONNECT ${authority} HTTP/1.1\r\nHost: ${authority}\r\n\r\n`),
+    );
+    socket.on("error", () => {});
+    socket.on("data", (chunk) => {
+      seen += chunk;
+      if (seen.includes("\r\n")) socket.destroy();
+    });
+    socket.on("close", () => resolve(seen.split("\r\n")[0] || "closed"));
+  });
+}
+
+test("a resolver that sends localhost elsewhere is never asked: a form, a request and a tunnel stay on loopback", async () => {
+  const address = strayAddress();
+  const { server, seen } = sink("the stray address");
+  await listen(server, address);
+  const port = server.address().port;
+  const wrong = misresolve(address);
+  const lied = await startGuard(new Set(["localhost"]));
+  const behind = await launchGuarded(chromium, lied, { channel: CHANNEL, headless: true });
+  try {
+    // The control: the resolver does lie, and Node's own connections follow it.
+    const control = await new Promise((resolve, reject) => {
+      http
+        .get(`http://localhost:${port}/control`, (answer) => resolve(answer.statusCode))
+        .on("error", reject);
+    });
+    assert.equal(control, 200);
+    assert.equal(seen.connections, 1);
+    seen.connections = 0;
+    seen.requests.length = 0;
+    wrong.asked.length = 0;
+
+    const page = await behind.newPage();
+    await page.goto(`${origin}/page`);
+    await page.setContent(form(`http://localhost:${port}/dns-browser`));
+    await Promise.all([
+      page.waitForURL(`http://localhost:${port}/dns-browser`),
+      page.locator("button").click(),
+    ]);
+    const posted = await throughProxy(lied, `http://localhost:${port}/dns-http`, CANARY);
+    const tunnel = await tunnelThrough(lied, `localhost:${port}`);
+
+    // Each went to loopback, where nothing listens on that port: no answer, never the sink.
+    assert.equal(posted.status, 502);
+    assert.notEqual(tunnel, "HTTP/1.1 200 Connection Established");
+    assert.equal(seen.connections, 0);
+    assert.deepEqual(seen.requests, []);
+    assert.deepEqual(wrong.asked, []);
+  } finally {
+    wrong.restore();
+    await behind.close();
+    await lied.close();
+    await closeServer(server);
+  }
+});
+
+test("the staging host is resolved once: an answer that changes later is never asked for", async () => {
+  // Two servers on one port: the address the staging host first resolves to, and the one a
+  // rebinding resolver gives every time after.
+  const first = sink("staging");
+  await listen(first.server, "127.0.0.1");
+  const port = first.server.address().port;
+  const later = sink("rebound");
+  await listenAt(later.server, "127.0.0.2", port);
+  const answers = [];
+  const resolve = async (host) => {
+    answers.push(host);
+    return [{ address: answers.length === 1 ? "127.0.0.1" : "127.0.0.2", family: 4 }];
+  };
+  const staged = await startGuard(new Set(["localhost", "staging.test"]), {
+    allowPrivate: true,
+    resolve,
+  });
+  const behind = await launchGuarded(chromium, staged, { channel: CHANNEL, headless: true });
+  try {
+    for (let n = 0; n < 3; n += 1) {
+      const answer = await throughProxy(staged, `http://staging.test:${port}/again`, CANARY);
+      assert.deepEqual(answer, { status: 200, text: "staging" });
+    }
+    assert.equal(
+      await tunnelThrough(staged, `staging.test:${port}`),
+      "HTTP/1.1 200 Connection Established",
+    );
+    const page = await behind.newPage();
+    for (let n = 0; n < 2; n += 1) {
+      await page.goto(`http://staging.test:${port}/browser`);
+      assert.equal(await page.locator("body").textContent(), "staging");
+    }
+
+    assert.deepEqual(answers, ["staging.test"]);
+    assert.equal(later.seen.connections, 0);
+    assert.ok(first.seen.requests.length >= 5, JSON.stringify(first.seen.requests));
+  } finally {
+    await behind.close();
+    await staged.close();
+    await closeServer(first.server);
+    await closeServer(later.server);
+  }
+});
+
+/** What starting a guard came to: its error's message, or "started" (and the guard closed at
+ * once, so one that should have been refused never keeps the test run open). */
+const refusal = (started) =>
+  started.then(
+    async (guard) => {
+      await guard.close();
+      return "started";
+    },
+    (error) => error.message,
+  );
+
+test("the staging host never points at link-local, metadata or non-unicast addresses, nor at private ones unless allowed", async () => {
+  // [what the resolver answers, DEMO_STAGING_ALLOW_PRIVATE, whether the guard starts]
+  const cases = [
+    [["203.0.113.10"], false, true],
+    [["2001:db8::10"], false, true],
+    [["10.0.0.5"], false, false],
+    [["10.0.0.5"], true, true],
+    [["172.16.0.1"], false, false],
+    [["192.168.1.2"], false, false],
+    [["100.64.0.1"], false, false],
+    [["127.0.0.1"], false, false],
+    [["127.0.0.1"], true, true],
+    [["::1"], false, false],
+    [["fc00::1"], false, false],
+    [["fc00::1"], true, true],
+    [["::ffff:10.0.0.5"], false, false],
+    [["169.254.169.254"], true, false],
+    [["::ffff:169.254.169.254"], true, false],
+    [["fd00:ec2::254"], true, false],
+    [["100.100.100.200"], true, false],
+    [["fe80::1"], true, false],
+    [["fe80::1%1"], true, false],
+    [["2001:db8::10%1"], true, false],
+    [["0.0.0.0"], true, false],
+    [["::"], true, false],
+    [["224.0.0.1"], true, false],
+    [["255.255.255.255"], true, false],
+    [["64:ff9b::a9fe:a9fe"], true, false],
+    // Every address it has, not the first one only.
+    [["203.0.113.10", "10.0.0.5"], false, false],
+    [["203.0.113.10", "169.254.169.254"], true, false],
+    [[], true, false],
+  ];
+  for (const [addresses, allowPrivate, starts] of cases) {
+    const resolve = async () =>
+      addresses.map((address) => ({ address, family: net.isIP(address) }));
+    const started = startGuard(new Set(["localhost", "staging.test"]), { allowPrivate, resolve });
+    const label = `${JSON.stringify(addresses)} allowPrivate=${allowPrivate}`;
+    if (starts) {
+      assert.equal(await refusal(started), "started", label);
+    } else {
+      assert.match(await refusal(started), /host guard/, label);
+    }
+  }
+});
+
+test("loopback hosts and an address as written are never resolved; a resolver failure stops the guard", async () => {
+  const asked = [];
+  const resolve = async (host) => {
+    asked.push(host);
+    throw new Error(`getaddrinfo ENOTFOUND ${host}`);
+  };
+  const local = startGuard(new Set(["localhost", "127.0.0.1", "::1", "203.0.113.10"]), {
+    resolve,
+  });
+  assert.equal(await refusal(local), "started");
+  assert.match(await refusal(startGuard(new Set(["10.0.0.5"]), { resolve })), /10\.0\.0\.5/);
+  assert.deepEqual(asked, []);
+  assert.match(
+    await refusal(startGuard(new Set(["staging.test"]), { resolve })),
+    /ENOTFOUND staging\.test/,
+  );
+  assert.deepEqual(asked, ["staging.test"]);
 });

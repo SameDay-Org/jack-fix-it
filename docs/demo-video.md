@@ -206,7 +206,8 @@ browser is downloaded. The demo password comes from `.demo-password`
 (`DEMO_STAFF_PASSWORD_FILE`); it is filled in, never typed into a log. Other settings:
 `DEMO_ADMIN_EMAIL`, `DEMO_WAITING_PRO` (Maria), `DEMO_DISPUTE_CODE` (default: the first open
 dispute), `DEMO_PARTIAL_RELEASE` (250.00), `DEMO_TIME_ZONE` (America/New_York),
-`DEMO_STAGING_HOST`.
+`DEMO_STAGING_HOST`, and `DEMO_STAGING_ALLOW_PRIVATE=1` when the staging host is on a private
+network.
 
 **The tour writes**: it takes a request, approves documents and the pro, moves a ticket and
 resolves the dispute. Run `seed_demo.py --reset` before each take. On used data a scene with
@@ -229,7 +230,12 @@ loopback included, and the proxy connects to the allowed hosts only. A Playwrigh
 do this: it sees the first request of a redirect chain and not the hops after it, so an allowed
 page answering 307 could forward a form to any host. At the proxy every connection is asked for
 by name first: each hop of a redirect, a subresource, a frame, a fetch, a websocket. A refused
-host gets no connection at all. What goes around a proxy is closed too: WebRTC sends no UDP (a
+host gets no connection at all. A name is not an address, so no resolver decides where an allowed
+name goes: `localhost` connects to 127.0.0.1 or ::1, from a table, whatever a hosts file says.
+`DEMO_STAGING_HOST` is resolved once, before the tour starts. Every address it has is checked, and
+the tour stops when one is link-local or cloud metadata (169.254.0.0/16, `fd00:ec2::254`), not
+unicast, or loopback or private (allowed by `DEMO_STAGING_ALLOW_PRIVATE=1`). Its connections then
+go to those addresses only: a later answer (DNS rebinding) is never asked for. What goes around a proxy is closed too: WebRTC sends no UDP (a
 launch switch, and every frame of a scene loses the WebRTC constructors), and the guard's own
 requests ignore Node's proxy settings (`NODE_USE_ENV_PROXY`, `HTTP_PROXY`). A broken answer from
 an allowed server is a 502 for that request, never a crash. `scenes.md` lists the other hosts a

@@ -16,6 +16,8 @@
 //                             seed_demo.py keeps it); never printed
 //   DEMO_ADMIN_EMAIL          the demo admin (default admin@example.com)
 //   DEMO_STAGING_HOST         the one non-local host allowed (staging), optional
+//   DEMO_STAGING_ALLOW_PRIVATE  "1" lets DEMO_STAGING_HOST resolve to a private network
+//                             (10/8, 172.16/12, 192.168/16, loopback...); never link-local
 //   DEMO_WAITING_PRO          name on the waiting pro's card (default "Maria")
 //   DEMO_DISPUTE_CODE         request code of the disputed job to resolve (default: first open)
 //   DEMO_PARTIAL_RELEASE      dollars released to the pro in the partial (default "250.00")
@@ -250,7 +252,16 @@ async function nothingLeft(locator, still) {
 }
 
 // ---- One scene = one context = one WebM. ----
-const guard = await startGuard(ALLOWED);
+let guard;
+try {
+  guard = await startGuard(ALLOWED, {
+    allowPrivate: process.env.DEMO_STAGING_ALLOW_PRIVATE === "1",
+  });
+} catch (error) {
+  // The staging host has no address, or one it may not have: nothing was opened yet.
+  console.error(`refusing: ${error.message}`);
+  process.exit(2);
+}
 const browser = await launchGuarded(chromium, guard, { channel: CHANNEL, headless: !args.headed });
 let storageState;
 const scenes = [];

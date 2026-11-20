@@ -16,9 +16,18 @@
 // - Node's own proxy settings: the guard's upstream requests use an agent of their own, so
 //   NODE_USE_ENV_PROXY and HTTP_PROXY never send the tour's traffic to another host.
 //
+// A name is not an address. The guard never lets a resolver decide where an allowed name goes:
+// `localhost` connects to 127.0.0.1 or ::1, from a table, whatever a hosts file or a resolver
+// would answer; the one other host (staging) is resolved once, before the guard serves anything,
+// every address it has is checked (never loopback, private, link-local or cloud metadata, unless
+// DEMO_STAGING_ALLOW_PRIVATE=1 allows the private ones), and its connections go to those
+// addresses only: a later answer that changed (DNS rebinding) is never asked for. Plain http and
+// tunnels connect the same way.
+//
 // Every socket and stream has an error listener, and every way an upstream answer can fail
 // ends that one browser request with a 502: a hostile or broken server stops a request, never
 // the tour.
+import dns from "node:dns";
 import http from "node:http";
 import net from "node:net";
 
@@ -77,15 +86,139 @@ export function tunnelTarget(authority) {
   return { host: bare(match[1]), port };
 }
 
+// The loopback hosts, with the only addresses they connect to: no resolver is asked for them.
+const LOOPBACK = new Map([
+  [
+    "localhost",
+    [
+      { address: "127.0.0.1", family: 4 },
+      { address: "::1", family: 6 },
+    ],
+  ],
+  ["127.0.0.1", [{ address: "127.0.0.1", family: 4 }]],
+  ["::1", [{ address: "::1", family: 6 }]],
+]);
+
+const blockList = (ranges) => {
+  const list = new net.BlockList();
+  for (const [address, prefix, family] of ranges) list.addSubnet(address, prefix, family);
+  return list;
+};
+// Where the staging host may never point: link-local (cloud metadata at 169.254.169.254 and
+// fd00:ec2::254 included), unspecified, multicast and reserved addresses, NAT64's prefix (it
+// embeds any IPv4 address). IPv4-mapped IPv6 addresses are checked as the IPv4 they carry.
+const NEVER = blockList([
+  ["0.0.0.0", 8, "ipv4"],
+  ["169.254.0.0", 16, "ipv4"],
+  ["192.0.0.0", 24, "ipv4"],
+  ["100.100.100.200", 32, "ipv4"],
+  ["224.0.0.0", 4, "ipv4"],
+  ["240.0.0.0", 4, "ipv4"],
+  ["::", 128, "ipv6"],
+  ["fe80::", 10, "ipv6"],
+  ["ff00::", 8, "ipv6"],
+  ["fd00:ec2::254", 128, "ipv6"],
+  ["64:ff9b::", 96, "ipv6"],
+]);
+// And where only DEMO_STAGING_ALLOW_PRIVATE=1 lets it point: this machine and private networks.
+const PRIVATE = blockList([
+  ["127.0.0.0", 8, "ipv4"],
+  ["10.0.0.0", 8, "ipv4"],
+  ["172.16.0.0", 12, "ipv4"],
+  ["192.168.0.0", 16, "ipv4"],
+  ["100.64.0.0", 10, "ipv4"],
+  ["198.18.0.0", 15, "ipv4"],
+  ["::1", 128, "ipv6"],
+  ["fc00::", 7, "ipv6"],
+]);
+
+/** Why the staging host may not have `address`, or null when it may. */
+function blocked(address, allowPrivate) {
+  const family = net.isIP(address);
+  if (family === 0) return "not an IP address";
+  // A zone (fe80::1%eth0) names an interface: a staging host's address never needs one, so
+  // any is refused, on whatever address (the block list reads past it, and only catches it
+  // on a link-local one).
+  if (address.includes("%")) return "a zone-scoped address";
+  const kind = family === 6 ? "ipv6" : "ipv4";
+  try {
+    if (NEVER.check(address, kind)) return "link-local, metadata or not unicast";
+    if (!allowPrivate && PRIVATE.check(address, kind)) {
+      return "loopback or private; DEMO_STAGING_ALLOW_PRIVATE=1 allows it";
+    }
+  } catch {
+    return "not an address the guard can check";
+  }
+  return null;
+}
+
+const systemResolve = (host) => dns.promises.lookup(host, { all: true, verbatim: true });
+
+/**
+ * Every allowed host's addresses, fixed before the guard serves anything: the loopback hosts'
+ * from the table above; any other host (the staging one) an address as written, or resolved
+ * once with `resolve`, and EVERY address it has checked. A host with an address it may not
+ * have, or none, stops the guard from starting.
+ */
+async function pinAddresses(allowed, { allowPrivate = false, resolve = systemResolve }) {
+  const pinned = new Map();
+  for (const host of allowed) {
+    if (LOOPBACK.has(host)) {
+      pinned.set(host, LOOPBACK.get(host));
+      continue;
+    }
+    const literal = net.isIP(host);
+    const answer = literal ? [{ address: host, family: literal }] : await resolve(host);
+    const addresses = answer.map(({ address, family }) => ({ address, family }));
+    if (addresses.length === 0) throw new Error(`the tour's host guard: ${host} has no address`);
+    for (const { address } of addresses) {
+      const reason = blocked(address, allowPrivate);
+      if (reason !== null) {
+        throw new Error(
+          `the tour's host guard refuses ${host}: it resolves to ${address} (${reason})`,
+        );
+      }
+    }
+    pinned.set(host, addresses);
+  }
+  return pinned;
+}
+
+/**
+ * A `lookup` for net and http that answers from `pinned` alone: a name connects to the
+ * addresses fixed for it at the start, and no resolver is ever asked. Any other name has none.
+ */
+const pinnedLookup = (pinned) => (hostname, options, callback) => {
+  const done = typeof options === "function" ? options : callback;
+  const wanted = typeof options === "object" && options !== null ? options : {};
+  const family = { 4: 4, 6: 6, IPv4: 4, IPv6: 6 }[wanted.family] ?? 0;
+  const addresses = (pinned.get(bare(hostname)) ?? []).filter(
+    (entry) => family === 0 || entry.family === family,
+  );
+  if (addresses.length === 0) {
+    const error = new Error(`the demo tour's host guard has no address for ${hostname}`);
+    error.code = "ENOTFOUND";
+    process.nextTick(done, error);
+  } else if (wanted.all) {
+    process.nextTick(done, null, addresses);
+  } else {
+    process.nextTick(done, null, addresses[0].address, addresses[0].family);
+  }
+};
+
 // What a proxy must not pass on: they are about the hop to the proxy itself.
 const HOP_HEADERS = new Set(["proxy-connection", "proxy-authorization"]);
 
 /**
  * Starts the guard: a forward proxy on a loopback port that serves the hosts in `allowed` and
- * refuses every other one (403, nothing connected). `refused` collects the refused hosts, in
- * order, for the caller to report.
+ * refuses every other one (403, nothing connected). Each allowed host connects only to the
+ * addresses pinned for it at the start (pinAddresses): `options.allowPrivate` lets the staging
+ * host be on a private network, `options.resolve` replaces the system resolver (tests). Rejects
+ * when the staging host may not be reached. `refused` collects the refused hosts, in order, for
+ * the caller to report.
  */
-export async function startGuard(allowed) {
+export async function startGuard(allowed, options = {}) {
+  const lookup = pinnedLookup(await pinAddresses(allowed, options));
   const refused = [];
   const refuse = (hostname) => refused.push(bare(hostname));
   // Its own agent: the process-wide one follows NODE_USE_ENV_PROXY and HTTP_PROXY.
@@ -131,6 +264,7 @@ export async function startGuard(allowed) {
       {
         agent,
         host: bare(target.hostname),
+        lookup,
         port: target.port || 80,
         method: request.method,
         path: target.pathname + target.search,
@@ -177,7 +311,7 @@ export async function startGuard(allowed) {
       socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
       return;
     }
-    const upstream = net.connect(target.port, target.host, () => {
+    const upstream = net.connect({ port: target.port, host: target.host, lookup }, () => {
       socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
       upstream.write(head);
       upstream.pipe(socket);
