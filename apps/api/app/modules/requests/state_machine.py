@@ -20,6 +20,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Final
 
 from sqlalchemy import text
@@ -104,6 +105,8 @@ class LockedRequest:
     address_id: uuid.UUID
     customer_id: uuid.UUID
     public_code: str
+    # Set while the BDC waits on the customer (#82): no automatic dispatch until released.
+    info_requested_at: datetime | None = None
 
 
 class RequestStateMachine:
@@ -125,6 +128,7 @@ class RequestStateMachine:
             request.address_id,
             request.customer_id,
             request.public_code,
+            request.info_requested_at,
         )
 
     async def transition(
