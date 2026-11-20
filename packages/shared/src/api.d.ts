@@ -12584,6 +12584,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description rate_limited: too many previews or cancels by this customer in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     cancel_job_v1_jobs__job_id__cancel_post: {
@@ -12651,6 +12660,15 @@ export interface operations {
             };
             /** @description validation_error: an unknown or a pro's reason_code; a note longer than 500 characters, holding a NUL, or empty once invisible characters are dropped; a negative expected_fee_cents; an unknown field (an amount above all); a job_id or an Idempotency-Key that is not a UUID. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many previews or cancels by this customer in the window; Retry-After says when to try again. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

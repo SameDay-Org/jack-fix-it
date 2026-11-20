@@ -8221,6 +8221,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "rate_limited: too many previews or cancels by this customer in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -8332,6 +8342,16 @@
           },
           "409": {
             "description": "cancel_not_allowed: the work started, or the job is done, confirmed, paid out, disputed or refunded (the message names its status): report a problem instead; cancel_needs_review: the job's payment needs a look by staff first; cancel_fee_changed: expected_fee_cents differs from the fee cancelling now costs (the pro set off since the preview); idempotency_key_reused: the caller already used this Idempotency-Key with a different body or on another job. Nothing was changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many previews or cancels by this customer in the window; Retry-After says when to try again.",
             "content": {
               "application/json": {
                 "schema": {
