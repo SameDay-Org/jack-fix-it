@@ -5,41 +5,59 @@ reaches the job payment's reconciliation, and a job payment's event never reache
 by the worker through the Stripe webhook base (#40): once per event, in the worker's
 transaction, which a handler never commits.
 
-The event finds the tip whose current attempt is its PaymentIntent, locked. A tip whose create
-answer was lost holds no PaymentIntent yet: when the event's metadata names that tip and its
-current attempt (tip_id, attempt), and the tip is still to pay with a create sent, the event's
-intent is stored (a conditional UPDATE in a savepoint) and the event applied, as the payment's
-reconciliation adopts one (#296). An intent of an earlier attempt changes nothing: the tip
-moved to a new attempt only once Stripe showed that intent canceled (service.py). One that
-succeeded anyway took money no tip holds: an ERROR `tip_succeeded_on_stale_attempt` (ids) and
-the event fails for staff. An intent naming no tip is a warning and changes nothing.
-
-Then, before anything else, the event must match the tip: its amount the tip's amount_cents,
-its currency the tip's, its customer the customer's Stripe Customer. A mismatch changes
-nothing, logs `tip_event_mismatch` (ids and the names of the fields that differ) and raises,
-so the event is retried and then ends failed for staff.
-
-The tip's status then moves along TIP_EVENT_TRANSITIONS: processing, failed (the same intent
-can be confirmed again), succeeded (with succeeded_at, and a `tip_added` line in the job's
-history, the customer its actor) or canceled. Anything else (a repeat, an out-of-order event,
-anything after succeeded or canceled) changes nothing, at debug level. Nothing here changes
-the job's status, its payment or its transfer. Logs carry ids, the event type, statuses and
-Stripe codes only: no amount, no PaymentIntent id, no customer data.
+The event only names the PaymentIntent (#510 round 1): what it is, whose it is and where it
+stands are read from Stripe by that id (StripePayments.tip_intent), never from the event's
+copy, so an event that arrives late, twice or out of order ends at the state Stripe has now.
+The four event types are handled alike:
+1. The tip whose current attempt is this PaymentIntent is locked. When no tip holds it, the
+   intent is read once to learn whose it is (its metadata tip_id), and that tip is locked.
+2. Under the lock the intent is read (again): its kind, tip, job, attempt, customer and
+   currency must be the locked tip's (and its amount the current attempt's). A mismatch
+   changes nothing, logs `tip_event_mismatch` (ids and the names of the fields that differ)
+   and raises, so the event ends failed for staff. Stripe failing, or no Stripe key: raised,
+   so the worker rolls the handler back and runs the event again after its backoff.
+3. Then, by what Stripe says:
+   - the current attempt's intent: the tip's status moves to Stripe's current one along
+     TIP_EVENT_TRANSITIONS (forward only: succeeded and canceled never move; anything else is
+     a debug line). Succeeded stamps succeeded_at and adds a `tip_added` line to the job's
+     history, the customer its actor;
+   - the current attempt's lost create (no intent stored, a create sent): the intent is
+     adopted (a conditional UPDATE in a savepoint), then as above;
+   - an earlier attempt's intent: canceled before the tip moved on, so its events change
+     nothing. One Stripe shows succeeded took money no attempt holds: the tip is flagged for
+     staff (late_success_at, which also stops any new choice), its current attempt's intent is
+     canceled when it still can be, and staff get an ERROR (`tip_succeeded_on_stale_attempt`)
+     with the ids. Never a second silent charge.
+   An intent naming no tip of ours is a warning and changes nothing.
+Nothing here changes the job's status, its payment or its transfer. Logs carry ids, the event
+type, statuses and Stripe codes only: no amount, no PaymentIntent id, no customer data.
 """
 
 import logging
 import uuid
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import Final
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.integrations.stripe_errors import StripeCallError
+from app.integrations.stripe_payments import (
+    TIP_INTENT_KIND,
+    StripePayments,
+    TipIntentFacts,
+    worker_stripe_payments,
+)
 from app.modules.jobs.service import JobTimeline
 from app.modules.payments.webhook_handlers import intent_event
 from app.modules.tips.errors import TipEventMismatchError, TipRowMissingError
+from app.modules.tips.intents import (
+    mismatches,
+    named_tip,
+    status_of,
+    tip_cancel_idempotency_key,
+)
 from app.modules.tips.models import UNPAID_STATUSES, Tip, TipStatus
 from app.modules.tips.repository import TipRepository
 from app.modules.users.service import UserService
@@ -48,7 +66,8 @@ from app.modules.webhooks.events import AfterCommit, StripeEvent, StripeEventHan
 logger = logging.getLogger(__name__)
 
 _S = TipStatus
-# (from, to) along the tip's PaymentIntent events. Anything not listed changes nothing.
+# (from, to) along the tip's PaymentIntent, as Stripe reports it. Anything not listed changes
+# nothing: succeeded and canceled are final.
 TIP_EVENT_TRANSITIONS: Final = frozenset(
     {
         (_S.REQUIRES_PAYMENT, _S.PROCESSING),
@@ -63,164 +82,166 @@ TIP_EVENT_TRANSITIONS: Final = frozenset(
         (_S.FAILED, _S.CANCELED),
     }
 )
+TIP_EVENT_TYPES: Final = (
+    "payment_intent.processing",
+    "payment_intent.payment_failed",
+    "payment_intent.succeeded",
+    "payment_intent.canceled",
+)
+
+StripePaymentsProvider = Callable[[], StripePayments | None]
 
 
-@dataclass(frozen=True)
-class TipIntentEvent:
-    """A tip's payment_intent.* event as the reconciliation reads it."""
-
-    stripe_event_id: str
-    event_type: str
-    intent_id: str
-    amount: int
-    currency: str
-    customer: str | None
-    failure_code: str | None
-    # The metadata the tip's create writes (strings): read only to adopt a lost create's
-    # intent. Never logged.
-    tip_id: str | None
-    attempt: str | None
+class TipsStripeNotConfiguredError(Exception):
+    """No Stripe key: the PaymentIntent cannot be read, so the event is run again later."""
 
 
-def tip_intent_event(event: StripeEvent) -> TipIntentEvent:
-    """The event's PaymentIntent; malformed as for a payment's (logged and raised)."""
-    base = intent_event(event)
-    data = event.payload.get("data")
-    intent = data.get("object") if isinstance(data, Mapping) else None
-    metadata = intent.get("metadata") if isinstance(intent, Mapping) else None
-    named = metadata.get("tip_id") if isinstance(metadata, Mapping) else None
-    attempt = metadata.get("attempt") if isinstance(metadata, Mapping) else None
-    return TipIntentEvent(
-        stripe_event_id=base.stripe_event_id,
-        event_type=base.event_type,
-        intent_id=base.intent_id,
-        amount=base.amount,
-        currency=base.currency,
-        customer=base.customer,
-        failure_code=base.failure_code,
-        tip_id=named if isinstance(named, str) else None,
-        attempt=attempt if isinstance(attempt, str) else None,
-    )
-
-
-def _ids(event: TipIntentEvent, tip: Tip) -> dict[str, str]:
-    return {
-        "tip_id": str(tip.id),
-        "job_id": str(tip.job_id),
-        "stripe_event_id": event.stripe_event_id,
-        "event_type": event.event_type,
-    }
-
-
-def _named_tip(value: str | None) -> uuid.UUID | None:
-    """The tip id the metadata names, as the tip's create writes it (a lowercase UUID with
-    hyphens); None for anything else."""
-    if value is None:
-        return None
-    try:
-        parsed = uuid.UUID(value)
-    except ValueError:
-        return None
-    return parsed if str(parsed) == value else None
+def _ids(ids: dict[str, str], tip: Tip) -> dict[str, str]:
+    return {**ids, "tip_id": str(tip.id), "job_id": str(tip.job_id)}
 
 
 class TipReconciler:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, stripe: StripePayments) -> None:
         self._session = session
+        self._stripe = stripe
         self._tips = TipRepository(session)
         self._users = UserService(session)
         self._timeline = JobTimeline(session)
 
-    async def apply(self, event: TipIntentEvent, status: TipStatus) -> None:
-        tip = await self._tips.get_by_intent_for_update(event.intent_id)
+    async def apply(self, intent_id: str, ids: dict[str, str]) -> uuid.UUID | None:
+        """Applies what Stripe says of the PaymentIntent (see the module doc). Returns the tip's
+        id when it succeeded through this event, else None."""
+        tip = await self._tips.get_by_intent_for_update(intent_id)
         if tip is None:
-            tip = await self._adopt(event, status)
+            first = await self._read(intent_id)
+            tip_id = named_tip(first.tip_id) if first.kind == TIP_INTENT_KIND else None
+            tip = None if tip_id is None else await self._tips.get_for_update(tip_id)
             if tip is None:
-                return
-        else:
-            await self._check(event, tip)
-        current = tip.status
-        if (current, status) not in TIP_EVENT_TRANSITIONS:
-            logger.debug("tip_event_ignored", extra={**_ids(event, tip), "tip_status": current})
-            return
-        if not await self._tips.move_status(tip.id, event.intent_id, current, status):
-            raise TipRowMissingError  # pragma: no cover - the row is locked
-        ids = _ids(event, tip)
-        if status is TipStatus.SUCCEEDED:
-            await self._timeline.tip_added(tip.job_id, tip.customer_id)
-            logger.info("tip_succeeded", extra=ids)
-        elif status is TipStatus.FAILED:
-            logger.info("tip_payment_failed", extra={**ids, "stripe_code": event.failure_code})
-        else:
-            logger.info("tip_status_moved", extra={**ids, "tip_status": status.value})
-
-    async def _adopt(self, event: TipIntentEvent, status: TipStatus) -> Tip | None:
-        """The tip the metadata names, when the event's intent is its current attempt's lost
-        create: stored on the locked row and returned. None (logged) otherwise."""
-        tip_id = _named_tip(event.tip_id)
-        tip = None if tip_id is None else await self._tips.get_for_update(tip_id)
-        if tip is None:
-            logger.warning(
-                "tip_event_unknown_intent",
-                extra={"stripe_event_id": event.stripe_event_id, "event_type": event.event_type},
-            )
-            return None
-        current = (
-            tip.stripe_payment_intent_id is None
+                logger.warning("tip_event_unknown_intent", extra=ids)
+                return None
+        facts = await self._read(intent_id)  # under the tip's lock: Stripe's state now
+        await self._check(facts, tip, ids)
+        current = facts.attempt == str(tip.attempt)
+        if current and tip.stripe_payment_intent_id == intent_id:
+            return await self._settle(tip, facts, ids)
+        if (
+            current
+            and tip.stripe_payment_intent_id is None
             and tip.payment_intent_requested_at is not None
             and tip.status in UNPAID_STATUSES
-            and event.attempt == str(tip.attempt)
-        )
+        ):
+            if not await self._adopt(tip, facts, ids):
+                return None
+            return await self._settle(tip, facts, ids)
         if not current:
-            if status is TipStatus.SUCCEEDED:
-                logger.error("tip_succeeded_on_stale_attempt", extra=_ids(event, tip))
-                raise TipEventMismatchError
-            logger.info("tip_event_stale_attempt", extra=_ids(event, tip))
+            if facts.status == "succeeded":
+                await self._contain(tip, ids)
+            else:
+                logger.info("tip_event_stale_attempt", extra=_ids(ids, tip))
             return None
-        await self._check(event, tip)
+        # The current attempt's number, but the tip holds another intent: not adopted.
+        logger.warning("tip_event_not_adopted", extra=_ids(ids, tip))
+        return None
+
+    async def _read(self, intent_id: str) -> TipIntentFacts:
+        # Stripe failing raises (StripeCallError): the event is rolled back and run again.
+        return await self._stripe.tip_intent(intent_id)
+
+    async def _check(self, facts: TipIntentFacts, tip: Tip, ids: dict[str, str]) -> None:
+        """The intent is this locked tip's: its kind, tip, job, customer and currency, and the
+        current attempt's amount when it is that attempt's."""
+        differ = mismatches(
+            facts,
+            tip_id=tip.id,
+            job_id=tip.job_id,
+            attempt=tip.attempt,
+            amount_cents=tip.amount_cents,
+            currency=tip.currency,
+            stripe_customer_id=await self._users.stripe_customer_id(tip.customer_id),
+        )
+        if differ:
+            logger.error("tip_event_mismatch", extra={**_ids(ids, tip), "fields": differ})
+            raise TipEventMismatchError
+
+    async def _settle(
+        self, tip: Tip, facts: TipIntentFacts, ids: dict[str, str]
+    ) -> uuid.UUID | None:
+        target, current = status_of(facts), tip.status
+        if (current, target) not in TIP_EVENT_TRANSITIONS:
+            logger.debug(
+                "tip_event_no_move",
+                extra={**_ids(ids, tip), "tip_status": current, "stripe_status": facts.status},
+            )
+            return None
+        if not await self._tips.move_status(tip.id, facts.payment_intent_id, current, target):
+            raise TipRowMissingError  # pragma: no cover - the row is locked
+        logged = {**_ids(ids, tip), "tip_status": target.value}
+        if target is TipStatus.SUCCEEDED:
+            await self._timeline.tip_added(tip.job_id, tip.customer_id)
+            logger.info("tip_succeeded", extra=logged)
+            return tip.id
+        logger.info("tip_status_moved", extra=logged)
+        return None
+
+    async def _adopt(self, tip: Tip, facts: TipIntentFacts, ids: dict[str, str]) -> bool:
+        """Stores the current attempt's intent its create's answer lost, on the locked row."""
         try:
             async with self._session.begin_nested():
                 stored = await self._tips.set_payment_intent_if_missing(
-                    tip.id, tip.attempt, event.intent_id
+                    tip.id, tip.attempt, facts.payment_intent_id
                 )
         except IntegrityError:
             # Another tip holds this intent (the unique column): nothing changes.
             stored = False
         if not stored:
-            logger.warning("tip_event_not_adopted", extra=_ids(event, tip))
-            return None
-        logger.warning("tip_payment_intent_adopted_from_event", extra=_ids(event, tip))
-        return tip
+            logger.warning("tip_event_not_adopted", extra=_ids(ids, tip))
+            return False
+        logger.warning("tip_payment_intent_adopted_from_event", extra=_ids(ids, tip))
+        return True
 
-    async def _check(self, event: TipIntentEvent, tip: Tip) -> None:
-        customer = await self._users.stripe_customer_id(tip.customer_id)
-        differ = [
-            name
-            for name, same in (
-                ("amount", event.amount == tip.amount_cents),
-                ("currency", event.currency == tip.currency),
-                ("customer", customer is not None and event.customer == customer),
+    async def _contain(self, tip: Tip, ids: dict[str, str]) -> None:
+        """An earlier attempt's intent succeeded: money no attempt holds. The tip is flagged
+        for staff and takes no new choice; its current attempt's intent is canceled when it
+        still can be (Stripe refusing: it is being paid, and staff see both)."""
+        # Read before the flag's UPDATE, which expires the row's attributes.
+        logged = _ids(ids, tip)
+        intent, payable = tip.stripe_payment_intent_id, tip.status in UNPAID_STATUSES
+        key = tip_cancel_idempotency_key(tip.id, tip.attempt, tip.updated_at)
+        flagged = await self._tips.flag_late_success(tip.id)
+        cancelled = False
+        if flagged and intent is not None and payable:
+            cancelled = await self._stripe.cancel_payment_intent(intent, idempotency_key=key)
+        logger.error(
+            "tip_succeeded_on_stale_attempt",
+            extra={**logged, "current_canceled": str(cancelled).lower()},
+        )
+
+
+def tip_event_handler(stripe: StripePaymentsProvider) -> StripeEventHandler:
+    """The handler, reading PaymentIntents with the client `stripe` gives (the worker's own in
+    production, a fake in tests)."""
+
+    async def tip_event(
+        session: AsyncSession, event: StripeEvent, after_commit: AfterCommit
+    ) -> None:
+        intent_id = intent_event(event).intent_id  # a malformed object is raised
+        ids = {"stripe_event_id": event.stripe_event_id, "event_type": event.event_type}
+        client = stripe()
+        if client is None:
+            logger.warning("tips_stripe_not_configured", extra=ids)
+            raise TipsStripeNotConfiguredError
+        try:
+            await TipReconciler(session, client).apply(intent_id, ids)
+        except StripeCallError as error:
+            logger.warning(
+                "tip_event_stripe_unavailable",
+                extra={**ids, "error": type(error).__name__, "stripe_code": error.code},
             )
-            if not same
-        ]
-        if differ:
-            logger.error("tip_event_mismatch", extra={**_ids(event, tip), "fields": differ})
-            raise TipEventMismatchError
+            raise
 
-
-def _moving_to(status: TipStatus) -> StripeEventHandler:
-    async def handle(session: AsyncSession, event: StripeEvent, after_commit: AfterCommit) -> None:
-        await TipReconciler(session).apply(tip_intent_event(event), status)
-
-    handle.__name__ = f"tip_intent_{status}"
-    return handle
+    return tip_event
 
 
 TIP_INTENT_HANDLERS: Final[Mapping[str, StripeEventHandler]] = MappingProxyType(
-    {
-        "payment_intent.processing": _moving_to(TipStatus.PROCESSING),
-        "payment_intent.payment_failed": _moving_to(TipStatus.FAILED),
-        "payment_intent.succeeded": _moving_to(TipStatus.SUCCEEDED),
-        "payment_intent.canceled": _moving_to(TipStatus.CANCELED),
-    }
+    dict.fromkeys(TIP_EVENT_TYPES, tip_event_handler(worker_stripe_payments))
 )

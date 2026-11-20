@@ -419,6 +419,10 @@ class Settings(BaseSettings):
     tip_max_percent: int = Field(default=100, gt=0, le=1000)
     tip_max_cents: int = Field(default=50_000, gt=0)
     tip_window_hours: int = Field(default=168, gt=0)
+    # Tip choices one customer may send per window, replays included (#510 round 1): each
+    # may cancel, create or read a PaymentIntent and mints a CustomerSession.
+    tip_choice_limit: int = Field(default=20, gt=0)
+    tip_choice_window_seconds: int = Field(default=600, gt=0)
     # Transfers to the pros (D13.3, #68): once a job is confirmed its pro's payout is
     # transferred to their Stripe account, by a worker task queued at the confirmation and by a
     # sweep for whatever is left. How often the worker sweeps (a cron, in minutes of the hour),

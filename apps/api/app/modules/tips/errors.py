@@ -27,6 +27,25 @@ class TipInProgressError(AppError):
     message = "The tip for this job is being processed. Try again shortly."
 
 
+class TipNeedsReviewError(AppError):
+    """The tip cannot take a choice until staff look (#510 round 1): a PaymentIntent create
+    whose answer was lost long ago and that Stripe's search cannot place, or a late success of
+    an earlier attempt. Nothing changes."""
+
+    status_code = 409
+    code = "tip_needs_review"
+    message = "This tip needs a review by our support team."
+
+
+class TipIdempotencyKeyReusedError(AppError):
+    """The caller's Idempotency-Key already made a tip choice with another body, or on another
+    job. Keys are per customer: someone else's key is just a new key."""
+
+    status_code = 409
+    code = "idempotency_key_reused"
+    message = "This Idempotency-Key was already used with a different tip choice."
+
+
 class TipAmountOutOfRangeError(AppError):
     """The amount, or what the percent comes to on this job, is outside the tip's bounds."""
 

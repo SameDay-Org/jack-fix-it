@@ -21,9 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.modules.jobs.models import JobStatus
+from app.modules.tips.intents import tip_cancel_idempotency_key
 from app.modules.tips.models import Tip, TipChoice, TipStatus
 from app.modules.tips.repository import TipRepository
-from app.modules.tips.service import tip_cancel_idempotency_key
 from app.modules.tips.tasks import cancel_unpaid_tips
 from tests.conftest import make_settings
 from tests.job_world import JobWorld, build_world, make_job

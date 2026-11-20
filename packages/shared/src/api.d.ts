@@ -13179,7 +13179,10 @@ export interface operations {
     choose_tip_v1_requests__request_id__job_tip_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description A UUID the app makes once per choice and sends again with every retry of it. A retry answers 200 with the tip as it is now (and the same attempt's Payment Sheet while it is still the one to pay) and changes nothing; the same key with another body, or on another job, answers 409 idempotency_key_reused. */
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 request_id: string;
             };
@@ -13227,7 +13230,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description tip_not_available: the job was never confirmed (under way, disputed, refunded, cancelled) or its tip window closed; tip_already_paid: the tip succeeded; tip_in_progress: its payment is processing, or another change of the tip is under way. Nothing changed. */
+            /** @description tip_not_available: the job was never confirmed (under way, disputed, refunded, cancelled) or its tip window closed; tip_already_paid: the tip succeeded; tip_in_progress: its payment is processing, or another change of the tip is under way; tip_needs_review: support has to look at the tip first; idempotency_key_reused: the key went with another body or job. Nothing changed. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13238,6 +13241,15 @@ export interface operations {
             };
             /** @description tip_percent_not_offered: the percent is not one of the job's presets; tip_amount_out_of_range: the amount, or what the percent comes to, is outside the job's bounds; validation_error: a malformed id or body. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than TIP_CHOICE_LIMIT choices in the window; Retry-After says when to try again. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
