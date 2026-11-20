@@ -115,7 +115,11 @@ export function ProCancelScreen() {
         name={name}
         onSent={(cancellation) => {
           setSent({ jobId: id, cancellation });
-          announce(t(`cancellation.pro.${cancelledCopy(cancellation)}.title`));
+          // Both lines: the first alone would not say that the customer had cancelled first.
+          const copy = cancelledCopy(cancellation);
+          announce(
+            `${t(`cancellation.pro.${copy}.title`)}. ${t(`cancellation.pro.${copy}.body`, { name })}`,
+          );
         }}
         onReview={() => setReviewFor(id)}
         onChanged={() => void job.refetch()}

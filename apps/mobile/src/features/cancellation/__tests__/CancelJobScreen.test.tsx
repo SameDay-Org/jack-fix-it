@@ -305,6 +305,34 @@ describe("CancelJobScreen", () => {
     expect(router.back).toHaveBeenCalled();
   });
 
+  it("a cancel that finds the pro's, made first, says the pro cancelled, never that the customer did", async () => {
+    const announce = announced();
+    await renderScreen();
+    await pick();
+    await confirm();
+    await answer(
+      0,
+      jsonResponse(
+        200,
+        cancellation({
+          cancelled_by: "pro",
+          reason_code: "cannot_make_it",
+          fee_cents: 0,
+          refund_cents: 18_050,
+        }),
+      ),
+    );
+    expect(await screen.findByText("Dan cancelled this job")).toBeTruthy();
+    const support = "This costs you nothing. You can start a new request to find another pro.";
+    expect(screen.getByText(support)).toBeTruthy();
+    expect(
+      screen.getByText("$180.50 is going back to your payment method. It's being processed."),
+    ).toBeTruthy();
+    expect(screen.queryByText("Your job was cancelled")).toBeNull();
+    expect(screen.queryByText("Your pro was told.")).toBeNull();
+    expect(announce).toHaveBeenCalledWith(`Dan cancelled this job. ${support}`, { queue: true });
+  });
+
   it("a link to another job's cancel shows that job, never the cancel just sent", async () => {
     const rendered = await renderScreen();
     await pick();

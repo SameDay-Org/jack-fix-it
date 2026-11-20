@@ -5,6 +5,7 @@ import { AccessibilityInfo } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { router } from "expo-router";
 
+import { sessionGeneration } from "@/api";
 import i18n from "@/i18n";
 
 import {
@@ -21,6 +22,7 @@ import {
 } from "../../../api/__tests__/helpers";
 import { attachQueryClient, sessionStore } from "../../../api/session";
 import { METRICS, SIGNED_OUT } from "../../auth/__tests__/helpers";
+import { proJobsQueryKey } from "../../pro-jobs/api";
 import type { ProJob } from "../../pro-jobs/phase";
 import { arrived, JOB_ID, onTheWay, proJob, working } from "../../pro-jobs/__tests__/helpers";
 import type { ProCancellation } from "../api";
@@ -230,6 +232,7 @@ describe("ProCancelScreen", () => {
     await pick("The job is different from what was asked");
     await fireEvent.changeText(screen.getByTestId("cancel-note"), "  It needs a plumber.  ");
     await confirm();
+    // The button is busy once the first tap is drawn: the second does not send again.
     await confirm();
     await waitFor(() => expect(postCalls()).toHaveLength(1));
     const [call] = postCalls();
@@ -274,28 +277,37 @@ describe("ProCancelScreen", () => {
     const before = jobReads();
     await pick();
     await confirm();
-    job = cancelledJob();
+    // The job read still answers the scheduled job: the cancel's own answer draws the state.
     await answer(0, jsonResponse(200, cancellation()));
-    expect(await screen.findByTestId("cancel-sent")).toBeTruthy();
+    await waitFor(() => expect(jobReads()).toBeGreaterThan(before));
+    await act(settle);
+    expect(screen.getByTestId("cancel-sent")).toBeTruthy();
     expect(screen.getByText("You cancelled this job")).toBeTruthy();
     expect(screen.getByText("We told Maria. They won't be charged for it.")).toBeTruthy();
-    expect(announce).toHaveBeenCalledWith("You cancelled this job", { queue: true });
-    await waitFor(() => expect(jobReads()).toBeGreaterThan(before));
+    expect(announce).toHaveBeenCalledWith(
+      "You cancelled this job. We told Maria. They won't be charged for it.",
+      { queue: true },
+    );
     await fireEvent.press(screen.getByTestId("cancel-back"));
     expect(router.back).toHaveBeenCalled();
   });
 
   it("says so when the customer had cancelled first (the API answers with theirs)", async () => {
+    const announce = announced();
     await renderScreen();
     await pick();
     await confirm();
-    job = cancelledJob("customer");
     await answer(0, jsonResponse(200, cancellation({ cancelled_by: "customer" })));
     expect(await screen.findByText("This job was cancelled")).toBeTruthy();
     expect(
       screen.getByText("It was cancelled by Maria. Nothing more is needed from you."),
     ).toBeTruthy();
     expect(screen.queryByText("You cancelled this job")).toBeNull();
+    // Both lines are said: the title alone would read as the pro's own cancel.
+    expect(announce).toHaveBeenCalledWith(
+      "This job was cancelled. It was cancelled by Maria. Nothing more is needed from you.",
+      { queue: true },
+    );
   });
 
   it("opened on a job already cancelled, says who did it, with no form", async () => {
@@ -377,6 +389,30 @@ describe("ProCancelScreen", () => {
     expect(await screen.findByTestId("cancel-form")).toBeTruthy();
     expect(screen.queryByText("You cancelled this job")).toBeNull();
     expect(screen.getByRole("radio", { name: "I can't make it" })).not.toBeChecked();
+  });
+
+  it("a link to another job's cancel opens that job's own form: no reason, notice or key carried over", async () => {
+    // The other job is in the pro's list: its screen draws at once, with no loading in between.
+    client.setQueryData(proJobsQueryKey(sessionGeneration()), [proJob({ id: OTHER_JOB_ID })]);
+    const rendered = await renderScreen();
+    await pick();
+    await confirm();
+    await answer(0, new TypeError("Network request failed"));
+    expect(screen.getByTestId("cancel-failure")).toBeTruthy();
+    mockParams.id = OTHER_JOB_ID;
+    await rendered.rerender(<ProCancelScreen />);
+    expect(screen.getByTestId("cancel-form")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "I can't make it" })).not.toBeChecked();
+    expect(screen.queryByTestId("cancel-failure")).toBeNull();
+    await pick();
+    await confirm();
+    const otherPosts = () =>
+      fetchMock.mock.calls.filter(
+        (call) => callPath(call) === `/v1/pros/me/jobs/${OTHER_JOB_ID}/cancel` && isPost(call),
+      );
+    await waitFor(() => expect(otherPosts()).toHaveLength(1));
+    expect(keyOf(otherPosts()[0]!)).toMatch(UUID);
+    expect(keyOf(otherPosts()[0]!)).not.toBe(keyOf(postCalls()[0]!));
   });
 
   it("speaks Spanish too", async () => {
