@@ -30,7 +30,7 @@ from app.modules.jobs.location import NoJobLocationStore
 from app.modules.jobs.models import JobStatus
 from app.modules.notifications import catalog
 from app.modules.payments.cancel_refund_tasks import refund_cancellation
-from app.modules.payments.models import RefundStatus
+from app.modules.payments.models import Payment, RefundStatus, Transfer
 from app.modules.payments.transfers import ReleaseOutcome, TransferConfig, TransferService
 from app.modules.requests.models import RequestStatus, ServiceRequest
 from app.modules.requests.transitions import TERMINAL_STATES
@@ -247,6 +247,101 @@ async def test_a_job_its_pro_cancelled_is_never_paid_out(
 
     assert outcome is ReleaseOutcome.NOT_CONFIRMED
     assert stripe.creates == []
+
+
+async def assert_nothing_of_the_cancel(
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+) -> None:
+    """The job and its request as they were: no cancellation, no refund intent, nothing queued
+    or sent."""
+    assert (await job_row(session, job_id)).status is JobStatus.ON_THE_WAY
+    assert await request_status(session, job_id) is RequestStatus.ACCEPTED
+    assert (await cancellations(session, job_id), await refund_rows(session, job_id)) == ([], [])
+    assert queue.jobs == {}
+    assert refunds.creates == []
+
+
+async def test_a_pro_s_cancel_of_a_job_with_a_transfer_waits_for_staff(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A transfer row on the job (staff repaired one by hand): the pro may be paid already, so
+    nothing is refunded, nothing is cancelled, and staff look (Vault N1, service.py:264)."""
+    job_id = await booked(db_session, world, JobStatus.ON_THE_WAY)
+    request_id = (await job_row(db_session, job_id)).request_id
+    payment = (
+        await db_session.scalars(select(Payment).where(Payment.request_id == request_id))
+    ).one()
+    db_session.add(
+        Transfer(
+            job_id=job_id,
+            payment_id=payment.id,
+            pro_id=world.pro.profile_id,
+            amount_cents=payment.pro_payout_cents,
+            currency="usd",
+            idempotency_key=f"transfer:{job_id}",
+        )
+    )
+    await db_session.commit()
+
+    answer = await pro_cancel(db_client, world, job_id)
+
+    assert answer.status_code == 409, answer.text
+    assert answer.json()["error"]["code"] == "cancel_needs_review"
+    await assert_nothing_of_the_cancel(db_session, job_id, queue, refunds)
+    assert "cancel_job_has_transfer" in caplog.text
+
+
+# Each keeps the payment row valid (its CHECKs: the total adds up, the split adds up).
+PAYMENT_MISMATCHES: Final[dict[str, dict[str, Any]]] = {
+    "no_payment_intent": {"stripe_payment_intent_id": None},
+    "another_price": {
+        "amount_cents": Payment.amount_cents + 1,
+        "customer_total_cents": Payment.customer_total_cents + 1,
+        "platform_fee_cents": Payment.platform_fee_cents + 1,
+    },
+    "another_payout": {
+        "pro_payout_cents": Payment.pro_payout_cents - 1,
+        "platform_fee_cents": Payment.platform_fee_cents + 1,
+    },
+}
+
+
+@pytest.mark.parametrize("mismatch", PAYMENT_MISMATCHES)
+async def test_a_pro_s_cancel_against_a_payment_that_is_not_the_job_s_waits_for_staff(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    queue: RecordingQueue,
+    refunds: FakeStripeRefunds,
+    caplog: pytest.LogCaptureFixture,
+    mismatch: str,
+) -> None:
+    """The refund is computed from the job's payment only when it is the job's: a payment with
+    no PaymentIntent, or whose price or payout is not the job's frozen amount, is refused and
+    nothing is written (Vault N1, service.py:400)."""
+    job_id = await booked(db_session, world, JobStatus.ON_THE_WAY)
+    request_id = (await job_row(db_session, job_id)).request_id
+    await db_session.execute(
+        update(Payment)
+        .where(Payment.request_id == request_id)
+        .values(**PAYMENT_MISMATCHES[mismatch])
+    )
+    await db_session.commit()
+
+    answer = await pro_cancel(db_client, world, job_id)
+
+    assert answer.status_code == 409, answer.text
+    assert answer.json()["error"]["code"] == "cancel_needs_review"
+    await assert_nothing_of_the_cancel(db_session, job_id, queue, refunds)
+    assert "cancel_payment_mismatch" in caplog.text
 
 
 # --- The BDC's queue: under problems for a while ---------------------------------------------
