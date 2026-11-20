@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.errors import NotFoundError
 from app.modules.categories.service import CategoryService
 from app.modules.disputes.outcomes import DisputeStatus, dispute_outcomes
 from app.modules.jobs.service import JobReceiptFacts, JobReceiptReader
@@ -40,7 +39,7 @@ from app.modules.receipts.schemas import (
     ReceiptStatus,
     ReceiptTip,
 )
-from app.modules.requests.service import CustomerRequestReader, ProRequestReader
+from app.modules.requests.service import CustomerRequestReader
 from app.modules.tips.receipt_reader import ReceiptTip as TipFacts
 from app.modules.tips.receipt_reader import TipReceiptReader
 from app.modules.tips.service import TipConfig, TipReader
@@ -97,7 +96,6 @@ class ReceiptService:
         self._session = session
         self._config = config
         self._customer_requests = CustomerRequestReader(session)
-        self._requests = ProRequestReader(session)
         self._jobs = JobReceiptReader(session)
         self._payments = PaymentReceiptReader(session)
         self._tips = TipReceiptReader(session)
@@ -141,17 +139,19 @@ class ReceiptService:
         ]
         outcome = (await dispute_outcomes(self._session, [job.job_id])).get(job.job_id)
         dispute_open = outcome is not None and outcome.status is DisputeStatus.OPEN
-        request = (await self._requests.job_views([job.request_id])).get(job.request_id)
-        if request is None:  # pragma: no cover - jobs.request_id is a foreign key
-            raise NotFoundError
+        # The customer's own request, never the pro's masked view of it (a phone the
+        # customer typed into their own address stays as they typed it on their receipt).
+        category_id = (await self._customer_requests.category_ids([job.request_id])).get(
+            job.request_id
+        )
         category = None
-        if request.view.category_id is not None:
-            found = await self._categories.summaries([request.view.category_id])
+        if category_id is not None:
+            found = await self._categories.summaries([category_id])
             category = found[0] if found else None
         card = (await self._pros.cards([job.pro_id])).get(job.pro_id)
         starts = await self._quotes.proposed_starts([job.quote_id])
         tip_view = await self._tip_view.for_job(job.tip)
-        address = request.address
+        address = await self._customer_requests.own_address(job.request_id)
         method = payment.card
         out = ReceiptOut(
             receipt_number=await self._customer_requests.public_code(job.request_id),

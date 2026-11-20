@@ -67,12 +67,13 @@ def mismatches(
     tip_id: uuid.UUID,
     job_id: uuid.UUID,
     attempt: int,
-    amount_cents: int,
+    amount_cents: int | None,
     currency: str,
     stripe_customer_id: str | None,
 ) -> list[str]:
     """The names of what in Stripe's intent is not this tip's ([] when it is). The amount is
-    checked only for the tip's current attempt: an earlier attempt's amount is not kept."""
+    checked only for the tip's current attempt (an earlier attempt's amount is not kept), and
+    only when given: None for an intent of a closed attempt (#510 round 2)."""
     named = named_attempt(facts.attempt)
     checks = [
         ("kind", facts.kind == TIP_INTENT_KIND),
@@ -83,6 +84,6 @@ def mismatches(
         ("customer", stripe_customer_id is not None and facts.customer_id == stripe_customer_id),
         ("currency", facts.currency == currency),
     ]
-    if facts.attempt == str(attempt):
+    if amount_cents is not None and facts.attempt == str(attempt):
         checks.append(("amount", facts.amount_cents == amount_cents))
     return [name for name, same in checks if not same]

@@ -99,10 +99,20 @@ class ProProfileRepository:
         return list((await self._session.scalars(statement)).all())
 
     async def with_coverage(
-        self, pro_id: uuid.UUID, category_id: uuid.UUID, service_area_ids: Collection[uuid.UUID]
+        self,
+        pro_id: uuid.UUID,
+        category_id: uuid.UUID,
+        service_area_ids: Collection[uuid.UUID],
+        *,
+        lock: bool = False,
     ) -> tuple[ProProfile, bool, bool] | None:
         """(the profile, whether it lists the category, whether it lists one of the areas), in
-        one query; None when no profile has this id (#82)."""
+        one query; None when no profile has this id (#82). `lock` (#511): the profile row, then
+        its category row and its rows for these areas, FOR SHARE until the caller's transaction
+        ends, in three queries: a change to any of them committed first is read, one made after
+        waits for that commit."""
+        if lock:
+            return await self._locked_coverage(pro_id, category_id, service_area_ids)
         in_category = exists().where(
             ProCategory.pro_id == pro_id, ProCategory.category_id == category_id
         )
@@ -113,6 +123,41 @@ class ProProfileRepository:
         statement = select(ProProfile, in_category, in_area).where(ProProfile.id == pro_id)
         row = (await self._session.execute(statement)).one_or_none()
         return None if row is None else (row[0], bool(row[1]), bool(row[2]))
+
+    async def _locked_coverage(
+        self, pro_id: uuid.UUID, category_id: uuid.UUID, service_area_ids: Collection[uuid.UUID]
+    ) -> tuple[ProProfile, bool, bool] | None:
+        # The profile first: every writer of a profile, its categories or its areas locks the
+        # profile's row FOR UPDATE before anything else, so these waits never cross.
+        profile = await self._session.scalar(
+            select(ProProfile)
+            .where(ProProfile.id == pro_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        if profile is None:
+            return None
+        in_category = await self._session.scalar(
+            select(ProCategory.pro_id)
+            .where(ProCategory.pro_id == pro_id, ProCategory.category_id == category_id)
+            .with_for_update(read=True)
+        )
+        in_area: list[uuid.UUID] = []
+        if service_area_ids:
+            in_area = list(
+                (
+                    await self._session.scalars(
+                        select(ProServiceArea.service_area_id)
+                        .where(
+                            ProServiceArea.pro_id == pro_id,
+                            ProServiceArea.service_area_id.in_(service_area_ids),
+                        )
+                        .order_by(ProServiceArea.service_area_id)
+                        .with_for_update(read=True)
+                    )
+                ).all()
+            )
+        return profile, in_category is not None, bool(in_area)
 
     @staticmethod
     def photo_keys_among(keys: Collection[str]) -> Select[str | None]:
