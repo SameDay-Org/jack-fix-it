@@ -208,8 +208,17 @@ def revocation(scene: Scene, kind: str) -> Any:
     }[kind]
 
 
+async def bound_lock_waits(session: AsyncSession, seconds: int = LOCK_WAIT_SECONDS) -> None:
+    """A lock wait in this transaction fails (55P03) after `seconds` instead of lasting: a
+    wrong lock order then fails the test in seconds, never hangs it (#511 round 2, the Vault)."""
+    await session.execute(text(f"SET LOCAL lock_timeout = '{int(seconds)}s'"))
+
+
 async def revoke(scene: Scene, kind: str) -> None:
+    """Commits the revocation, which meets no lock: one it waits on is a wrong order, and
+    fails after LOCK_WAIT_SECONDS."""
     async with scene.sessions() as session:
+        await bound_lock_waits(session)
         await session.execute(revocation(scene, kind))
         await session.commit()
 
@@ -386,6 +395,8 @@ async def test_a_revocation_after_the_locked_read_waits_for_the_assignment(
         async with asyncio.timeout(LOCK_WAIT_SECONDS):
             await pause.inside.wait()
         async with scene.sessions() as revoker:
+            # It waits on the offer's locks on purpose, until the offer goes on: bounded too.
+            await bound_lock_waits(revoker, 3 * LOCK_WAIT_SECONDS)
             pid = await backend_pid(revoker)
             revoking = asyncio.create_task(revoker.execute(revocation(scene, kind)))
             await wait_until_waiting(scene.sessions, pid)
@@ -440,6 +451,8 @@ async def test_a_revocation_after_the_worker_s_locked_read_waits_for_its_offer(
         async with asyncio.timeout(LOCK_WAIT_SECONDS):
             await pause.inside.wait()
         async with scene.sessions() as revoker:
+            # It waits on the offer's locks on purpose, until the offer goes on: bounded too.
+            await bound_lock_waits(revoker, 3 * LOCK_WAIT_SECONDS)
             pid = await backend_pid(revoker)
             revoking = asyncio.create_task(revoker.execute(revocation(scene, kind)))
             await wait_until_waiting(scene.sessions, pid)
