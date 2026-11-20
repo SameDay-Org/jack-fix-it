@@ -656,7 +656,7 @@ async def test_the_card_shows_who_to_call_and_audits_the_read(
             entity_type="service_request",
             entity_id=request.id,
             before={},
-            after={"status": "accepted", "media": 1},
+            after={"status": "accepted", "media": 1, "notes": 0, "followups": 0},
             reason=None,
         )
     ]

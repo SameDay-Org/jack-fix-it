@@ -59,12 +59,23 @@ class QueuedRequest:
 
 
 @dataclass(frozen=True)
+class RequestBrief:
+    """A request named in a staff list: its code and status, nothing about the customer."""
+
+    public_code: str
+    status: RequestStatus
+
+
+@dataclass(frozen=True)
 class LockedRequest:
-    """A request whose row this transaction holds FOR UPDATE: its id and who holds it now.
-    Handed back to `RequestQueueReader.assign` to change the holder."""
+    """A request whose row this transaction holds FOR UPDATE: its id, who holds it now, and
+    what the BDC's actions read (#82). Handed back to `RequestQueueReader` to change it."""
 
     id: uuid.UUID
     assigned_agent_id: uuid.UUID | None
+    status: RequestStatus
+    category_id: uuid.UUID | None
+    first_contact_at: datetime | None
     _row: ServiceRequest = field(repr=False, compare=False)
 
 
@@ -108,11 +119,34 @@ class RequestQueueReader:
         request = await self._requests.get_for_update(request_id)
         if request is None:
             return None
-        return LockedRequest(request.id, request.assigned_agent_id, request)
+        return LockedRequest(
+            request.id,
+            request.assigned_agent_id,
+            request.status,
+            request.category_id,
+            request.first_contact_at,
+            request,
+        )
 
     async def assign(self, locked: LockedRequest, agent_id: uuid.UUID | None) -> None:
         """Writes who holds the locked request (None: nobody). The caller commits."""
         await self._queue.set_assigned_agent(locked._row, agent_id)
+
+    async def briefs(self, request_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, RequestBrief]:
+        """Each request's public code and status, for staff lists that name a request without
+        its customer (#82)."""
+        rows = await self._requests.get_many(request_ids)
+        return {row.id: RequestBrief(row.public_code, row.status) for row in rows}
+
+    async def contacted(self, locked: LockedRequest, at: datetime) -> None:
+        """Writes the BDC's first contact with the customer on the locked request (#82). The
+        caller checked it had none, and commits."""
+        await self._queue.set_first_contact(locked._row, at)
+
+    async def classify(self, locked: LockedRequest, category_id: uuid.UUID) -> None:
+        """Writes the locked request's category (#82). The caller checked the request's status
+        and that the category is active, and commits."""
+        await self._queue.set_category(locked._row, category_id)
 
 
 def _queued(row: QueueRow) -> QueuedRequest:
