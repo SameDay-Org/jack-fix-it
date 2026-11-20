@@ -58,6 +58,7 @@ CUSTOMER_KEYS = {
     "amount_cents",
     "tax_cents",
     "customer_total_cents",
+    "cancellation",
     "dispute_status",
     "dispute_resolution",
     "unread_messages",
@@ -80,6 +81,7 @@ PRO_KEYS = {
     "pro_payout_cents",
     "pro_receives_cents",
     "payout",
+    "cancellation",
     "unread_messages",
 }
 BASE = "/v1/pros/me/jobs"

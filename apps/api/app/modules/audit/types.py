@@ -57,6 +57,8 @@ class AuditAction(StrEnum):
     # An abandon the operator confirmed that was refused, or could not finish (#450 round 1):
     # its outcome code, so a confirmed attempt never leaves no trace.
     DISPUTE_REFUND_ABANDON_REFUSED = "dispute.refund_abandon_refused"
+    # A job cancelled by its own customer or pro (#69): who, from which status, the split.
+    JOB_CANCEL = "job.cancel"
 
 
 class AuditEntityType(StrEnum):

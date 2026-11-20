@@ -11,6 +11,7 @@ from typing import Annotated, Final
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
+from app.modules.cancellations.views import CustomerJobCancellation, ProJobCancellation
 from app.modules.disputes.outcomes import DisputeResolution, DisputeStatus
 from app.modules.jobs.models import JobPhotoKind, JobStatus
 from app.modules.payments.payout_status import PayoutStatus
@@ -123,6 +124,12 @@ class CustomerJob(_Out):
         description="How an admin resolved it (released, partial_release, refunded); null "
         "while open or without a report.",
     )
+    cancellation: CustomerJobCancellation | None = Field(
+        default=None,
+        description="Set once the job was cancelled (#69): who, why, when, the fee, the refund "
+        "and where the refund stands. Always sent (null before a cancel); optional in the "
+        "schema so clients built before #69 keep compiling.",
+    )
     unread_messages: int = Field(
         description="The pro's chat messages the customer has not marked read (#71)."
     )
@@ -199,6 +206,12 @@ class ProJob(_Out):
         "it, the full payout for a release, the released part for a partial, 0 for a refund; "
         "0 for a cancelled or refunded job. pro_payout_cents stays the quote's frozen payout. "
         "Always sent; optional in the schema so older clients keep compiling.",
+    )
+    cancellation: ProJobCancellation | None = Field(
+        default=None,
+        description="Set once the job was cancelled (#69): who, why and when. Always sent "
+        "(null before a cancel); optional in the schema so clients built before #69 keep "
+        "compiling.",
     )
     payout: JobPayout | None = Field(
         description="The transfer of that amount to the pro's account: null until the job is "

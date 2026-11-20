@@ -103,6 +103,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.errors import NotFoundError
 from app.integrations.storage import StorageProvider
+from app.modules.cancellations.reader import CancellationReader
 from app.modules.categories.service import CategoryService
 from app.modules.chat.service import ChatUnreadReader
 from app.modules.disputes.outcomes import DisputeOutcome, DisputeResolution, dispute_outcomes
@@ -231,6 +232,7 @@ class JobExecutionService:
         self._categories = CategoryService(session)
         self._chat = ChatUnreadReader(session)
         self._transfers = TransferReader(session)
+        self._cancellations = CancellationReader(session)
 
     # Reads
 
@@ -274,6 +276,9 @@ class JobExecutionService:
             amount_cents=job.customer_price_cents,
             tax_cents=job.tax_cents,
             customer_total_cents=job.customer_price_cents + job.tax_cents,
+            cancellation=await self._cancellations.for_customer(job.id)
+            if job.status is JobStatus.CANCELLED
+            else None,
             dispute_status=None if outcome is None else outcome.status,
             dispute_resolution=None if outcome is None else outcome.resolution,
             unread_messages=unread[job.id],
@@ -577,6 +582,9 @@ class JobExecutionService:
         names = await self._users.first_names([job.customer_id for job in jobs])
         unread = await self._chat.unread_counts([job.id for job in jobs], user.id)
         payouts = await self._transfers.payouts([job.id for job in jobs])
+        cancellations = await self._cancellations.for_pro(
+            [job.id for job in jobs if job.status is JobStatus.CANCELLED]
+        )
         outcomes = await dispute_outcomes(
             self._session, [job.id for job in jobs if job.status in _MAY_HAVE_A_DISPUTE]
         )
@@ -624,6 +632,7 @@ class JobExecutionService:
                     pro_payout_cents=job.pro_payout_cents,
                     pro_receives_cents=_pro_receives(job, outcomes.get(job.id)),
                     payout=_payout(job, payouts),
+                    cancellation=cancellations.get(job.id),
                     unread_messages=unread[job.id],
                 )
             )

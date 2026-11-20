@@ -30,7 +30,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Final
+from typing import Final, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -67,15 +67,59 @@ def dispute_refund_key(dispute_id: uuid.UUID, generation: int = 1) -> str:
     return base if generation == 1 else f"{base}:{generation}"
 
 
-def made_for(fact: RefundFacts, dispute_id: uuid.UUID, key: str) -> bool:
+def made_for(fact: RefundFacts, dispute_id: uuid.UUID | None, key: str) -> bool:
     """Whether Stripe's refund was made for the refund row of this dispute and key: its
     metadata names both (a refund without refund_key counts for the dispute's first row only,
-    made before rows carried it)."""
+    made before rows carried it). A row of no dispute (a cancelled job's, #69) matches only a
+    refund that names no dispute and carries its key."""
+    if dispute_id is None:
+        return fact.dispute_id is None and fact.refund_key == key
     if fact.dispute_id != str(dispute_id):
         return False
     if fact.refund_key is None:
         return key == dispute_refund_key(dispute_id)
     return fact.refund_key == key
+
+
+class RefundRow(Protocol):
+    """What the Stripe step reads of a refund row, a dispute's (DisputeRefund) or a cancelled
+    job's (payments.cancel_refunds.CancelRefund): plain values copied from the row."""
+
+    @property
+    def refund_id(self) -> uuid.UUID: ...
+    @property
+    def dispute_id(self) -> uuid.UUID | None: ...
+    @property
+    def amount_cents(self) -> int: ...
+    @property
+    def currency(self) -> str: ...
+    @property
+    def idempotency_key(self) -> str: ...
+    @property
+    def stripe_refund_id(self) -> str | None: ...
+    @property
+    def stripe_status(self) -> str | None: ...
+
+
+class StripeAttempt(Protocol):
+    """One Stripe attempt of a refund row, a dispute's (RefundAttempt) or a cancelled job's
+    (payments.cancel_refunds.CancelAttempt), copied before the transaction that stamped it
+    ended."""
+
+    @property
+    def dispute_id(self) -> uuid.UUID | None: ...
+    @property
+    def job_id(self) -> uuid.UUID: ...
+    @property
+    def payment_intent_id(self) -> str: ...
+    @property
+    def amount_cents(self) -> int: ...
+    @property
+    def currency(self) -> str: ...
+    @property
+    def idempotency_key(self) -> str: ...
+    @property
+    def number(self) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -189,6 +233,8 @@ class PaymentFacts:
     currency: str
     customer_total_cents: int
     pro_payout_cents: int
+    # The job price: the quote's amount before tax, the take rate's base (#69's fee base).
+    amount_cents: int
 
 
 @dataclass(frozen=True)
@@ -380,7 +426,7 @@ class RefundLedger:
             definitive=definitive,
         )
 
-    async def observe(self, refund: DisputeRefund, made: RefundFacts) -> Observed:
+    async def observe(self, refund: RefundRow, made: RefundFacts) -> Observed:
         """Stores the refund Stripe holds for the row (its id, the first time) and Stripe's
         status of it now, which only moves forward (stripe_status_rank): a read less final than
         the row's was taken before another reader stored a newer one, and the row's stands. The
@@ -408,6 +454,7 @@ def _payment_facts(payment: Payment) -> PaymentFacts:
         currency=payment.currency,
         customer_total_cents=payment.customer_total_cents,
         pro_payout_cents=payment.pro_payout_cents,
+        amount_cents=payment.amount_cents,
     )
 
 
@@ -483,7 +530,7 @@ class RefundNeedsReviewError(Exception):
         self.reason = reason
 
 
-async def make_refund(stripe: StripeRefunds, attempt: RefundAttempt) -> RefundFacts:
+async def make_refund(stripe: StripeRefunds, attempt: StripeAttempt) -> RefundFacts:
     """The refund in Stripe, found (a retry) or created (see the module doc), whatever its
     status. StripeCallError for Stripe's own failures (RefundCreateRejectedError when it is the
     create that Stripe refused); RefundNeedsReviewError when nothing may be created."""
@@ -506,13 +553,15 @@ async def make_refund(stripe: StripeRefunds, attempt: RefundAttempt) -> RefundFa
                 attempt.amount_cents,
                 attempt.currency,
             )
+    # A cancelled job's refund (#69) names no dispute.
+    named = {} if attempt.dispute_id is None else {"dispute_id": str(attempt.dispute_id)}
     try:
         made = await stripe.create_refund(
             payment_intent_id=attempt.payment_intent_id,
             # From the row committed before the call, never from a request.
             amount_cents=attempt.amount_cents,
             metadata={
-                "dispute_id": str(attempt.dispute_id),
+                **named,
                 "job_id": str(attempt.job_id),
                 "refund_key": attempt.idempotency_key,
             },
@@ -526,7 +575,7 @@ async def make_refund(stripe: StripeRefunds, attempt: RefundAttempt) -> RefundFa
     )
 
 
-async def recheck_refund(stripe: StripeRefunds, refund: DisputeRefund) -> RefundFacts:
+async def recheck_refund(stripe: StripeRefunds, refund: RefundRow) -> RefundFacts:
     """The row's Stripe refund as Stripe holds it now, read by its stored id (never from an
     event's payload). StripeCallError for Stripe's own failures; RefundNeedsReviewError when it
     no longer fits the row."""
@@ -536,7 +585,7 @@ async def recheck_refund(stripe: StripeRefunds, refund: DisputeRefund) -> Refund
     return refund_fits(read, refund)
 
 
-def refund_fits(read: RefundFacts, refund: DisputeRefund) -> RefundFacts:
+def refund_fits(read: RefundFacts, refund: RefundRow) -> RefundFacts:
     """`read` if it is the Stripe refund the row holds (or may hold: none stored yet)."""
     if refund.stripe_refund_id is not None and read.refund_id != refund.stripe_refund_id:
         raise RefundNeedsReviewError("refund_mismatch")
@@ -546,7 +595,7 @@ def refund_fits(read: RefundFacts, refund: DisputeRefund) -> RefundFacts:
 
 
 def _fitting(
-    made: RefundFacts, dispute_id: uuid.UUID, key: str, amount_cents: int, currency: str
+    made: RefundFacts, dispute_id: uuid.UUID | None, key: str, amount_cents: int, currency: str
 ) -> RefundFacts:
     """The refund if it is the one the row describes; else nothing is stored for it."""
     if (
