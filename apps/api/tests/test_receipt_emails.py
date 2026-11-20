@@ -8,7 +8,7 @@ only release a savepoint), with the payment calls' Stripe fake and a recording e
 import logging
 import re
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import fields
 from datetime import UTC, datetime, timedelta
@@ -23,11 +23,19 @@ from app.config import Settings
 from app.integrations.email import EmailUnavailableError
 from app.integrations.stripe_errors import StripeUnavailableError
 from app.integrations.stripe_payments import CardFacts, TipIntentFacts
+from app.modules.auth.email_copy import EmailContent
 from app.modules.jobs.models import Job, JobStatus
 from app.modules.payments.models import Payment
 from app.modules.payments.reconciliation import JobBooked
 from app.modules.payments.webhook_handlers import announce
-from app.modules.receipts.email_copy import COPY, money, payment_method
+from app.modules.receipts.email_copy import (
+    COPY,
+    ReceiptEmailFacts,
+    money,
+    payment_method,
+    payment_receipt_email,
+    tip_receipt_email,
+)
 from app.modules.receipts.tasks import send_payment_receipt, send_tip_receipt
 from app.modules.tips.models import Tip, TipChoice, TipStatus
 from app.modules.tips.webhooks import tip_event_handler
@@ -443,3 +451,41 @@ async def test_a_tip_that_succeeds_queues_its_receipt_once(
 
     receipts = [job for job in queue.jobs.values() if job[0] == "send_tip_receipt"]
     assert receipts == [("send_tip_receipt", (str(tip.id),))]
+
+
+HOSTILE = "<script>alert(\"x\")</script> & 'quoted'"
+ESCAPED = "&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &#x27;quoted&#x27;"
+
+
+@pytest.mark.parametrize(
+    ("build", "values"),
+    # The name, category, pro, city and address; the tip's intro names the pro again.
+    [(payment_receipt_email, 5), (tip_receipt_email, 6)],
+    ids=["payment", "tip"],
+)
+def test_every_value_is_html_escaped_in_the_html_part(
+    build: Callable[[ReceiptEmailFacts], EmailContent], values: int
+) -> None:
+    """#514 (the Vault, N1): a name, a pro, a category, a city or an address the customer or
+    staff typed reaches the HTML part escaped, never as markup; the text part keeps it as
+    typed."""
+    facts = ReceiptEmailFacts(
+        locale="en",
+        first_name=f"Ana {HOSTILE}",
+        code="K7Q29MXA",
+        category=f"Plumbing {HOSTILE}",
+        pro_name=f"Bea {HOSTILE}",
+        scheduled="Nov 22, 2026, 2:30 PM",
+        city=f"Orlando {HOSTILE}",
+        lines=(("Service", 10_000),),
+        total_cents=10_000,
+        card=None,
+        issuer=("Fixture LLC", f"1 Main St {HOSTILE}"),
+    )
+
+    email = build(facts)
+
+    assert "<script" not in email.html
+    assert ESCAPED in email.html
+    assert email.html.count(ESCAPED) == values
+    assert HOSTILE in email.text
