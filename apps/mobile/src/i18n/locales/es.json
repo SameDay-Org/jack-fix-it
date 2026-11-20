@@ -2062,7 +2062,7 @@
         "body": "Lo canceló {{name}}. No necesitas hacer nada más."
       }
     },
-    "newRequest": "Empezar una nueva solicitud"
+    "newRequest": "Nueva solicitud"
   },
   "disputes": {
     "entry": "Reportar un problema",

@@ -2062,7 +2062,7 @@
         "body": "It was cancelled by {{name}}. Nothing more is needed from you."
       }
     },
-    "newRequest": "Start a new request"
+    "newRequest": "New request"
   },
   "disputes": {
     "entry": "Report a problem",

@@ -625,9 +625,7 @@ describe("JobScreen", () => {
       screen.getByText("$180.50 is going back to your payment method. It's being processed."),
     ).toBeTruthy();
     expect(screen.queryByText(/Cancelling cost/)).toBeNull();
-    await act(async () =>
-      fireEvent.press(screen.getByRole("button", { name: "Start a new request" })),
-    );
+    await act(async () => fireEvent.press(screen.getByRole("button", { name: "New request" })));
     expect(router.dismissTo).toHaveBeenCalledWith("/");
   });
 
