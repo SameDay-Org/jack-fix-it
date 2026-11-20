@@ -755,6 +755,84 @@
           "refunded": "Reembolsado",
           "cancelled": "Cancelado"
         }
+      },
+      "ops": {
+        "title": "Acciones",
+        "label": "Acciones sobre esta solicitud",
+        "heldBy": "{{name}} tiene esta solicitud: tómala para actuar.",
+        "heldByNoName": "Otro agente tiene esta solicitud: tómala para actuar.",
+        "saving": "Guardando…",
+        "saved": "Guardado.",
+        "cancel": "Cancelar",
+        "note": {
+          "open": "Agregar nota",
+          "label": "Nota interna (solo para el equipo)",
+          "submit": "Guardar nota"
+        },
+        "contacted": {
+          "press": "Marcar como contactado"
+        },
+        "classify": {
+          "open": "Clasificar",
+          "label": "Categoría",
+          "submit": "Guardar categoría"
+        },
+        "followup": {
+          "open": "Programar seguimiento",
+          "day": "Día",
+          "time": "Hora",
+          "zone": "Día y hora en {{zone}}.",
+          "note": "Qué hacer",
+          "assignee": "Asignado a",
+          "me": "Yo",
+          "noName": "Sin nombre",
+          "submit": "Programar"
+        },
+        "errors": {
+          "request_held": "Otro agente tiene esta solicitud. Tómala primero o pide ayuda a un administrador.",
+          "forbidden": "Tu cuenta no puede hacer esto. Vuelve a iniciar sesión o pide ayuda a un administrador.",
+          "request_not_found": "No encontramos esta solicitud.",
+          "request_not_classifiable": "Solo se puede clasificar una solicitud nueva o en revisión.",
+          "category_inactive": "Esa categoría ya no se ofrece. Elige otra.",
+          "followup_due_out_of_range": "Elige una hora futura, dentro de {{days}} días.",
+          "assignee_not_staff": "Esa persona no puede tomar seguimientos. Elige un agente o administrador activo.",
+          "followup_not_found": "No encontramos este seguimiento.",
+          "rate_limited": "Demasiadas acciones en un minuto. Espera un momento.",
+          "validation_error": "Revisa los campos y vuelve a intentarlo.",
+          "note_empty": "Escribe algo primero.",
+          "note_too_long": "Es demasiado largo: acórtalo.",
+          "due_invalid": "Elige un día y una hora.",
+          "due_past": "Elige una hora que no haya pasado.",
+          "due_too_far": "Elige una hora dentro de {{days}} días.",
+          "unconfirmed": "No pudimos confirmar que se guardó. Revisa la ficha antes de volver a intentarlo.",
+          "unavailable": "No se pudo guardar. Vuelve a intentarlo."
+        },
+        "notes": {
+          "title": "Notas internas",
+          "hint": "Solo para el equipo: el cliente y el profesional nunca las ven.",
+          "none": "Todavía no hay notas.",
+          "you": "Tú",
+          "noName": "Equipo"
+        },
+        "followups": {
+          "title": "Seguimientos",
+          "scope": {
+            "mine": "Aquí solo se ven los seguimientos asignados a ti.",
+            "all": "Todos los seguimientos de esta solicitud, sea a quien sea que estén asignados."
+          },
+          "none": {
+            "mine": "No tienes seguimientos asignados en esta solicitud.",
+            "all": "No hay seguimientos en esta solicitud."
+          },
+          "due": "Para",
+          "assignee": "Asignado a",
+          "done": "Marcar como hecho",
+          "doneAt": "Hecho",
+          "you": "Tú",
+          "noName": "Sin nombre",
+          "overdue": "Atrasado",
+          "today": "Para hoy"
+        }
       }
     },
     "pros": {
