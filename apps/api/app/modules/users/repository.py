@@ -49,6 +49,24 @@ class UserRepository:
         statement = select(User.id, User.email, User.phone).where(User.id.in_(user_ids))
         return [(row[0], row[1], row[2]) for row in (await self._session.execute(statement)).all()]
 
+    async def active_staff(
+        self,
+    ) -> list[tuple[uuid.UUID, str | None, UserRole, str, str | None]]:
+        """(id, first_name, role, email, phone) of every active agent and admin, by first name
+        then id (#82): the email and phone only to withhold a first name that shows one."""
+        statement = (
+            select(User.id, User.first_name, User.role, User.email, User.phone)
+            .where(
+                User.role.in_((UserRole.AGENT, UserRole.ADMIN)),
+                User.status == UserStatus.ACTIVE,
+            )
+            .order_by(User.first_name.nulls_last(), User.id)
+        )
+        return [
+            (row[0], row[1], row[2], row[3], row[4])
+            for row in (await self._session.execute(statement)).all()
+        ]
+
     async def names(
         self, user_ids: Collection[uuid.UUID]
     ) -> list[tuple[uuid.UUID, str | None, str | None, str, str | None]]:

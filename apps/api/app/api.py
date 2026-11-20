@@ -24,6 +24,8 @@ from app.modules.jobs.router import route_router as job_route_router
 from app.modules.jobs.router import router as jobs_router
 from app.modules.metrics.router import staff_router as staff_metrics_router
 from app.modules.notifications.router import router as notification_preferences_router
+from app.modules.ops.router import followups_router as staff_followups_router
+from app.modules.ops.router import staff_members_router
 from app.modules.ops.router import staff_router as staff_ops_router
 from app.modules.payment_methods.router import router as payment_methods_router
 from app.modules.payments.router import router as payments_router
@@ -80,6 +82,8 @@ v1_router.include_router(notification_preferences_router)
 v1_router.include_router(support_router)
 v1_router.include_router(staff_support_router)
 v1_router.include_router(staff_ops_router)
+v1_router.include_router(staff_followups_router)
+v1_router.include_router(staff_members_router)
 v1_router.include_router(reviews_router)
 v1_router.include_router(dispute_customer_router)
 v1_router.include_router(cancel_customer_router)

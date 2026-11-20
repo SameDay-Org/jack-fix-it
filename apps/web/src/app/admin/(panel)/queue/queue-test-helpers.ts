@@ -87,6 +87,9 @@ export function card(extra: Partial<RequestCard> = {}): RequestCard {
     next_action: null,
     last_contact_at: null,
     updated_at: NOW,
+    notes: [],
+    followups: [],
+    actions_allowed: true,
     ...extra,
   };
 }

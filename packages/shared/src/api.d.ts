@@ -1651,6 +1651,172 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/requests/{request_id}/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add an internal note to a request (staff)
+         * @description Plain text for the team, kept as written: never shown to the customer or the pro.
+         *     Notes are only added. Recorded in the audit log (without the text).
+         */
+        post: operations["staff_add_note_v1_admin_requests__request_id__notes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/contacted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark the customer contacted (staff)
+         * @description Sets the first contact time once: the queue's timer stops. Again keeps the first time
+         *     (no error). Recorded in the audit log.
+         */
+        post: operations["staff_mark_contacted_v1_admin_requests__request_id__contacted_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/classify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a request's category (staff)
+         * @description Only while the request is received or reviewing, to an active category. Runs nothing
+         *     else. Recorded in the audit log.
+         */
+        post: operations["staff_classify_request_v1_admin_requests__request_id__classify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/followups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Schedule a follow-up on a request (staff)
+         * @description The caller's by default. Recorded in the audit log (without the note).
+         */
+        post: operations["staff_schedule_followup_v1_admin_requests__request_id__followups_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/followups/{followup_id}/done": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark a follow-up done (staff)
+         * @description Done once: again changes nothing. Recorded in the audit log.
+         */
+        post: operations["staff_followup_done_v1_admin_requests__request_id__followups__followup_id__done_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/followups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My follow-ups (staff)
+         * @description The follow-ups not done, the most overdue first. Each names its request by code and
+         *     status: never a contact.
+         */
+        get: operations["staff_list_followups_v1_admin_followups_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/followups/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * How many of my follow-ups are due today (staff)
+         * @description The caller's open follow-ups due by the end of today in the business time zone, overdue
+         *     ones included: the nav badge, equal to the default follow-ups list's length.
+         */
+        get: operations["staff_followups_summary_v1_admin_followups_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/staff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The active agents and admins (staff)
+         * @description Id, first name and role of every active agent and admin, for assigning a follow-up and
+         *     filtering the follow-ups list. No contact.
+         */
+        get: operations["staff_members_v1_admin_staff_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/jobs/{job_id}/reviews": {
         parameters: {
             query?: never;
@@ -2574,6 +2740,40 @@ export interface components {
             id: string;
             assigned_agent: components["schemas"]["QueueAgent"] | null;
         };
+        /** ClassifyIn */
+        ClassifyIn: {
+            /**
+             * Category Id
+             * Format: uuid
+             * @description An active category.
+             */
+            category_id: string;
+        };
+        /** ClassifyOut */
+        ClassifyOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            category: components["schemas"]["CategorySummary"];
+        };
+        /**
+         * ContactedOut
+         * @description When the BDC first contacted the customer: set once.
+         */
+        ContactedOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * First Contact At
+             * Format: date-time
+             */
+            first_contact_at: string;
+        };
         /** CustomerCancelIn */
         CustomerCancelIn: {
             reason_code: components["schemas"]["CustomerCancelReason"];
@@ -3134,6 +3334,100 @@ export interface components {
         ErrorResponse: {
             error: components["schemas"]["ErrorDetail"];
         };
+        /**
+         * FollowupDue
+         * @enum {string}
+         */
+        FollowupDue: "today" | "all";
+        /** FollowupIn */
+        FollowupIn: {
+            /**
+             * Due At
+             * Format: date-time
+             * @description When it is due: in the future, at most OPS_FOLLOWUP_MAX_DAYS ahead.
+             */
+            due_at: string;
+            /**
+             * Note
+             * @description What to do, 1 to 500 characters (staff only).
+             */
+            note: string;
+            /**
+             * Assigned To
+             * @description An active agent or admin; the caller by default. Only an admin gives a follow-up to someone else.
+             */
+            assigned_to?: string | null;
+        };
+        /**
+         * FollowupItem
+         * @description A follow-up in the list: its request's code and status, never a contact.
+         */
+        FollowupItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            assigned_to: components["schemas"]["QueueAgent"];
+            /**
+             * Due At
+             * Format: date-time
+             */
+            due_at: string;
+            /** Note */
+            note: string;
+            /** Done At */
+            done_at: string | null;
+            /** Public Code */
+            public_code: string;
+            request_status: components["schemas"]["RequestStatus"];
+        };
+        /** FollowupOut */
+        FollowupOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            assigned_to: components["schemas"]["QueueAgent"];
+            /**
+             * Due At
+             * Format: date-time
+             */
+            due_at: string;
+            /** Note */
+            note: string;
+            /** Done At */
+            done_at: string | null;
+        };
+        /** FollowupsPage */
+        FollowupsPage: {
+            /**
+             * Items
+             * @description By due time, the most overdue first.
+             */
+            items: components["schemas"]["FollowupItem"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** FollowupsSummary */
+        FollowupsSummary: {
+            /**
+             * Due Today
+             * @description The caller's open follow-ups due by the end of today in the business time zone, overdue ones included: the length of GET /v1/admin/followups (due today).
+             */
+            due_today: number;
+        };
         /** GroupPreferences */
         GroupPreferences: {
             group: components["schemas"]["PreferenceGroup"];
@@ -3565,6 +3859,30 @@ export interface components {
              * @description Pass as `cursor` for older tickets.
              */
             next_cursor: string | null;
+        };
+        /** NoteIn */
+        NoteIn: {
+            /**
+             * Body
+             * @description Plain text, 1 to 2000 characters, kept as written (staff only, never shown to the customer or the pro, never logged).
+             */
+            body: string;
+        };
+        /** NoteOut */
+        NoteOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            author: components["schemas"]["QueueAgent"];
+            /** Body */
+            body: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * NotificationPreferences
@@ -4923,6 +5241,22 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Notes
+             * @description The staff's internal notes, oldest first (#82). Never shown to the customer or the pro.
+             */
+            notes: components["schemas"]["NoteOut"][];
+            /**
+             * Followups
+             * @description By due time (#82).
+             */
+            followups: components["schemas"]["FollowupOut"][];
+            /**
+             * Actions Allowed
+             * @description Whether the caller may act on this request now (#82): it is unassigned, held by them, or they are an admin. The API stays the guard (409 request_held).
+             * @default true
+             */
+            actions_allowed: boolean;
         };
         /** RequestCreate */
         RequestCreate: {
@@ -5734,6 +6068,31 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** StaffList */
+        StaffList: {
+            /**
+             * Staff
+             * @description By first name.
+             */
+            staff: components["schemas"]["StaffMemberOut"][];
+        };
+        /**
+         * StaffMemberOut
+         * @description An active agent or admin, as the panel's assignee pickers list them (#82): no contact.
+         */
+        StaffMemberOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * First Name
+             * @description Null when missing or showing a contact.
+             */
+            first_name: string | null;
+            role: components["schemas"]["UserRole"];
         };
         /**
          * StaffProDecisionOut
@@ -11246,6 +11605,539 @@ export interface operations {
                 };
             };
             /** @description validation_error: a request_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_add_note_v1_admin_requests__request_id__notes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins (checked again as the action is written). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request (they, or an admin, act on it). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a note empty or over 2000 characters, or a bad request_id. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_mark_contacted_v1_admin_requests__request_id__contacted_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactedOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins (checked again as the action is written). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request (they, or an admin, act on it). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a request_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_classify_request_v1_admin_requests__request_id__classify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClassifyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassifyOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins (checked again as the action is written). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request. request_not_classifiable: the request is past reviewing (dispatch took it). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description category_inactive: the category is not active; validation_error: a bad id. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_schedule_followup_v1_admin_requests__request_id__followups_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FollowupIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FollowupOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins; only an admin gives a follow-up to someone else. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request (they, or an admin, act on it). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description followup_due_out_of_range: due in the past or more than OPS_FOLLOWUP_MAX_DAYS ahead; assignee_not_staff: the assignee is not an active agent or admin; validation_error: a note empty or over 500 characters, a bad id. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_followup_done_v1_admin_requests__request_id__followups__followup_id__done_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+                followup_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FollowupOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only its assignee or an admin, an active one. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description followup_not_found: none with this id here. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a request_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_list_followups_v1_admin_followups_get: {
+        parameters: {
+            query?: {
+                /** @description today: due by the end of today in BUSINESS_TIME_ZONE, overdue too. */
+                due?: components["schemas"]["FollowupDue"];
+                /** @description Whose follow-ups (admins only; an agent reads their own without it). */
+                assignee?: string | null;
+                /** @description Page size; capped. */
+                limit?: number | null;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FollowupsPage"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins; only an admin names an assignee (their own id included). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a bad cursor or limit. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_followups_summary_v1_admin_followups_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FollowupsSummary"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_members_v1_admin_staff_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffList"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
             422: {
                 headers: {
                     [name: string]: unknown;

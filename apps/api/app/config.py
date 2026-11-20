@@ -551,6 +551,11 @@ class Settings(BaseSettings):
     # Minutes a pending quote may wait for its customer before the request counts as waiting
     # on the customer instead of quote ready.
     ops_quote_waiting_minutes: int = Field(default=1_440, gt=0)
+    # The BDC's actions on a request (#82): how far ahead a follow-up may be due, and the
+    # actions one staff member may take per window.
+    ops_followup_max_days: int = Field(default=30, gt=0)
+    ops_action_limit: int = Field(default=60, gt=0)
+    ops_action_window_seconds: int = Field(default=60, gt=0)
     # Hours a request whose pro cancelled its job stays under problems in the queue (#69).
     ops_pro_cancel_attention_hours: int = Field(default=72, gt=0)
     # The IANA time zone "scheduled today" is read in, as Postgres names it.
