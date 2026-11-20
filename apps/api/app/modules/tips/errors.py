@@ -37,6 +37,11 @@ class TipNeedsReviewError(AppError):
     message = "This tip needs a review by our support team."
 
 
+class TipRecoveryRefusedError(Exception):
+    """A staff recovery of a tip's lost create (scripts/resolve_tip_intent.py) that changes
+    nothing; the message says why (no ids, no secret)."""
+
+
 class TipIdempotencyKeyReusedError(AppError):
     """The caller's Idempotency-Key already made a tip choice with another body, or on another
     job. Keys are per customer: someone else's key is just a new key."""

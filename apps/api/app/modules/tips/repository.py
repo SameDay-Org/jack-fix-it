@@ -144,6 +144,19 @@ class TipRepository:
             )
         )
 
+    async def clear_payment_intent_requested(self, tip_id: uuid.UUID, attempt: int) -> None:
+        """Forgets the current attempt's create (staff's recovery: Stripe made nothing under
+        its key), while the attempt holds no intent. The caller holds the lock and commits."""
+        await self._session.execute(
+            update(Tip)
+            .where(
+                Tip.id == tip_id,
+                Tip.attempt == attempt,
+                Tip.stripe_payment_intent_id.is_(None),
+            )
+            .values(payment_intent_requested_at=None)
+        )
+
     async def mark_create_refused(self, tip_id: uuid.UUID, attempt: int) -> None:
         """Stripe refused this attempt's create for good: no PaymentIntent exists under its
         key. The caller holds the lock and commits."""

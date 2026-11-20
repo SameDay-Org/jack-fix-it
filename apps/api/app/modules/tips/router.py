@@ -54,9 +54,10 @@ IdempotencyKey = Annotated[
         alias="Idempotency-Key",
         description=(
             "A UUID the app makes once per choice and sends again with every retry of it. A "
-            "retry answers 200 with the tip as it is now (and the same attempt's Payment Sheet "
-            "while it is still the one to pay) and changes nothing; the same key with another "
-            "body, or on another job, answers 409 idempotency_key_reused."
+            "retry never changes the choice: while the attempt it settled is still the one to "
+            "pay it finishes that attempt (the same PaymentIntent, its Payment Sheet), else it "
+            "answers 200 with the tip as it is now. The same key with another body, or on "
+            "another job, answers 409 idempotency_key_reused."
         ),
     ),
 ]
