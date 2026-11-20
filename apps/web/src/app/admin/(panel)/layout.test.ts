@@ -42,8 +42,19 @@ afterEach(() => {
   fetchMock.mockReset();
 });
 
-async function render(role: "agent" | "admin" | "customer", locale: string): Promise<string> {
-  fetchMock.mockImplementation(routeFetch({ "/v1/auth/me": () => me(role, locale) }));
+async function render(
+  role: "agent" | "admin" | "customer",
+  locale: string,
+  dueToday?: number,
+): Promise<string> {
+  fetchMock.mockImplementation(
+    routeFetch({
+      "/v1/auth/me": () => me(role, locale),
+      ...(dueToday === undefined
+        ? {}
+        : { "/v1/admin/followups/summary": () => Response.json({ due_today: dueToday }) }),
+    }),
+  );
   return decoded(renderToStaticMarkup(await PanelLayout({ children: "page" })));
 }
 
@@ -61,7 +72,7 @@ describe("the panel shell", () => {
       expect(classes?.split(" ")).toEqual(
         expect.arrayContaining(["flex", "flex-wrap", "md:flex-col", "md:flex-nowrap"]),
       );
-      expect(links?.match(/<a /g)).toHaveLength(6);
+      expect(links?.match(/<a /g)).toHaveLength(7);
       expect(links).toMatch(/<a aria-current="page" [^>]*href="\/admin\/queue"/);
     },
   );
@@ -112,6 +123,34 @@ describe("the panel shell", () => {
       new RegExp(`<a aria-current="page" [^>]*href="/admin/kpis"[^>]*>.*?${name}</a>`),
     );
     expect(links.match(/aria-current="page"/g)).toHaveLength(1);
+  });
+
+  it.each([
+    ["agent", "en", "Follow-ups", 3, "3 due today"],
+    ["admin", "en", "Follow-ups", 1, "1 due today"],
+    ["agent", "es", "Seguimientos", 2, "2 para hoy"],
+  ] as const)(
+    "links the follow-ups for an %s (%s), with how many are due today",
+    async (role, locale, label, due, said) => {
+      path.current = "/admin/followups";
+      const html = await render(role, locale, due);
+      const links = /<nav [^>]*>(.*?)<\/nav>/.exec(html)?.[1] ?? "";
+      const link = /<a aria-current="page" [^>]*href="\/admin\/followups"[^>]*>(.*?)<\/a>/.exec(
+        links,
+      );
+      expect(link?.[1]).toContain(label);
+      expect(link?.[1]).toMatch(new RegExp(`aria-hidden="true" data-due="${due}"[^>]*>${due}<`));
+      expect(link?.[1]).toContain(`<span class="sr-only">${said}</span>`);
+    },
+  );
+
+  it("shows no badge when nothing is due, or when the API cannot say", async () => {
+    path.current = "/admin/queue";
+    for (const due of [0, undefined]) {
+      const html = await render("agent", "en", due);
+      expect(html).toContain('href="/admin/followups"');
+      expect(html).not.toContain("data-due=");
+    }
   });
 
   it("lets no one without a staff session see the shell", async () => {

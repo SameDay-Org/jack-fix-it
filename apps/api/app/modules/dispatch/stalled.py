@@ -2,10 +2,11 @@
 request_dispatches row (DispatchService.dispatch: NO_ELIGIBLE_PROS changes nothing).
 
 Stalled: received or reviewing (what dispatch takes), with a category, no dispatch row at all
-(a request with any row, even all declined or expired, stays with the existing flow), and
-created within REDISPATCH_MAX_AGE_DAYS (requests have no lifetime of their own yet). Every read
-is bounded (REDISPATCH_BATCH_SIZE) with all its filters in the statement, before the limit:
-never an unbounded query. Reading only: the caller queues each request's dispatch
+(a request with any row, even all declined or expired, stays with the existing flow), not held
+by the BDC while it waits for the customer (info_requested_at, #82), and created within
+REDISPATCH_MAX_AGE_DAYS (requests have no lifetime of their own yet). Every read is bounded
+(REDISPATCH_BATCH_SIZE) with all its filters in the statement, before the limit: never an
+unbounded query. Reading only: the caller queues each request's dispatch
 (dispatch.tasks), which locks the request and checks everything again.
 
 - The kick (one pro may have become eligible): the stalled requests in one of the pro's
