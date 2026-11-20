@@ -6,8 +6,21 @@
   "site": {
     "language": {
       "label": "Idioma",
+      "footerLabel": "Idioma (pie de página)",
       "en": "English",
       "es": "Español"
+    },
+    "error": {
+      "title": "Esta página no cargó",
+      "body": "Algo salió mal de nuestro lado. Vuelve a intentarlo en un momento.",
+      "retry": "Volver a intentar",
+      "home": "Ir a la página de inicio"
+    },
+    "notFound": {
+      "metaTitle": "Página no encontrada | Jack Fix It",
+      "title": "No encontramos esta página",
+      "body": "Puede que el enlace sea antiguo o tenga un error.",
+      "home": "Ir a la página de inicio"
     }
   },
   "landing": {
@@ -310,7 +323,8 @@
   "showcase": {
     "meta": {
       "title": "Jack Fix It: la app para lo que pase en casa",
-      "description": "Cuéntale a Jack qué pasó, compara presupuestos de precio fijo de profesionales verificados y paga en la app. Tú confirmas cuando el trabajo está terminado. Muy pronto en iPhone y Android."
+      "description": "Cuéntale a Jack qué pasó, compara presupuestos de precio fijo de profesionales verificados y paga en la app. Tú confirmas cuando el trabajo está terminado. Muy pronto en iPhone y Android.",
+      "ogAlt": "El nombre Jack Fix It y su frase “Cuéntaselo a Jack. Nosotros nos encargamos del resto.” sobre azul marino."
     },
     "skipToContent": "Saltar al contenido",
     "homeLabel": "Jack Fix It, volver al inicio",
@@ -435,6 +449,7 @@
       "body": "La app llega muy pronto a iPhone y Android."
     },
     "footer": {
+      "sectionsLabel": "Secciones de la página (pie de página)",
       "legalLabel": "Legal",
       "terms": "Términos de servicio",
       "privacy": "Política de privacidad",
@@ -758,6 +773,84 @@
           "refunded": "Reembolsado",
           "cancelled": "Cancelado"
         }
+      },
+      "ops": {
+        "title": "Acciones",
+        "label": "Acciones sobre esta solicitud",
+        "heldBy": "{{name}} tiene esta solicitud: tómala para actuar.",
+        "heldByNoName": "Otro agente tiene esta solicitud: tómala para actuar.",
+        "saving": "Guardando…",
+        "saved": "Guardado.",
+        "cancel": "Cancelar",
+        "note": {
+          "open": "Agregar nota",
+          "label": "Nota interna (solo para el equipo)",
+          "submit": "Guardar nota"
+        },
+        "contacted": {
+          "press": "Marcar como contactado"
+        },
+        "classify": {
+          "open": "Clasificar",
+          "label": "Categoría",
+          "submit": "Guardar categoría"
+        },
+        "followup": {
+          "open": "Programar seguimiento",
+          "day": "Día",
+          "time": "Hora",
+          "zone": "Día y hora en {{zone}}.",
+          "note": "Qué hacer",
+          "assignee": "Asignado a",
+          "me": "Yo",
+          "noName": "Sin nombre",
+          "submit": "Programar"
+        },
+        "errors": {
+          "request_held": "Otro agente tiene esta solicitud. Tómala primero o pide ayuda a un administrador.",
+          "forbidden": "Tu cuenta no puede hacer esto. Vuelve a iniciar sesión o pide ayuda a un administrador.",
+          "request_not_found": "No encontramos esta solicitud.",
+          "request_not_classifiable": "Solo se puede clasificar una solicitud nueva o en revisión.",
+          "category_inactive": "Esa categoría ya no se ofrece. Elige otra.",
+          "followup_due_out_of_range": "Elige una hora futura, dentro de {{days}} días.",
+          "assignee_not_staff": "Esa persona no puede tomar seguimientos. Elige un agente o administrador activo.",
+          "followup_not_found": "No encontramos este seguimiento.",
+          "rate_limited": "Demasiadas acciones en un minuto. Espera un momento.",
+          "validation_error": "Revisa los campos y vuelve a intentarlo.",
+          "note_empty": "Escribe algo primero.",
+          "note_too_long": "Es demasiado largo: acórtalo.",
+          "due_invalid": "Elige un día y una hora.",
+          "due_past": "Elige una hora que no haya pasado.",
+          "due_too_far": "Elige una hora dentro de {{days}} días.",
+          "unconfirmed": "No pudimos confirmar que se guardó. Revisa la ficha antes de volver a intentarlo.",
+          "unavailable": "No se pudo guardar. Vuelve a intentarlo."
+        },
+        "notes": {
+          "title": "Notas internas",
+          "hint": "Solo para el equipo: el cliente y el profesional nunca las ven.",
+          "none": "Todavía no hay notas.",
+          "you": "Tú",
+          "noName": "Equipo"
+        },
+        "followups": {
+          "title": "Seguimientos",
+          "scope": {
+            "mine": "Aquí solo se ven los seguimientos asignados a ti.",
+            "all": "Todos los seguimientos de esta solicitud, sea a quien sea que estén asignados."
+          },
+          "none": {
+            "mine": "No tienes seguimientos asignados en esta solicitud.",
+            "all": "No hay seguimientos en esta solicitud."
+          },
+          "due": "Para",
+          "assignee": "Asignado a",
+          "done": "Marcar como hecho",
+          "doneAt": "Hecho",
+          "you": "Tú",
+          "noName": "Sin nombre",
+          "overdue": "Atrasado",
+          "today": "Para hoy"
+        }
       }
     },
     "pros": {
@@ -859,7 +952,11 @@
           "reasonLabel": "Motivo",
           "reasonHint": "El profesional puede leerlo. Hasta {{max}} caracteres.",
           "saving": "Guardando…",
-          "saved": "Guardado."
+          "saved": "Guardado.",
+          "decided": {
+            "approved": "Aprobado.",
+            "rejected": "Rechazado."
+          }
         },
         "errors": {
           "reason_required": "Escribe un motivo de hasta {{max}} caracteres.",
@@ -1068,6 +1165,7 @@
           "proRelease": "Pagado al profesional",
           "customerRefund": "Reembolsado al cliente",
           "noPayment": "No hay un pago registrado para este trabajo: hay que revisarlo antes de resolver la disputa.",
+          "needsReversal": "Puede que haya que revertir un pago al profesional: pide ayuda a un ingeniero.",
           "none": "Ninguno",
           "stripeCode": "Código de Stripe: {{code}}",
           "paymentStatus": {
@@ -1185,6 +1283,79 @@
           "unavailable": "Algo salió mal. Revisa la disputa antes de volver a intentarlo."
         }
       }
+    },
+    "error": {
+      "title": "El panel no puede conectarse con el servidor ahora",
+      "body": "Vuelve a intentarlo en un momento. Si sigue pasando, avisa a un ingeniero.",
+      "retry": "Volver a intentar",
+      "home": "Volver al panel"
+    }
+  },
+  "request": {
+    "meta": {
+      "title": "Cuéntale a Jack qué pasó | Jack Fix It",
+      "description": "Cuéntale a Jack qué pasa en casa. Unas preguntas rápidas, sin crear una cuenta."
+    },
+    "title": "Cuéntale a Jack qué pasó",
+    "intro": "Unas preguntas rápidas. Sin crear una cuenta.",
+    "noscript": "Este formulario necesita JavaScript. Actívalo en tu navegador para continuar.",
+    "progress": "Paso {{current}} de {{total}}",
+    "back": "Atrás",
+    "next": "Continuar",
+    "optional": "{{label}} (opcional)",
+    "counter": "{{length}} / {{max}}",
+    "check": "Algunas respuestas necesitan revisión:",
+    "zip": {
+      "title": "¿Dónde es el trabajo?",
+      "support": "Primero, veamos si Jack trabaja en tu zona.",
+      "label": "Código postal (ZIP)",
+      "hint": "El código postal de 5 dígitos de la casa.",
+      "checking": "Revisando tu zona…",
+      "errors": {
+        "invalid": "Escribe un código postal de 5 dígitos.",
+        "rate_limited": "Demasiados intentos desde aquí. Espera un minuto y vuelve a intentarlo.",
+        "unavailable": "No pudimos revisar tu zona ahora. Inténtalo de nuevo."
+      }
+    },
+    "waitlist": {
+      "title": "Todavía no llegamos a tu zona",
+      "body": "Por ahora Jack trabaja en pocas zonas. Déjanos un correo o un número de celular y te avisamos cuando lleguemos a {{zip}}.",
+      "emailLabel": "Correo electrónico",
+      "phoneLabel": "Número de celular",
+      "contactHint": "Con uno basta.",
+      "use": "Solo lo usaremos para avisarte cuando Jack llegue a tu zona.",
+      "submit": "Avísame",
+      "sending": "Enviando…",
+      "otherZip": "Probar otro código postal",
+      "joinedTitle": "Ya estás en la lista",
+      "joinedBody": "Te avisaremos cuando Jack llegue a {{zip}}.",
+      "home": "Volver a la página de inicio",
+      "servedNow": "Buenas noticias: Jack ya trabaja en {{zip}}.",
+      "errors": {
+        "missing_contact": "Agrega un correo o un número de celular.",
+        "invalid_email": "Escribe un correo como nombre@ejemplo.com.",
+        "invalid_phone": "Escribe un número de celular de 10 dígitos.",
+        "invalid": "Revisa el correo y el número de celular.",
+        "rate_limited": "Demasiados intentos desde aquí. Espera unos minutos y vuelve a intentarlo.",
+        "unavailable": "No se pudo enviar. Inténtalo de nuevo."
+      }
+    },
+    "describe": {
+      "title": "¿Qué está pasando?",
+      "support": "Cuéntanos con tus palabras: qué pasó, en qué parte de la casa y todo lo que ayude.",
+      "label": "Describe el trabajo",
+      "required": "Cuéntanos qué pasa para continuar.",
+      "categoryLegend": "¿Qué tipo de trabajo es?",
+      "categoryHint": "¿No estás seguro? Déjalo así: nuestro equipo elegirá el adecuado.",
+      "notSure": "No estoy seguro"
+    },
+    "questions": {
+      "support": "Unas preguntas rápidas para que los profesionales te envíen presupuestos precisos.",
+      "required": "Responde esto para continuar.",
+      "range": "Escribe un número del {{min}} al {{max}}.",
+      "tooFew": "Elige al menos {{count}}.",
+      "tooMany": "Elige hasta {{count}}.",
+      "pickUpTo": "Elige hasta {{count}}."
     }
   }
 }

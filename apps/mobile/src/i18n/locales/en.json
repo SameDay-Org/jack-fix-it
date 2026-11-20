@@ -197,12 +197,30 @@
         "failed": "We couldn't load more requests.",
         "retry": "Try again"
       },
-      "refreshFailed": "Couldn't refresh. Check your connection and try again."
+      "refreshFailed": "Couldn't refresh. Check your connection and try again.",
+      "banner": {
+        "received": "Jack got your request",
+        "findingPro": "Jack is finding a pro",
+        "quoteReady": "Quote ready",
+        "compare": "compare",
+        "hint": "Opens your request"
+      }
     },
     "pro": {
       "title": "Your jobs",
       "empty": "Jobs you're hired for will show up here.",
-      "cta": "Go to Home"
+      "cta": "Go to Home",
+      "loading": "Loading your jobs",
+      "error": {
+        "title": "We couldn't load your jobs",
+        "body": "Check your connection and try again.",
+        "retry": "Try again"
+      },
+      "more": {
+        "failed": "We couldn't load more jobs.",
+        "retry": "Try again"
+      },
+      "refreshFailed": "Couldn't refresh. Check your connection and try again."
     }
   },
   "customerStatus": {
@@ -825,7 +843,8 @@
       "arrived": "Arrived",
       "working": "Working",
       "done": "Done",
-      "closed": "Cancelled"
+      "closed": "Cancelled",
+      "underReview": "Under review"
     },
     "customerFallback": "the customer",
     "screen": {
@@ -866,6 +885,7 @@
         "arrived": "You're checked in. Start the job when you begin the work.",
         "done": "You marked this job done.",
         "closed": "This job was cancelled.",
+        "closedAfterReport": "This job was closed after a report was resolved.",
         "working": "When the work is finished, tap Job's done.",
         "waiting": "Job's done. Waiting for {{name}} to confirm."
       },
@@ -1110,7 +1130,13 @@
   "idCard": {
     "hello": "Hello, I'm:",
     "pro": "PRO",
+    "brand": "Jack Fix It",
+    "memberSince": "Member since",
+    "code": "Member code",
+    "support": "Support when you need it",
     "a11y": {
+      "verified": "verified",
+      "memberSince": "member since {{date}}",
       "card": "ID card",
       "unnamed": "name not set yet",
       "back": "Back of the ID card, code {{code}}",
@@ -1326,6 +1352,7 @@
       "done": "Job confirmed",
       "attention": "This job needs attention",
       "cancelled": "This job was cancelled",
+      "refunded": "Your report was resolved",
       "finished": "{{name}} marked the job done",
       "thanks": "Thanks! Job confirmed"
     },
@@ -1338,7 +1365,8 @@
       "finished": "Take a look at the work, then confirm it's done.",
       "done": "This job is complete.",
       "attention": "A problem was reported on this job.",
-      "cancelled": "Nothing more is needed from you."
+      "cancelled": "Nothing more is needed from you.",
+      "refunded": "Your payment for this job went back to your payment method."
     },
     "eta": {
       "close": "Arriving around {{time}} · {{countdown}}",
@@ -1378,7 +1406,8 @@
       "completed": "Marked as done",
       "confirmed": "Confirmed",
       "disputed": "Problem reported",
-      "cancelled": "Cancelled"
+      "cancelled": "Cancelled",
+      "refunded": "Report resolved"
     },
     "banner": {
       "scheduled": "{{name}} is booked · {{date}}",
@@ -1927,6 +1956,90 @@
       "title": "Finish payout setup",
       "body": "Connect a payout account with Stripe to start receiving requests.",
       "action": "Set up payouts"
+    }
+  },
+  "cancellation": {
+    "entry": "Cancel job",
+    "entryFailed": "We couldn't check if this job can be cancelled.",
+    "entryBusy": "We need a moment to check if this job can be cancelled.",
+    "retry": "Try again",
+    "title": "Cancel this job?",
+    "intro": "Tell us why, and check what it costs. Your pro will be told.",
+    "reasonLabel": "Why are you cancelling?",
+    "reasonMissing": "Choose why you're cancelling.",
+    "reason": {
+      "changed_my_mind": "I changed my mind",
+      "found_another_pro": "I found another pro",
+      "pro_late": "The pro is late",
+      "other": "Something else"
+    },
+    "noteLabel": "Anything to add? (optional)",
+    "noteHint": "Only our team reads this.",
+    "tooLong_one": "This is {{count}} character too long.",
+    "tooLong_other": "This is {{count}} characters too long.",
+    "costTitle": "What it costs",
+    "cost": {
+      "free": "Cancelling is free: you'll get back the full {{amount}}.",
+      "fee": "Cancelling now costs {{fee}} ({{rate}} of the job price). You'll get back {{amount}}."
+    },
+    "confirm": "Cancel the job",
+    "keep": "Keep the job",
+    "retrySend": "Try again",
+    "sent": {
+      "title": "Your job was cancelled",
+      "body": "Your pro was told.",
+      "back": "Back to the job"
+    },
+    "money": {
+      "title": "Cancellation",
+      "fee": "Cancelling cost {{fee}}.",
+      "none": "There was nothing to give back.",
+      "pending": "{{amount}} is going back to your payment method. It's being processed.",
+      "succeeded": "{{amount}} went back to your payment method.",
+      "failed": "{{amount}} hasn't gone back to your payment method yet. Our team is looking into it and will contact you in the app."
+    },
+    "closed": {
+      "title": "This job can't be cancelled now",
+      "body": "Once the work has started, a job can't be cancelled. If something's wrong, talk to Jack."
+    },
+    "review": {
+      "title": "We need to look at this job first",
+      "body": "Something about its payment needs our team. Talk to Jack and we'll sort it out."
+    },
+    "talkToJack": "Talk to Jack",
+    "loadFailed": {
+      "title": "We couldn't load this",
+      "body": "Check your connection and try again."
+    },
+    "busy": {
+      "title": "Give it a moment",
+      "body": "We can't show what cancelling costs right now. Try again shortly."
+    },
+    "failure": {
+      "offline": {
+        "title": "No connection",
+        "body": "Your choice is still here. Try again when you're back online."
+      },
+      "feeChanged": {
+        "title": "The cost changed",
+        "body": "Your pro is on the way now, so cancelling has a cost. Check the new amount before you cancel."
+      },
+      "closed": {
+        "title": "This can't be done anymore",
+        "body": "Things changed in the meantime. What you see now is up to date."
+      },
+      "invalid": {
+        "title": "Check your note",
+        "body": "Something in it couldn't be accepted. Check it and try again."
+      },
+      "rateLimited": {
+        "title": "That's a lot of tries at once",
+        "body": "Nothing was cancelled, and your choice is still here. Try again a little later."
+      },
+      "failed": {
+        "title": "That didn't go through",
+        "body": "Something went wrong on our side. Try again in a moment."
+      }
     }
   },
   "disputes": {

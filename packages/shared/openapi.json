@@ -6971,6 +6971,770 @@
         }
       }
     },
+    "/v1/admin/requests/{request_id}/notes": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Add an internal note to a request (staff)",
+        "description": "Plain text for the team, kept as written: never shown to the customer or the pro.\nNotes are only added. Recorded in the audit log (without the text).",
+        "operationId": "staff_add_note_v1_admin_requests__request_id__notes_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a note empty or over 2000 characters, or a bad request_id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only active agents and admins (checked again as the action is written).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request_held: another agent holds the request (they, or an admin, act on it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/requests/{request_id}/contacted": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Mark the customer contacted (staff)",
+        "description": "Sets the first contact time once: the queue's timer stops. Again keeps the first time\n(no error). Recorded in the audit log.",
+        "operationId": "staff_mark_contacted_v1_admin_requests__request_id__contacted_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactedOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a request_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only active agents and admins (checked again as the action is written).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request_held: another agent holds the request (they, or an admin, act on it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/requests/{request_id}/classify": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Set a request's category (staff)",
+        "description": "Only while the request is received or reviewing, to an active category. Runs nothing\nelse. Recorded in the audit log.",
+        "operationId": "staff_classify_request_v1_admin_requests__request_id__classify_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassifyIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassifyOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "category_inactive: the category is not active; validation_error: a bad id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only active agents and admins (checked again as the action is written).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request_held: another agent holds the request. request_not_classifiable: the request is past reviewing (dispatch took it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/requests/{request_id}/followups": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Schedule a follow-up on a request (staff)",
+        "description": "The caller's by default. Recorded in the audit log (without the note).",
+        "operationId": "staff_schedule_followup_v1_admin_requests__request_id__followups_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FollowupIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowupOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "followup_due_out_of_range: due in the past or more than OPS_FOLLOWUP_MAX_DAYS ahead; assignee_not_staff: the assignee is not an active agent or admin; validation_error: a note empty or over 500 characters, a bad id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only active agents and admins; only an admin gives a follow-up to someone else.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request_held: another agent holds the request (they, or an admin, act on it).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/requests/{request_id}/followups/{followup_id}/done": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Mark a follow-up done (staff)",
+        "description": "Done once: again changes nothing. Recorded in the audit log.",
+        "operationId": "staff_followup_done_v1_admin_requests__request_id__followups__followup_id__done_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          },
+          {
+            "name": "followup_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Followup Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowupOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a request_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only its assignee or an admin, an active one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "followup_not_found: none with this id here.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/followups": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "My follow-ups (staff)",
+        "description": "The follow-ups not done, the most overdue first. Each names its request by code and\nstatus: never a contact.",
+        "operationId": "staff_list_followups_v1_admin_followups_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "due",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/FollowupDue",
+              "description": "today: due by the end of today in BUSINESS_TIME_ZONE, overdue too.",
+              "default": "today"
+            },
+            "description": "today: due by the end of today in BUSINESS_TIME_ZONE, overdue too."
+          },
+          {
+            "name": "assignee",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Whose follow-ups (admins only; an agent reads their own without it).",
+              "title": "Assignee"
+            },
+            "description": "Whose follow-ups (admins only; an agent reads their own without it)."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size; capped.",
+              "title": "Limit"
+            },
+            "description": "Page size; capped."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowupsPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a bad cursor or limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only active agents and admins; only an admin names an assignee (their own id included).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/followups/summary": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "How many of my follow-ups are due today (staff)",
+        "description": "The caller's open follow-ups due by the end of today in the business time zone, overdue\nones included: the nav badge, equal to the default follow-ups list's length.",
+        "operationId": "staff_followups_summary_v1_admin_followups_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowupsSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/staff": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "The active agents and admins (staff)",
+        "description": "Id, first name and role of every active agent and admin, for assigning a follow-up and\nfiltering the follow-ups list. No contact.",
+        "operationId": "staff_members_v1_admin_staff_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/v1/jobs/{job_id}/reviews": {
       "post": {
         "tags": [
@@ -7361,6 +8125,233 @@
           },
           "404": {
             "description": "not_found: no job with this id of which the caller is the customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}/cancel-preview": {
+      "get": {
+        "tags": [
+          "cancellations"
+        ],
+        "summary": "What cancelling my job now would cost",
+        "description": "The fee kept and the refund given back if the customer cancels now, computed on the\nserver: free before the pro taps On my way; after it (on the way or arrived) a share of the\njob price is kept and the rest of the payment, tax included, is refunded. Show it before\nthe customer confirms, and send its fee_cents back as expected_fee_cents.",
+        "operationId": "cancel_preview_v1_jobs__job_id__cancel_preview_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelPreviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a job_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers cancel here (a pro's own cancel is separate).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id of which the caller is the customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "cancel_not_allowed: the work started, or the job is done, confirmed, paid out, disputed or refunded (the message names its status): report a problem instead; cancel_needs_review: the job's payment needs a look by staff first. Nothing is written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many previews or cancels by this customer in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}/cancel": {
+      "post": {
+        "tags": [
+          "cancellations"
+        ],
+        "summary": "Cancel my job",
+        "description": "The customer cancels their scheduled or on-the-way job. The job and its request are\ncancelled; the refund (the payment minus the fee, if any) goes back to the original payment\nmethod through Stripe, made by the server: refund_status says where it stands. The pro is\nnotified. A job is cancelled once: sending again returns that cancellation (200).",
+        "operationId": "cancel_job_v1_jobs__job_id__cancel_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A UUID the app makes once per cancel and sends again with every retry of it. A retry answers 200 with the cancellation as it is now and writes nothing; the same key with another body, or on another job, answers 409 idempotency_key_reused. With or without it, a job is cancelled once.",
+              "title": "Idempotency-Key"
+            },
+            "description": "A UUID the app makes once per cancel and sends again with every retry of it. A retry answers 200 with the cancellation as it is now and writes nothing; the same key with another body, or on another job, answers 409 idempotency_key_reused. With or without it, a job is cancelled once."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerCancelIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancellationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: an unknown or a pro's reason_code; a note longer than 500 characters, holding a NUL, or empty once invisible characters are dropped; a negative expected_fee_cents; an unknown field (an amount above all); a job_id or an Idempotency-Key that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers cancel here (a pro's own cancel is separate).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id of which the caller is the customer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "cancel_not_allowed: the work started, or the job is done, confirmed, paid out, disputed or refunded (the message names its status): report a problem instead; cancel_needs_review: the job's payment needs a look by staff first; cancel_fee_changed: expected_fee_cents differs from the fee cancelling now costs (the pro set off since the preview); idempotency_key_reused: the caller already used this Idempotency-Key with a different body or on another job. Nothing was changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many previews or cancels by this customer in the window; Retry-After says when to try again.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8392,6 +9383,157 @@
         "title": "BucketFilter",
         "description": "The list's `bucket`: one of the queue's buckets, or every request."
       },
+      "CancelParty": {
+        "type": "string",
+        "enum": [
+          "customer",
+          "pro"
+        ],
+        "title": "CancelParty",
+        "description": "Who cancelled the job: its customer or its pro."
+      },
+      "CancelPreviewOut": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "job_status": {
+            "$ref": "#/components/schemas/JobStatus",
+            "description": "scheduled or on_the_way: still cancellable."
+          },
+          "fee_applies": {
+            "type": "boolean",
+            "title": "Fee Applies",
+            "description": "The pro tapped On my way (or arrived): cancelling now costs a fee."
+          },
+          "fee_bps": {
+            "type": "integer",
+            "title": "Fee Bps",
+            "description": "The fee's rate once the pro is on the way, in basis points of the job price (1500 = 15%), from the server's setting: for the rule line, whether or not it applies now (fee_applies)."
+          },
+          "customer_total_cents": {
+            "type": "integer",
+            "title": "Customer Total Cents",
+            "description": "What the customer paid, tax included."
+          },
+          "fee_cents": {
+            "type": "integer",
+            "title": "Fee Cents",
+            "description": "What cancelling now keeps: 0 before On my way."
+          },
+          "refund_cents": {
+            "type": "integer",
+            "title": "Refund Cents",
+            "description": "What cancelling now gives back: total minus fee."
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "examples": [
+              "usd"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "job_status",
+          "fee_applies",
+          "fee_bps",
+          "customer_total_cents",
+          "fee_cents",
+          "refund_cents",
+          "currency"
+        ],
+        "title": "CancelPreviewOut"
+      },
+      "CancelReason": {
+        "type": "string",
+        "enum": [
+          "changed_my_mind",
+          "found_another_pro",
+          "pro_late",
+          "other",
+          "cannot_make_it",
+          "customer_unreachable",
+          "scope_changed"
+        ],
+        "title": "CancelReason",
+        "description": "Why, as the cancelling side picks it (#69): the customer's first four, the pro's last\nthree, and `other` for both."
+      },
+      "CancelRefundState": {
+        "type": "string",
+        "enum": [
+          "none",
+          "pending",
+          "succeeded",
+          "failed"
+        ],
+        "title": "CancelRefundState",
+        "description": "A cancelled job's refund in plain terms, as its customer is told."
+      },
+      "CancellationOut": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "job_status": {
+            "$ref": "#/components/schemas/JobStatus",
+            "description": "cancelled."
+          },
+          "cancelled_by": {
+            "$ref": "#/components/schemas/CancelParty"
+          },
+          "reason_code": {
+            "$ref": "#/components/schemas/CancelReason"
+          },
+          "fee_cents": {
+            "type": "integer",
+            "title": "Fee Cents",
+            "description": "Kept by the platform: 0 when cancelled before On my way."
+          },
+          "refund_cents": {
+            "type": "integer",
+            "title": "Refund Cents",
+            "description": "Given back to the original payment method."
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "examples": [
+              "usd"
+            ]
+          },
+          "refund_status": {
+            "$ref": "#/components/schemas/CancelRefundState",
+            "description": "none: nothing to give back. pending: on its way (Stripe has not said the money is back yet). succeeded: Stripe says it is back on the payment method. failed: it did not go through; our team looks into it."
+          },
+          "cancelled_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Cancelled At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "job_status",
+          "cancelled_by",
+          "reason_code",
+          "fee_cents",
+          "refund_cents",
+          "currency",
+          "refund_status",
+          "cancelled_at"
+        ],
+        "title": "CancellationOut"
+      },
       "CardCustomer": {
         "properties": {
           "id": {
@@ -9181,6 +10323,113 @@
         "title": "ClaimOut",
         "description": "Who holds the request after a claim or a release."
       },
+      "ClassifyIn": {
+        "properties": {
+          "category_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Category Id",
+            "description": "An active category."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "category_id"
+        ],
+        "title": "ClassifyIn"
+      },
+      "ClassifyOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "category": {
+            "$ref": "#/components/schemas/CategorySummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "category"
+        ],
+        "title": "ClassifyOut"
+      },
+      "ContactedOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "first_contact_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "First Contact At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "first_contact_at"
+        ],
+        "title": "ContactedOut",
+        "description": "When the BDC first contacted the customer: set once."
+      },
+      "CustomerCancelIn": {
+        "properties": {
+          "reason_code": {
+            "$ref": "#/components/schemas/CustomerCancelReason"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500,
+                "minLength": 1,
+                "pattern": "^[^\\x00]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "Optional, plain text. Contact details are masked before it is stored; only the masked text is kept, for staff."
+          },
+          "expected_fee_cents": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Fee Cents",
+            "description": "The fee_cents the preview showed. When given and cancelling now costs another fee (the pro set off since), nothing changes: 409 cancel_fee_changed. Never used as an amount."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason_code"
+        ],
+        "title": "CustomerCancelIn"
+      },
+      "CustomerCancelReason": {
+        "type": "string",
+        "enum": [
+          "changed_my_mind",
+          "found_another_pro",
+          "pro_late",
+          "other"
+        ],
+        "title": "CustomerCancelReason",
+        "description": "Why the customer cancels: the reasons their app offers."
+      },
       "CustomerDisputeOut": {
         "properties": {
           "id": {
@@ -9237,6 +10486,18 @@
             "type": "integer",
             "title": "Photos Pending",
             "description": "Photos whose copy is still being prepared."
+          },
+          "customer_refund_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Refund Cents",
+            "description": "What the resolution gives back to the customer (#472): 0 for a release, part of the payment for a partial, the whole payment for a refund; null while open. Always sent; optional in the schema so clients built before #472 keep compiling."
           }
         },
         "additionalProperties": false,
@@ -9390,6 +10651,39 @@
             "title": "Customer Total Cents",
             "description": "What the customer paid: amount plus tax."
           },
+          "dispute_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DisputeStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The job's reported problem, if any (#472): open, or resolved. null when none was reported. Optional in the schema so older clients keep compiling."
+          },
+          "dispute_resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DisputeResolution"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How an admin resolved it (released, partial_release, refunded); null while open or without a report."
+          },
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CustomerJobCancellation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set once the job was cancelled (#69): who, why, when, the fee, the refund and where the refund stands. Always sent (null before a cancel); optional in the schema so clients built before #69 keep compiling."
+          },
           "unread_messages": {
             "type": "integer",
             "title": "Unread Messages",
@@ -9416,6 +10710,53 @@
         ],
         "title": "CustomerJob",
         "description": "The customer's job on their request, once paid."
+      },
+      "CustomerJobCancellation": {
+        "properties": {
+          "cancelled_by": {
+            "$ref": "#/components/schemas/CancelParty"
+          },
+          "reason_code": {
+            "$ref": "#/components/schemas/CancelReason"
+          },
+          "cancelled_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Cancelled At"
+          },
+          "customer_total_cents": {
+            "type": "integer",
+            "title": "Customer Total Cents",
+            "description": "What the customer paid, tax included: the fee plus the refund, as the cancellation split it (frozen with it)."
+          },
+          "fee_cents": {
+            "type": "integer",
+            "title": "Fee Cents",
+            "description": "Kept by the platform: 0 when cancelled before On my way."
+          },
+          "refund_cents": {
+            "type": "integer",
+            "title": "Refund Cents",
+            "description": "Given back to the original payment method."
+          },
+          "refund_status": {
+            "$ref": "#/components/schemas/CancelRefundState",
+            "description": "none, pending, succeeded or failed, as on the cancel's answer."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cancelled_by",
+          "reason_code",
+          "cancelled_at",
+          "customer_total_cents",
+          "fee_cents",
+          "refund_cents",
+          "refund_status"
+        ],
+        "title": "CustomerJobCancellation",
+        "description": "The cancellation of the customer's job, as their job view shows it."
       },
       "CustomerJobPhotos": {
         "properties": {
@@ -10225,6 +11566,201 @@
           "error"
         ],
         "title": "ErrorResponse"
+      },
+      "FollowupDue": {
+        "type": "string",
+        "enum": [
+          "today",
+          "all"
+        ],
+        "title": "FollowupDue"
+      },
+      "FollowupIn": {
+        "properties": {
+          "due_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Due At",
+            "description": "When it is due: in the future, at most OPS_FOLLOWUP_MAX_DAYS ahead."
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Note",
+            "description": "What to do, 1 to 500 characters (staff only)."
+          },
+          "assigned_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned To",
+            "description": "An active agent or admin; the caller by default. Only an admin gives a follow-up to someone else."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "due_at",
+          "note"
+        ],
+        "title": "FollowupIn"
+      },
+      "FollowupItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Request Id"
+          },
+          "assigned_to": {
+            "$ref": "#/components/schemas/QueueAgent"
+          },
+          "due_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Due At"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "done_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done At"
+          },
+          "public_code": {
+            "type": "string",
+            "title": "Public Code"
+          },
+          "request_status": {
+            "$ref": "#/components/schemas/RequestStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "request_id",
+          "assigned_to",
+          "due_at",
+          "note",
+          "done_at",
+          "public_code",
+          "request_status"
+        ],
+        "title": "FollowupItem",
+        "description": "A follow-up in the list: its request's code and status, never a contact."
+      },
+      "FollowupOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Request Id"
+          },
+          "assigned_to": {
+            "$ref": "#/components/schemas/QueueAgent"
+          },
+          "due_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Due At"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "done_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "request_id",
+          "assigned_to",
+          "due_at",
+          "note",
+          "done_at"
+        ],
+        "title": "FollowupOut"
+      },
+      "FollowupsPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FollowupItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "By due time, the most overdue first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "FollowupsPage"
+      },
+      "FollowupsSummary": {
+        "properties": {
+          "due_today": {
+            "type": "integer",
+            "title": "Due Today",
+            "description": "The caller's open follow-ups due by the end of today in the business time zone, overdue ones included: the length of GET /v1/admin/followups (due today)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "due_today"
+        ],
+        "title": "FollowupsSummary"
       },
       "GroupPreferences": {
         "properties": {
@@ -11119,6 +12655,53 @@
           "next_cursor"
         ],
         "title": "MySupportTicketPage"
+      },
+      "NoteIn": {
+        "properties": {
+          "body": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Body",
+            "description": "Plain text, 1 to 2000 characters, kept as written (staff only, never shown to the customer or the pro, never logged)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "body"
+        ],
+        "title": "NoteIn"
+      },
+      "NoteOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "author": {
+            "$ref": "#/components/schemas/QueueAgent"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "author",
+          "body",
+          "created_at"
+        ],
+        "title": "NoteOut"
       },
       "NotificationPreferences": {
         "properties": {
@@ -12228,6 +13811,29 @@
             "title": "Pro Payout Cents",
             "description": "What the pro receives for the job."
           },
+          "pro_receives_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Receives Cents",
+            "description": "What the pro will actually receive for this job (#488): the full payout normally and while a reported problem is open (under review); once an admin resolved it, the full payout for a release, the released part for a partial, 0 for a refund; 0 for a cancelled or refunded job. pro_payout_cents stays the quote's frozen payout. Always sent; optional in the schema so older clients keep compiling."
+          },
+          "cancellation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProJobCancellation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set once the job was cancelled (#69): who, why and when. Always sent (null before a cancel); optional in the schema so clients built before #69 keep compiling."
+          },
           "payout": {
             "anyOf": [
               {
@@ -12268,6 +13874,30 @@
         ],
         "title": "ProJob",
         "description": "The pro's own job. Never the arrival code, the customer's last name or contacts."
+      },
+      "ProJobCancellation": {
+        "properties": {
+          "cancelled_by": {
+            "$ref": "#/components/schemas/CancelParty"
+          },
+          "reason_code": {
+            "$ref": "#/components/schemas/CancelReason"
+          },
+          "cancelled_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Cancelled At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cancelled_by",
+          "reason_code",
+          "cancelled_at"
+        ],
+        "title": "ProJobCancellation",
+        "description": "The cancellation of the pro's job, as their job view shows it: who, why and when; never\nthe money or the note."
       },
       "ProJobPage": {
         "properties": {
@@ -13390,7 +15020,7 @@
             ]
           },
           "status": {
-            "$ref": "#/components/schemas/RefundStatus",
+            "$ref": "#/components/schemas/ShownRefundStatus",
             "description": "pending: Stripe holds no refund of ours yet, an attempt may be under way. created: Stripe holds the refund; stripe_status says whether the money is back. failed: the last attempt's call failed. A retry sends the same idempotency key, and Stripe answers a refusal it already gave under that key (for 24 h) with the same refusal: a retry helps when the call never reached Stripe, or once the key expired."
           },
           "stripe_refund_id": {
@@ -13462,16 +15092,6 @@
         ],
         "title": "RefundOut",
         "description": "A refund to the customer as staff see it (#76): the row, without the idempotency key."
-      },
-      "RefundStatus": {
-        "type": "string",
-        "enum": [
-          "pending",
-          "created",
-          "failed"
-        ],
-        "title": "RefundStatus",
-        "description": "Where a refund to the customer stands (#76; internal: staff read the row)."
       },
       "RegionOut": {
         "properties": {
@@ -13777,6 +15397,28 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "notes": {
+            "items": {
+              "$ref": "#/components/schemas/NoteOut"
+            },
+            "type": "array",
+            "title": "Notes",
+            "description": "The staff's internal notes, oldest first (#82). Never shown to the customer or the pro."
+          },
+          "followups": {
+            "items": {
+              "$ref": "#/components/schemas/FollowupOut"
+            },
+            "type": "array",
+            "title": "Followups",
+            "description": "By due time (#82)."
+          },
+          "actions_allowed": {
+            "type": "boolean",
+            "title": "Actions Allowed",
+            "description": "Whether the caller may act on this request now (#82): it is unassigned, held by them, or they are an admin. The API stays the guard (409 request_held).",
+            "default": true
           }
         },
         "type": "object",
@@ -13809,7 +15451,9 @@
           "job",
           "next_action",
           "last_contact_at",
-          "updated_at"
+          "updated_at",
+          "notes",
+          "followups"
         ],
         "title": "RequestCard",
         "description": "One request for the BDC: everything in the list, plus who to call and where, what was\nasked, the media, the quotes and the job. Reading it is recorded in the audit log."
@@ -13952,6 +15596,19 @@
           },
           "address": {
             "$ref": "#/components/schemas/AddressOut"
+          },
+          "address_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Id",
+            "description": "The customer's own address the request uses (#69: Request again offers it when it is still in their address book). Always set; optional in the schema so clients built before #69 keep compiling."
           },
           "preferred_date": {
             "anyOf": [
@@ -14960,6 +16617,16 @@
         "title": "SetupIntentOut",
         "description": "What the app's Payment Sheet needs, in setup mode, to save a card on the customer."
       },
+      "ShownRefundStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "created",
+          "failed"
+        ],
+        "title": "ShownRefundStatus",
+        "description": "A dispute's refund as staff see it: the one that is not abandoned (#434), so never\n`abandoned`. The same values as RefundStatus otherwise."
+      },
       "SingleChoiceQuestion": {
         "properties": {
           "key": {
@@ -15258,6 +16925,11 @@
             "title": "Refund Failed",
             "description": "Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it."
           },
+          "refund_needs_reconciliation": {
+            "type": "boolean",
+            "title": "Refund Needs Reconciliation",
+            "description": "Stripe shows a refund made (or still under way) for this dispute that its abandoned or failed refund records do not hold (#450 round 2): money may have gone back outside the records, so any payout of the job stays held until staff reconcile it in Stripe and clear the hold (docs/stripe-money.md). Never cleared on its own."
+          },
           "description": {
             "type": "string",
             "title": "Description",
@@ -15382,6 +17054,7 @@
           "opened_at",
           "resolved_at",
           "refund_failed",
+          "refund_needs_reconciliation",
           "description",
           "pro_reply",
           "pro_replied_at",
@@ -15530,6 +17203,11 @@
             "type": "boolean",
             "title": "Refund Failed",
             "description": "Stripe failed or canceled the decision's refund: the money did not go back, the dispute stays open (or, resolved, needs a look) and any payout it decided stays held. Staff repair it."
+          },
+          "refund_needs_reconciliation": {
+            "type": "boolean",
+            "title": "Refund Needs Reconciliation",
+            "description": "Stripe shows a refund made (or still under way) for this dispute that its abandoned or failed refund records do not hold (#450 round 2): money may have gone back outside the records, so any payout of the job stays held until staff reconcile it in Stripe and clear the hold (docs/stripe-money.md). Never cleared on its own."
           }
         },
         "additionalProperties": false,
@@ -15551,7 +17229,8 @@
           "currency",
           "opened_at",
           "resolved_at",
-          "refund_failed"
+          "refund_failed",
+          "refund_needs_reconciliation"
         ],
         "title": "StaffDisputeSummary",
         "description": "One line of the staff list."
@@ -15772,6 +17451,55 @@
           "created_at"
         ],
         "title": "StaffJobEventOut"
+      },
+      "StaffList": {
+        "properties": {
+          "staff": {
+            "items": {
+              "$ref": "#/components/schemas/StaffMemberOut"
+            },
+            "type": "array",
+            "title": "Staff",
+            "description": "By first name."
+          }
+        },
+        "type": "object",
+        "required": [
+          "staff"
+        ],
+        "title": "StaffList"
+      },
+      "StaffMemberOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "first_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Name",
+            "description": "Null when missing or showing a contact."
+          },
+          "role": {
+            "$ref": "#/components/schemas/UserRole"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "first_name",
+          "role"
+        ],
+        "title": "StaffMemberOut",
+        "description": "An active agent or admin, as the panel's assignee pickers list them (#82): no contact."
       },
       "StaffProDecisionOut": {
         "properties": {
@@ -16616,7 +18344,7 @@
               }
             ],
             "title": "Last Error Code",
-            "description": "Why the last attempt did not make the transfer: a Stripe error code, an error class, `payouts_not_enabled` or `transfer_needs_review`. Never a message."
+            "description": "Why the last attempt did not make the transfer: a Stripe error code, an error class, `payouts_not_enabled`, `pro_not_approved`, `held_before_create` (a hold seen at the last check before the create) or `transfer_needs_review`. Never a message."
           },
           "requested_at": {
             "anyOf": [
@@ -16630,6 +18358,32 @@
             ],
             "title": "Requested At",
             "description": "When the latest attempt started."
+          },
+          "create_may_have_been_issued_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Create May Have Been Issued At",
+            "description": "When an attempt first went past the last check before the create (#450 round 5): from then on Stripe may hold a transfer of the job, even while a later attempt retries. Kept for good; null when no attempt ever got that far."
+          },
+          "needs_reversal_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Needs Reversal At",
+            "description": "When a refund made late for the job's dispute found this transfer made, or possibly made (#450 round 4): the hold came too late to stop it. Staff reverse it in Stripe by hand and clear the flag (docs/stripe-money.md); nothing reverses or clears it automatically. null otherwise."
           },
           "created_at": {
             "type": "string",
@@ -16656,6 +18410,8 @@
           "attempts",
           "last_error_code",
           "requested_at",
+          "create_may_have_been_issued_at",
+          "needs_reversal_at",
           "created_at",
           "updated_at"
         ],

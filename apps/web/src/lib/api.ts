@@ -127,7 +127,7 @@ type PostBody<P extends PostPath> = paths[P] extends {
   ? Body
   : undefined;
 
-/** The JSON body of a POST path's 200 or 201 response; undefined for a 204. */
+/** The JSON body of a POST path's 200 or 201 response; undefined for one without a body. */
 type PostResponse<P extends PostPath> = paths[P] extends {
   post: { responses: { 200: { content: { "application/json": infer Body } } } };
 }
@@ -159,8 +159,10 @@ export async function apiPost<P extends PostPath>(
     signal: AbortSignal.timeout(apiTimeoutMs()), // body read included, as in apiGet
   });
   if (!response.ok) throw new ApiError(response.status, await readErrorCode(response));
-  if (response.status === 204) return undefined as PostResponse<P>;
-  return (await response.json()) as PostResponse<P>;
+  // A 204, or a 202 that only says "accepted" (POST /v1/waitlist), has no body to read.
+  const text = await response.text();
+  if (text === "") return undefined as PostResponse<P>;
+  return JSON.parse(text) as PostResponse<P>;
 }
 
 /** API paths that accept PATCH. */

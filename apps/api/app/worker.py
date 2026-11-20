@@ -20,10 +20,16 @@ from app.integrations.stripe_payments import StripePaymentsClient
 from app.integrations.stripe_transfers import StripeTransfersClient
 from app.modules.addresses.tasks import geocode_address
 from app.modules.chat.tasks import purge_chat_originals
-from app.modules.dispatch.tasks import dispatch_request
+from app.modules.dispatch.tasks import (
+    dispatch_request,
+    redispatch_for_pro,
+    redispatch_stalled_requests,
+)
 from app.modules.disputes.tasks import dispute_photo_sanitize_task
 from app.modules.jobs.tasks import auto_confirm_jobs, photo_sanitize_task
+from app.modules.media.resweep import requeue_stale_media_copies
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
+from app.modules.payments.cancel_refund_tasks import refund_cancellation, retry_cancel_refunds
 from app.modules.payments.tasks import cancel_unpaid_payments
 from app.modules.payments.transfer_tasks import (
     check_transfer_reversals,
@@ -109,6 +115,8 @@ class WorkerSettings:
     functions = (
         discarding_result(ping),
         discarding_result(dispatch_request),
+        # One run per kick (#478): the re-dispatch sweep below is its retry.
+        discarding_result(redispatch_for_pro, max_tries=1),
         # With no result kept, a receipt that asks for a resend can queue the message's job id
         # again once the first run is over; the tries match the sends per device.
         discarding_result(send_push, max_tries=get_settings().push_max_attempts),
@@ -125,6 +133,9 @@ class WorkerSettings:
         # One run per queued confirmation; it never raises, and the sweep below takes whatever
         # a run could not finish.
         discarding_result(release_transfer, max_tries=1),
+        # One run per cancel (#69); it never raises, and the sweep below makes whatever a run
+        # could not.
+        discarding_result(refund_cancellation, max_tries=1),
     )
     # A cron job keeps no result by default (ARQ's cron keep_result is 0); stated anyway.
     cron_jobs = (
@@ -134,10 +145,25 @@ class WorkerSettings:
             keep_result=0,
             keep_result_forever=False,
         ),
+        # Safe copies an outage (or a missed queue) left pending (#473).
+        cron(
+            requeue_stale_media_copies,
+            minute=every(get_settings().media_sanitize_resweep_minutes),
+            timeout=get_settings().media_sanitize_resweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
         cron(
             sweep_orphan_uploads,
             minute=every(get_settings().orphan_upload_sweep_minutes),
             timeout=get_settings().orphan_upload_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        cron(
+            redispatch_stalled_requests,
+            minute=every(get_settings().redispatch_sweep_minutes),
+            timeout=get_settings().redispatch_sweep_timeout_seconds,
             keep_result=0,
             keep_result_forever=False,
         ),
@@ -173,6 +199,14 @@ class WorkerSettings:
             release_confirmed_jobs,
             minute=every(get_settings().transfer_release_sweep_minutes),
             timeout=get_settings().transfer_release_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        # Cancelled jobs' refunds left without Stripe's answer (#69).
+        cron(
+            retry_cancel_refunds,
+            minute=every(get_settings().cancel_refund_sweep_minutes),
+            timeout=get_settings().cancel_refund_sweep_timeout_seconds,
             keep_result=0,
             keep_result_forever=False,
         ),

@@ -6,8 +6,21 @@
   "site": {
     "language": {
       "label": "Language",
+      "footerLabel": "Language (footer)",
       "en": "English",
       "es": "Español"
+    },
+    "error": {
+      "title": "This page didn't load",
+      "body": "Something went wrong on our side. Please try again in a moment.",
+      "retry": "Try again",
+      "home": "Go to the home page"
+    },
+    "notFound": {
+      "metaTitle": "Page not found | Jack Fix It",
+      "title": "We can't find this page",
+      "body": "The link may be old or have a typo.",
+      "home": "Go to the home page"
     }
   },
   "landing": {
@@ -310,7 +323,8 @@
   "showcase": {
     "meta": {
       "title": "Jack Fix It: the app for whatever happens at home",
-      "description": "Tell Jack what happened, compare fixed-price quotes from verified pros and pay in the app. You confirm when the job is done. Coming soon to iPhone and Android."
+      "description": "Tell Jack what happened, compare fixed-price quotes from verified pros and pay in the app. You confirm when the job is done. Coming soon to iPhone and Android.",
+      "ogAlt": "The Jack Fix It name and its line “Tell Jack. We'll take care of the rest.” on navy."
     },
     "skipToContent": "Skip to content",
     "homeLabel": "Jack Fix It, back to the top",
@@ -435,6 +449,7 @@
       "body": "The app is coming soon to iPhone and Android."
     },
     "footer": {
+      "sectionsLabel": "Page sections (footer)",
       "legalLabel": "Legal",
       "terms": "Terms of Service",
       "privacy": "Privacy Policy",
@@ -758,6 +773,84 @@
           "refunded": "Refunded",
           "cancelled": "Cancelled"
         }
+      },
+      "ops": {
+        "title": "Actions",
+        "label": "Actions on this request",
+        "heldBy": "{{name}} holds this request: take it to act on it.",
+        "heldByNoName": "Another agent holds this request: take it to act on it.",
+        "saving": "Saving…",
+        "saved": "Saved.",
+        "cancel": "Cancel",
+        "note": {
+          "open": "Add note",
+          "label": "Internal note (staff only)",
+          "submit": "Save note"
+        },
+        "contacted": {
+          "press": "Mark contacted"
+        },
+        "classify": {
+          "open": "Classify",
+          "label": "Category",
+          "submit": "Save category"
+        },
+        "followup": {
+          "open": "Schedule follow-up",
+          "day": "Day",
+          "time": "Time",
+          "zone": "Day and time in {{zone}}.",
+          "note": "What to do",
+          "assignee": "Assigned to",
+          "me": "Me",
+          "noName": "No name",
+          "submit": "Schedule"
+        },
+        "errors": {
+          "request_held": "Another agent holds this request. Take it first, or ask an admin.",
+          "forbidden": "Your account can't do this. Sign in again or ask an admin.",
+          "request_not_found": "We couldn't find this request.",
+          "request_not_classifiable": "Only a new or in-review request can be classified.",
+          "category_inactive": "That category is no longer offered. Choose another.",
+          "followup_due_out_of_range": "Choose a time ahead, within {{days}} days.",
+          "assignee_not_staff": "That person can't take follow-ups. Choose an active agent or admin.",
+          "followup_not_found": "We couldn't find this follow-up.",
+          "rate_limited": "Too many actions in a minute. Wait a moment.",
+          "validation_error": "Check the fields and try again.",
+          "note_empty": "Write something first.",
+          "note_too_long": "That's too long: shorten it.",
+          "due_invalid": "Choose a day and a time.",
+          "due_past": "Choose a time that hasn't passed.",
+          "due_too_far": "Choose a time within {{days}} days.",
+          "unconfirmed": "We couldn't confirm it went through. Check the card before trying again.",
+          "unavailable": "That didn't go through. Try again."
+        },
+        "notes": {
+          "title": "Internal notes",
+          "hint": "Staff only: the customer and the pro never see these.",
+          "none": "No notes yet.",
+          "you": "You",
+          "noName": "Staff"
+        },
+        "followups": {
+          "title": "Follow-ups",
+          "scope": {
+            "mine": "Only the follow-ups assigned to you show here.",
+            "all": "Every follow-up on this request, whoever it is assigned to."
+          },
+          "none": {
+            "mine": "None assigned to you on this request.",
+            "all": "No follow-ups on this request."
+          },
+          "due": "Due",
+          "assignee": "Assigned to",
+          "done": "Mark done",
+          "doneAt": "Done",
+          "you": "You",
+          "noName": "No name",
+          "overdue": "Overdue",
+          "today": "Due today"
+        }
       }
     },
     "pros": {
@@ -859,7 +952,11 @@
           "reasonLabel": "Reason",
           "reasonHint": "The pro can read this. Up to {{max}} characters.",
           "saving": "Saving…",
-          "saved": "Saved."
+          "saved": "Saved.",
+          "decided": {
+            "approved": "Approved.",
+            "rejected": "Rejected."
+          }
         },
         "errors": {
           "reason_required": "Write a reason of up to {{max}} characters.",
@@ -1068,6 +1165,7 @@
           "proRelease": "Released to the pro",
           "customerRefund": "Refunded to the customer",
           "noPayment": "No payment on record for this job: it needs a review before it can be resolved.",
+          "needsReversal": "A payout may need to be reversed: ask an engineer.",
           "none": "None",
           "stripeCode": "Stripe code: {{code}}",
           "paymentStatus": {
@@ -1185,6 +1283,79 @@
           "unavailable": "Something went wrong. Check the dispute before trying again."
         }
       }
+    },
+    "error": {
+      "title": "The panel can't reach the server right now",
+      "body": "Please try again in a moment. If it keeps happening, tell an engineer.",
+      "retry": "Try again",
+      "home": "Back to the panel"
+    }
+  },
+  "request": {
+    "meta": {
+      "title": "Tell Jack what happened | Jack Fix It",
+      "description": "Tell Jack what's going on at home. A few quick questions, no account needed."
+    },
+    "title": "Tell Jack what happened",
+    "intro": "A few quick questions. No account needed.",
+    "noscript": "This form needs JavaScript. Turn it on in your browser to continue.",
+    "progress": "Step {{current}} of {{total}}",
+    "back": "Back",
+    "next": "Continue",
+    "optional": "{{label}} (optional)",
+    "counter": "{{length}} / {{max}}",
+    "check": "Some answers need a look:",
+    "zip": {
+      "title": "Where's the job?",
+      "support": "First, let's check that Jack works in your area.",
+      "label": "ZIP code",
+      "hint": "The 5-digit ZIP code of the home.",
+      "checking": "Checking your area…",
+      "errors": {
+        "invalid": "Enter a 5-digit ZIP code.",
+        "rate_limited": "Too many tries from here. Wait a minute, then try again.",
+        "unavailable": "We couldn't check your area right now. Try again."
+      }
+    },
+    "waitlist": {
+      "title": "We're not in your area yet",
+      "body": "Jack works in a few areas for now. Leave an email or a mobile number and we'll tell you when we come to {{zip}}.",
+      "emailLabel": "Email",
+      "phoneLabel": "Mobile number",
+      "contactHint": "One is enough.",
+      "use": "We'll use it only to tell you when Jack comes to your area.",
+      "submit": "Let me know",
+      "sending": "Sending…",
+      "otherZip": "Try another ZIP code",
+      "joinedTitle": "You're on the list",
+      "joinedBody": "We'll let you know when Jack comes to {{zip}}.",
+      "home": "Back to the home page",
+      "servedNow": "Good news: Jack works in {{zip}} now.",
+      "errors": {
+        "missing_contact": "Add an email or a mobile number.",
+        "invalid_email": "Enter an email like name@example.com.",
+        "invalid_phone": "Enter a 10-digit mobile number.",
+        "invalid": "Check the email and the mobile number.",
+        "rate_limited": "Too many tries from here. Wait a few minutes, then try again.",
+        "unavailable": "That didn't go through. Try again."
+      }
+    },
+    "describe": {
+      "title": "What's going on?",
+      "support": "Tell us in your own words: what happened, where in the home, anything that helps.",
+      "label": "Describe the job",
+      "required": "Tell us what's going on to continue.",
+      "categoryLegend": "What kind of job is it?",
+      "categoryHint": "Not sure? Leave it: our team will pick the right one.",
+      "notSure": "Not sure"
+    },
+    "questions": {
+      "support": "A few quick questions so pros can send you accurate quotes.",
+      "required": "Answer this to continue.",
+      "range": "Enter a number from {{min}} to {{max}}.",
+      "tooFew": "Pick at least {{count}}.",
+      "tooMany": "Pick up to {{count}}.",
+      "pickUpTo": "Pick up to {{count}}."
     }
   }
 }

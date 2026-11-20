@@ -261,6 +261,7 @@ async def test_customer_creates_request_with_address_media_and_gets_public_code(
         "category_id",
         "description",
         "address",
+        "address_id",
         "preferred_date",
         "preferred_period",
         "intake_answers",

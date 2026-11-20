@@ -5,12 +5,21 @@ import { FakeCookieJar, routeFetch, user } from "@/lib/test-helpers";
 
 const { jar } = vi.hoisted(() => ({ jar: { current: null as unknown } }));
 
-vi.mock("next/headers", () => ({ cookies: async () => jar.current }));
+vi.mock("next/headers", () => ({
+  cookies: async () => jar.current,
+  headers: async () => new Headers(),
+}));
 vi.mock("next/navigation", async () => {
   const { RedirectSignal: Signal } = await import("@/lib/test-helpers");
   return {
     redirect: (url: string) => {
       throw new Signal(url);
+    },
+    // The action bar's forms read the router (to read the card again after a lost answer).
+    useRouter: () => ({ refresh: () => {} }),
+    // A missing record answers 404 (not-found.tsx, #494).
+    notFound: () => {
+      throw new Error("NEXT_NOT_FOUND");
     },
   };
 });
@@ -58,9 +67,10 @@ function text(page: string): string {
   return page.replaceAll(/<[^>]+>/g, " ").replaceAll(/\s+/g, " ");
 }
 
-/** The labels of the page's buttons, in order. */
+/** The labels of the claim control's buttons, in order (the action bar's group left out). */
 function buttons(page: string): string[] {
-  return [...page.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map(([, label]) => label ?? "");
+  const claim = page.replace(/<div role="group" aria-label="[^"]*"[\s\S]*?<\/div>/, "");
+  return [...claim.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map(([, label]) => label ?? "");
 }
 
 /** The href of every link that is not a page of the panel. */
@@ -233,21 +243,15 @@ describe("request card page", () => {
     async (requestId) => {
       api(() => Response.json(card()));
 
-      const page = await render(requestId);
-
-      expect(page).toContain("This request doesn't exist.");
+      await expect(render(requestId)).rejects.toThrow("NEXT_NOT_FOUND");
       expect(requestsTo(fetchMock.mock.calls, CARD)).toEqual([]);
     },
   );
 
-  it("says when the request does not exist", async () => {
+  it("answers 404 when the request does not exist (#494)", async () => {
     api(() => Response.json({ error: { code: "request_not_found" } }, { status: 404 }));
 
-    const page = await render();
-
-    expect(page).toContain("This request doesn't exist.");
-    expect(page).not.toContain('role="alert"');
-    expect(buttons(page)).toEqual([]);
+    await expect(render()).rejects.toThrow("NEXT_NOT_FOUND");
   });
 
   it.each([

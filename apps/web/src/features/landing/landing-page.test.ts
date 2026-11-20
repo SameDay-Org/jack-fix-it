@@ -85,6 +85,20 @@ describe("the landing page", () => {
     },
   );
 
+  // Both language switches are on screen at once, so they need two names (axe
+  // landmark-unique). The header's links and the phone menu share one: only one is ever shown.
+  it.each([
+    ["en", ["Language", "Language (footer)"]],
+    ["es", ["Idioma", "Idioma (pie de página)"]],
+  ] as const)("in %s names its two language switches apart", async (locale, names) => {
+    const html = await page(locale);
+    const switches = [
+      ...html.matchAll(/<nav aria-label="([^"]+)"[^>]*>(?:(?!<\/nav>)[\s\S])*?hrefLang=/g),
+    ];
+
+    expect(switches.map((m) => m[1])).toEqual(names);
+  });
+
   it("names its sections, and every anchor it links to is on the page", async () => {
     const html = await page("en");
     const anchors = [...html.matchAll(/href="#([^"]+)"/g)].map((match) => match[1]!);

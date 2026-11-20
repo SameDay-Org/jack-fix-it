@@ -43,6 +43,7 @@ from app.modules.categories.service import CategoryService
 from app.modules.dispatch.opportunities import sign_safe_media
 from app.modules.jobs.service import JobStaffReader, JobStatus, StaffJob
 from app.modules.jobs.transitions import CUSTOMER_STATUS
+from app.modules.ops.actions import OpsRecords
 from app.modules.ops.errors import (
     InvalidQueueQueryError,
     QueueRequestNotFoundError,
@@ -124,6 +125,7 @@ class OpsQueueService:
         self._users = UserService(session)
         self._pros = ProService(session)
         self._audit = AuditService(session)
+        self._records = OpsRecords(session)
         self._sla = timedelta(minutes=config.first_contact_sla_minutes)
         self._rules = QueueRules(
             first_contact_sla=self._sla,
@@ -190,11 +192,21 @@ class OpsQueueService:
         )
 
     async def card(self, staff: UserAccount, request_id: uuid.UUID) -> RequestCard:
-        """One request with the customer's contacts; the read is audited first."""
+        """One request with the customer's contacts; the read is audited first. What the
+        viewer may see of its follow-ups, and whether they may act on it, follow their account
+        as this transaction reads it, never the role their token was issued with (#499 round
+        1)."""
+        viewer = await self._audit.current_staff(staff.id)
+        if viewer is None:
+            raise ForbiddenError
         row = await self._requests.one(request_id, self._sources, self._rules)
         if row is None:
             raise QueueRequestNotFoundError
-        card = await self._card(row)
+        card = await self._card(row, viewer)
+        holder = card.assigned_agent
+        card.actions_allowed = (
+            holder is None or holder.id == viewer.id or viewer.role is UserRole.ADMIN
+        )
         # Committed before the answer: an audit write that fails answers 500, so no contact
         # is shown unaudited.
         try:
@@ -202,7 +214,12 @@ class OpsQueueService:
                 staff.id,
                 AuditAction.REQUEST_CARD_READ,
                 AuditEntity(AuditEntityType.SERVICE_REQUEST, request_id),
-                {"status": row.status.value, "media": len(card.media)},
+                {
+                    "status": row.status.value,
+                    "media": len(card.media),
+                    "notes": len(card.notes),
+                    "followups": len(card.followups),
+                },
             )
         except ReaderNotStaffError:
             await self._session.rollback()
@@ -335,7 +352,7 @@ class OpsQueueService:
             media_count=media_count,
         )
 
-    async def _card(self, row: QueuedRequest) -> RequestCard:
+    async def _card(self, row: QueuedRequest, viewer: UserAccount) -> RequestCard:
         request = row
         [item] = await self._items([row])
         customer = await self._users.get_by_id(request.customer_id)
@@ -396,6 +413,8 @@ class OpsQueueService:
             next_action=request.next_action,
             last_contact_at=request.last_contact_at,
             updated_at=request.updated_at,
+            notes=await self._records.notes_of(request.id),
+            followups=await self._records.followups_of(request.id, viewer),
         )
 
 

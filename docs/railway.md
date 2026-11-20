@@ -334,7 +334,15 @@ explains each). The Stripe webhook endpoint must also send `transfer.reversed`, 
 resolution (#76) refunds through the API with the same key; `REFUND_STUCK_PENDING_MINUTES` is
 optional too. The platform webhook endpoint must also send `refund.updated`, `refund.failed`
 and `charge.refund.updated`: a dispute settles only once Stripe says its refund succeeded, and
-the worker reads each refund event's refund from Stripe with the same key (#433).
+the worker reads each refund event's refund from Stripe with the same key (#433). `REFUND_ABANDON_ENABLED` (api, default `false`) lets staff
+abandon a dispute's refund Stripe refused for good (`scripts.resolve_dispute_refund`, #434):
+turn it on only after the deploy that contains the abandoned-refund reader has finished on the
+api AND the worker, so no previous release is serving; Cesar sets it when a repair is needed.
+A customer's cancel (#69) keeps `CANCELLATION_FEE_BPS` (api, default 1500) of the job price once
+the pro is on the way; the worker makes the cancelled job's refund with the same Stripe key, a
+task per cancel and the `retry_cancel_refunds` cron for whatever is left
+(`CANCEL_REFUND_SWEEP_MINUTES`, `CANCEL_REFUND_SWEEP_TIMEOUT_SECONDS`,
+`CANCEL_REFUND_BATCH_SIZE`, all optional), and the same refund events settle it.
 
 `apps/api/tests/test_railway_doc.py` fails when a setting that staging or production requires
 is missing from either table, so this list cannot fall behind `app/config.py`.

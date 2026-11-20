@@ -104,6 +104,7 @@ jest.mock(
 
 const JOB_PATH = "/v1/requests/{request_id}/job";
 const QUOTES_PATH = "/v1/requests/{request_id}/quotes";
+const PREVIEW_PATH = "/v1/jobs/{job_id}/cancel-preview";
 const MINUTE_MS = 60_000;
 const HIDDEN = { includeHiddenElements: true };
 const NBSP = " ";
@@ -208,9 +209,13 @@ const dateTime = (iso: string) =>
 
 type Get = (path: string, options?: unknown) => Promise<unknown>;
 const get = apiGet as unknown as jest.MockedFunction<Get>;
+/** The API refuses to cancel unless a test says otherwise (#69): no Cancel job on screen. */
+const refuseCancel = (): Promise<unknown> =>
+  Promise.reject(new ApiError(409, "cancel_not_allowed"));
 const api = {
   job: (): Promise<unknown> => Promise.resolve(ON_THE_WAY),
   quotes: (): Promise<unknown> => Promise.resolve(QUOTE_LIST),
+  preview: refuseCancel,
 };
 const answerJob = (value: CustomerJob) => {
   api.job = () => Promise.resolve(value);
@@ -228,6 +233,7 @@ const post = apiPost as unknown as jest.MockedFunction<(...args: unknown[]) => P
 const announced = () =>
   jest.mocked(AccessibilityInfo.announceForAccessibilityWithOptions).mock.calls.map(([m]) => m);
 const jobCalls = () => get.mock.calls.filter(([path]) => path === JOB_PATH).length;
+const previewCalls = () => get.mock.calls.filter(([path]) => path === PREVIEW_PATH).length;
 
 /** AppState listeners currently subscribed: a removed one is never called again. */
 const appStateListeners = new Set<(state: AppStateStatus) => void>();
@@ -284,9 +290,11 @@ beforeEach(() => {
   mockSession.generation = 1;
   api.job = () => Promise.resolve(ON_THE_WAY);
   api.quotes = () => Promise.resolve(QUOTE_LIST);
+  api.preview = refuseCancel;
   get.mockReset().mockImplementation((path) => {
     if (path === JOB_PATH) return api.job();
     if (path === QUOTES_PATH) return api.quotes();
+    if (path === PREVIEW_PATH) return api.preview();
     return Promise.reject(new Error(`unexpected GET ${path}`));
   });
   appStateListeners.clear();
@@ -537,6 +545,60 @@ describe("JobScreen", () => {
     } finally {
       spies.forEach((spy) => spy.mockRestore());
     }
+  });
+
+  it("offers Cancel job while the API's preview says yes, into the cancel screen (#69)", async () => {
+    api.preview = () =>
+      Promise.resolve({
+        job_id: ON_THE_WAY.id,
+        job_status: "on_the_way",
+        fee_applies: true,
+        fee_bps: 1500,
+        customer_total_cents: 18_050,
+        fee_cents: 2_708,
+        refund_cents: 15_342,
+        currency: "usd",
+      });
+    await renderWithQuery(<JobScreen />);
+    await loaded("Dan is on the way");
+    const cancel = await screen.findByRole("button", { name: "Cancel job" });
+    await act(async () => fireEvent.press(cancel));
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/requests/[id]/cancel",
+      params: { id: REQUEST_ID },
+    });
+  });
+
+  it("offers no Cancel job when the API says the job cannot be cancelled (#69)", async () => {
+    await renderWithQuery(<JobScreen />);
+    await loaded("Dan is on the way");
+    await waitFor(() => expect(previewCalls()).toBe(1));
+    await act(settle);
+    expect(screen.queryByTestId("job-cancel")).toBeNull();
+    expect(screen.queryByTestId("job-cancel-check-failed")).toBeNull();
+  });
+
+  it("shows a cancelled job's money, and asks it for no preview (#69)", async () => {
+    answerJob({
+      ...CANCELLED,
+      cancellation: {
+        cancelled_by: "customer",
+        reason_code: "pro_late",
+        cancelled_at: at(-30),
+        customer_total_cents: 18_050,
+        fee_cents: 2_708,
+        refund_cents: 15_342,
+        refund_status: "pending",
+      },
+    });
+    await renderWithQuery(<JobScreen />);
+    await loaded("This job was cancelled");
+    expect(screen.getByTestId("job-cancellation")).toBeTruthy();
+    expect(screen.getByText("Cancelling cost $27.08.")).toBeTruthy();
+    expect(
+      screen.getByText("$153.42 is going back to your payment method. It's being processed."),
+    ).toBeTruthy();
+    expect(previewCalls()).toBe(0);
   });
 
   it("the pro row opens the pro's profile over the job", async () => {
@@ -823,6 +885,18 @@ describe("JobScreen, the finished job (#66)", () => {
     expect(screen.queryByTestId("job-photo-hero")).toBeNull();
     expect(screen.getByTestId("job-map", HIDDEN)).toBeTruthy();
     expect(screen.getByTestId("job-confirm")).toBeTruthy();
+    // Over the navy drawn map the way back stays the translucent white pill.
+    expect(screen.getByTestId("job-back")).toBeTruthy();
+    expect(screen.queryByTestId("job-back-glass")).toBeNull();
+  });
+
+  it("over a photo of the work, the way back is the light glass pill with a navy arrow (#477)", async () => {
+    answerJob(FINISHED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Dan marked the job done");
+
+    const glass = screen.getByTestId("job-back-glass");
+    expect(within(glass).getByRole("button", { name: "Back" })).toBeTruthy();
   });
 
   it("when the full confirm words would wrap at this size, the button says Confirm and keeps them as its name", async () => {

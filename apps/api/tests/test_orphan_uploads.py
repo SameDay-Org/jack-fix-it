@@ -31,6 +31,7 @@ from app.integrations.storage import (
 from app.modules.addresses.models import Address
 from app.modules.categories.models import Category
 from app.modules.categories.service import CategoryService
+from app.modules.dispatch.kicks import RedispatchKick
 from app.modules.disputes.models import Dispute, DisputePhoto, DisputeReason
 from app.modules.jobs.models import Job, JobPhoto, JobPhotoKind
 from app.modules.pros.models import ProDocument, ProDocumentType, ProProfile
@@ -64,6 +65,7 @@ from app.observability import configure_logging
 from tests.conftest import make_settings
 from tests.helpers import as_status_writer
 from tests.test_media_logging import leaks
+from tests.test_requests_api import ENQUEUE_TIMEOUT, RecordingQueue
 from tests.test_schema_requests_jobs import add
 
 NOW = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)
@@ -82,6 +84,8 @@ NOT_UPLOAD_KEYS = {
     # Stripe's idempotency keys: a dispute's refund (#76), a job's transfer to its pro (#68).
     "refunds.idempotency_key",
     "transfers.idempotency_key",
+    # A job's cancellation (#69): the customer's Idempotency-Key.
+    "job_cancellations.idempotency_key",
 }
 
 
@@ -530,6 +534,7 @@ async def test_replaced_pro_photo_becomes_orphan(db_session: AsyncSession, world
         ServiceAreaService(db_session),
         storage,
         ProProfileConfig.from_settings(make_settings()),
+        RedispatchKick(RecordingQueue(), ENQUEUE_TIMEOUT),
     )
     account = await UserService(db_session).get_by_id(world.pro.id)
     assert account is not None

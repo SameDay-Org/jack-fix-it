@@ -101,6 +101,20 @@ class UserService:
         parts = [name for _, first, last, _, _ in rows for name in (first, last) if name]
         return " ".join(parts) or None
 
+    async def active_staff(self) -> list[tuple[uuid.UUID, str | None, UserRole]]:
+        """Every active agent and admin: id, first name alone (None when missing or showing a
+        contact, as first_names) and role, by first name (#82: the panel's assignee pickers)."""
+        return [
+            (
+                user_id,
+                safe_first_name(
+                    first, KnownValues(emails=(email,), phones=(phone,) if phone else ())
+                ),
+                role,
+            )
+            for user_id, first, role, email, phone in await self._users.active_staff()
+        ]
+
     async def first_names(self, user_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str | None]:
         """Each user's first name alone, read in one query: what the pro of a paid job sees of
         the customer (#63). None when it is missing or shows a contact detail, the user's own

@@ -39,6 +39,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "for-pros",
   "mascot",
   "privacy",
+  "request",
   "showcase",
   "terms",
   "icon",

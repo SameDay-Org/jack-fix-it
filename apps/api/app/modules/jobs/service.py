@@ -34,6 +34,7 @@ from sqlalchemy.exc import DBAPIError, PendingRollbackError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.errors import ForbiddenError, NotFoundError
+from app.modules.disputes.outcomes import dispute_outcomes
 from app.modules.jobs.errors import InvalidTransitionError
 from app.modules.jobs.location import JobLocationStore, forget_position
 from app.modules.jobs.models import Job, JobEvent
@@ -41,7 +42,13 @@ from app.modules.jobs.models import Job, JobEvent
 # Re-exported: other modules name a job's status through this module (ADR 0003).
 from app.modules.jobs.models import JobStatus as JobStatus
 from app.modules.jobs.repository import JobRepository
-from app.modules.jobs.transitions import CHAT_OPEN, REVIEWABLE, TRANSITIONS, ActorKind
+from app.modules.jobs.transitions import (
+    CHAT_OPEN,
+    REVIEWABLE,
+    TRANSITIONS,
+    ActorKind,
+    customer_status_of,
+)
 from app.modules.pros.service import ProService
 from app.modules.users.types import UserAccount, UserRole
 
@@ -209,6 +216,24 @@ def job_earning_facts() -> Subquery:
     """Each job's ids, status, completion, the pro's frozen payout and paid-out time, as
     JobRepository.earning_facts names them: a subquery for the pro's earnings (#70)."""
     return JobRepository.earning_facts()
+
+
+async def job_customer_statuses_of_requests(
+    session: AsyncSession, request_ids: Collection[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """What the customer sees of each request's job, by request, for the customer's own request
+    views (#466): once a request is paid, its job's status takes over, a disputed job whose
+    dispute is resolved reading completed (#472, customer_status_of). Two statements; requests
+    without a job are left out."""
+    jobs = await JobRepository(session).statuses_of_requests(request_ids)
+    disputed = [job_id for job_id, status in jobs.values() if status is JobStatus.DISPUTED]
+    outcomes = await dispute_outcomes(session, disputed)
+    return {
+        request_id: customer_status_of(
+            status, dispute_resolved=job_id in outcomes and outcomes[job_id].resolved
+        )
+        for request_id, (job_id, status) in jobs.items()
+    }
 
 
 def _actor_id(actor: UserAccount | SystemActor | AdminDecision) -> uuid.UUID | None:
@@ -547,6 +572,83 @@ class JobDisputes:
         round 1): the machine's transition (409 from any other status) with its job_events row.
         Flushes, never commits."""
         await self._machine.transition(job_id, JobStatus.REFUNDED, by)
+
+
+@dataclass(frozen=True)
+class JobCancelFacts:
+    """What a cancellation reads of a job (#69): its parties, its request (closed with it, and
+    its public code for the pushes), its accepted quote (its payment), its status and the
+    amounts it froze at payment."""
+
+    job_id: uuid.UUID
+    request_id: uuid.UUID
+    quote_id: uuid.UUID
+    customer_id: uuid.UUID
+    pro_id: uuid.UUID
+    pro_user_id: uuid.UUID
+    status: JobStatus
+    customer_price_cents: int
+    pro_payout_cents: int
+
+
+class JobCancellations:
+    """A job as its cancellation sees it, for the cancellations module (#69): the parties'
+    read, the read under the job's lock, and the one move a cancel makes, -> cancelled, through
+    the machine with the cancelling side as actor (409 from any status the table does not
+    allow). Built with the location store: a job on the way loses the pro's live position as
+    it leaves on_the_way (#350)."""
+
+    def __init__(
+        self, session: AsyncSession, pros: ProService, locations: JobLocationStore
+    ) -> None:
+        self._jobs = JobRepository(session)
+        self._pros = pros
+        self._machine = JobStateMachine(session, pros, locations)
+
+    async def of_party(self, user_id: uuid.UUID, job_id: uuid.UUID) -> JobCancelFacts | None:
+        """The job when `user_id` is its customer or its pro; None for a job of others and an
+        unknown one alike, through one statement. Unlocked."""
+        found = await self._jobs.get_with_pro_user(
+            job_id, self._pros.users(), participant=user_id, lock=False
+        )
+        return None if found is None else _cancel_facts(*found)
+
+    async def read(self, job_id: uuid.UUID) -> JobCancelFacts | None:
+        """The job, whoever takes part, unlocked; None for an unknown job."""
+        found = await self._jobs.get_with_pro_user(
+            job_id, self._pros.users(), participant=None, lock=False
+        )
+        return None if found is None else _cancel_facts(*found)
+
+    async def locked(self, job_id: uuid.UUID) -> JobCancelFacts | None:
+        """The job, its row locked FOR UPDATE until the caller's transaction ends (the lock
+        every status change takes), read as last committed; None for an unknown job."""
+        job = await self._jobs.get_for_update(job_id)
+        if job is None:
+            return None
+        pro_user_id = await self._pros.user_id_of(job.pro_id)
+        if pro_user_id is None:  # pragma: no cover - jobs.pro_id is a foreign key
+            return None
+        return _cancel_facts(job, pro_user_id)
+
+    async def cancelled(self, job_id: uuid.UUID, actor: UserAccount) -> None:
+        """-> cancelled, the cancelling side as actor: the machine's transition with its
+        job_events row. Flushes, never commits."""
+        await self._machine.transition(job_id, JobStatus.CANCELLED, actor)
+
+
+def _cancel_facts(job: Job, pro_user_id: uuid.UUID) -> JobCancelFacts:
+    return JobCancelFacts(
+        job_id=job.id,
+        request_id=job.request_id,
+        quote_id=job.quote_id,
+        customer_id=job.customer_id,
+        pro_id=job.pro_id,
+        pro_user_id=pro_user_id,
+        status=job.status,
+        customer_price_cents=job.customer_price_cents,
+        pro_payout_cents=job.pro_payout_cents,
+    )
 
 
 def _dispute_facts(job: Job, pro_user_id: uuid.UUID) -> JobDisputeFacts:

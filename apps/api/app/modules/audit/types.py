@@ -40,6 +40,13 @@ class AuditAction(StrEnum):
     # A staff member took a request, or let go of one (#81).
     REQUEST_CLAIM = "service_request.claim"
     REQUEST_RELEASE = "service_request.release"
+    # The BDC's actions on a request (#82): an internal note, the first contact, the category,
+    # a follow-up scheduled or done.
+    REQUEST_NOTE_ADD = "service_request.add_note"
+    REQUEST_MARK_CONTACTED = "service_request.mark_contacted"
+    REQUEST_CLASSIFY = "service_request.classify"
+    REQUEST_FOLLOWUP_SCHEDULE = "service_request.schedule_followup"
+    REQUEST_FOLLOWUP_DONE = "service_request.followup_done"
     # A staff read of a dispute: both sides' text and the photos' URLs (#76).
     DISPUTE_READ = "dispute.read"
     # An admin resolved a dispute: released, partly released or refunded money (#76). For a
@@ -51,6 +58,14 @@ class AuditAction(StrEnum):
     # What came of it when it did not settle the dispute: a call that failed or never
     # answered, a refund Stripe has not finished, failed or canceled (#433 round 1 B2).
     DISPUTE_REFUND_OUTCOME = "dispute.refund_outcome"
+    # Staff abandoned a dispute's refund Stripe refused for good, failed or canceled, once Stripe
+    # showed none that could still move money, so an admin may decide again (#434).
+    DISPUTE_REFUND_ABANDON = "dispute.refund_abandon"
+    # An abandon the operator confirmed that was refused, or could not finish (#450 round 1):
+    # its outcome code, so a confirmed attempt never leaves no trace.
+    DISPUTE_REFUND_ABANDON_REFUSED = "dispute.refund_abandon_refused"
+    # A job cancelled by its own customer or pro (#69): who, from which status, the split.
+    JOB_CANCEL = "job.cancel"
 
 
 class AuditEntityType(StrEnum):

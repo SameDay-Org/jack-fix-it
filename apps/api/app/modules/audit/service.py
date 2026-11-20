@@ -93,6 +93,21 @@ class AuditService:
             reason=operator.reason,
         )
 
+    async def active_staff(self, user_id: uuid.UUID) -> bool:
+        """Whether the user is an active agent or admin as last committed, read now and
+        share-locked until the caller's transaction ends, as active_admin: a staff member
+        demoted or suspended since they were authenticated is seen, and cannot be demoted
+        before the commit of what this guards (#82)."""
+        return await self.current_staff(user_id) is not None
+
+    async def current_staff(self, user_id: uuid.UUID) -> UserAccount | None:
+        """The user's account when they are an active agent or admin as last committed, read
+        now and share-locked until the caller's transaction ends (as active_staff); None for
+        anyone else. Its role is the one to decide with: the role a token was issued with can
+        be older than a demotion committed since (#499 round 1)."""
+        account = await self._users.get_current_shared(user_id)
+        return account if _active_staff(account) else None
+
     async def active_admin(self, user_id: uuid.UUID) -> bool:
         """Whether the user is an active admin as last committed, read now and share-locked
         until the caller's transaction ends: an admin demoted or suspended since an earlier
@@ -112,10 +127,13 @@ class AuditService:
     ) -> None:
         """Adds the row of what came of a money action an active admin already took, and that
         `record` audited when they took it (#433 round 1: a dispute's refund, which Stripe
-        finishes later), to the caller's transaction and flushes it. `actor_id` is that admin
-        (or the admin acting on it now), taken from the row that holds the action, never from a
-        request. No role check: the outcome happened whatever the admin's role is now, and
-        refusing to record it would leave money moved with no row."""
+        finishes later), or that a staff script checked them for when it started (#450 round 2:
+        a refund repair the operator confirmed and that was refused, the loss of their admin
+        role included), to the caller's transaction and flushes it. `actor_id` is that admin
+        (or the admin acting on it now), taken from the row that holds the action or the
+        script's checked operator, never from a request. No role check: the outcome happened
+        whatever the admin's role is now, and refusing to record it would leave money moved, or
+        a refused attempt, with no row. It authorizes nothing."""
         await self._audit.add(
             actor_user_id=actor_id,
             action=action.value,
@@ -124,6 +142,29 @@ class AuditService:
             before=before,
             after=after,
             reason=reason,
+        )
+
+    async def record_party_action(
+        self,
+        actor_id: uuid.UUID,
+        action: AuditAction,
+        entity: AuditEntity,
+        before: AuditState,
+        after: AuditState,
+    ) -> None:
+        """Adds the row of a money action a job's own customer or pro took on it (#69: a
+        cancel, with the refund and the fee it decides) to the caller's transaction and flushes
+        it, so a failure surfaces before the caller commits the change it describes. No role
+        check here: the caller proved, under the job's lock, that `actor_id` is that party.
+        Ids, statuses, amounts and codes only: never their free text."""
+        await self._audit.add(
+            actor_user_id=actor_id,
+            action=action.value,
+            entity_type=entity.type.value,
+            entity_id=entity.id,
+            before=before,
+            after=after,
+            reason=None,
         )
 
     async def record_staff_action(

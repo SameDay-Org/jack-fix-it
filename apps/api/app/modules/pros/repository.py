@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Select, Subquery, delete, func, select, tuple_, update
+from sqlalchemy import Select, Subquery, delete, exists, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -215,6 +215,10 @@ class ProProfileRepository:
             .values(payouts_enabled=enabled, updated_at=func.now())
         )
         return bool(result.rowcount)  # type: ignore[attr-defined]  # CursorResult of an UPDATE
+
+    async def receives_requests(self, pro_id: uuid.UUID) -> bool:
+        statement = select(exists().where(ProProfile.id == pro_id, *_RECEIVES_REQUESTS))
+        return bool(await self._session.scalar(statement))
 
     async def category_ids(self, pro_id: uuid.UUID) -> list[uuid.UUID]:
         statement = select(ProCategory.category_id).where(ProCategory.pro_id == pro_id)

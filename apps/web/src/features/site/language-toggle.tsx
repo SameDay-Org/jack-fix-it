@@ -12,6 +12,8 @@ type LanguageToggleProps = {
   locale: Locale;
   /** The address of this same page in each language. */
   paths: Record<Locale, string>;
+  /** The landmark's name when the page has a second switch (the footer's): names must differ. */
+  label?: string;
   className?: string;
 };
 
@@ -21,10 +23,10 @@ type LanguageToggleProps = {
  * crawler can follow it. Each shows its code and carries the language's own name for a screen
  * reader, in that language.
  */
-export function LanguageToggle({ t, locale, paths, className }: LanguageToggleProps) {
+export function LanguageToggle({ t, locale, paths, label, className }: LanguageToggleProps) {
   return (
     <nav
-      aria-label={t("site.language.label")}
+      aria-label={label ?? t("site.language.label")}
       className={cn("inline-flex shrink-0 rounded-pill bg-navy-700 p-1", className)}
     >
       {locales.map((value) => (

@@ -4,7 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { router, Slot, useLocalSearchParams } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { createElement } from "react";
-import { AppState, Text, type AppStateStatus } from "react-native";
+import { AppState, Dimensions, StyleSheet, Text, type AppStateStatus } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -17,6 +17,7 @@ import { METRICS } from "../../auth/__tests__/helpers";
 import type { RequestSummary } from "../../history/useMyRequests";
 import { HistoryScreen } from "../../history/HistoryScreen";
 import { CATEGORIES, newQueryClient, signedIn } from "../../home/__tests__/helpers";
+import { EMPTY_PROFILE } from "../../pro-profile/__tests__/helpers";
 import { HomeScreen } from "../../home/HomeScreen";
 import { freezeClock, NOW } from "../../quotes/__tests__/helpers";
 import { TabsLayout } from "../../tabs/TabsLayout";
@@ -144,6 +145,11 @@ function JobStub() {
   return <Text testID="job-stub">{`job ${id}`}</Text>;
 }
 
+function RequestStub() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  return <Text testID="request-stub">{`request ${id}`}</Text>;
+}
+
 const routes = {
   _layout: Root,
   "(app)/_layout": { default: AppLayout, unstable_settings: appSettings },
@@ -152,6 +158,7 @@ const routes = {
   "(app)/(tabs)/history": HistoryScreen,
   "(app)/(tabs)/account": AccountScreen,
   "(app)/requests/[id]/job": JobStub,
+  "(app)/requests/[id]/index": RequestStub,
 };
 
 type ApiOptions = { generation?: number; params?: { request_id?: string } };
@@ -193,7 +200,18 @@ async function expectBanner(line: string) {
   expect(screen.getByTestId("tab-bar-accessory")).toBeTruthy();
 }
 
+let dimensions: jest.SpyInstance;
+
+/** The system font scale the tree reads (`useWindowDimensions`, the tab bar's geometry). */
+function setFontScale(fontScale: number) {
+  const real = Dimensions.get("window");
+  dimensions.mockReturnValue({ ...real, fontScale });
+}
+
 beforeEach(() => {
+  // The one-line banner: below the accessory's two-line scale (Jest's own default is 2).
+  dimensions = jest.spyOn(Dimensions, "get");
+  setFontScale(1);
   freezeClock();
   client = newQueryClient();
   // RN's AppState mock keeps every listener ever added: only this test's trees are told.
@@ -208,16 +226,21 @@ beforeEach(() => {
       if (path === REQUESTS_PATH) return { items: mockApi.requests, next_cursor: null };
       // The Account tab counts a customer's saved addresses.
       if (path === "/v1/addresses") return { items: [] };
+      // The Account tab reads a pro's own profile: the card's verified seal comes from it.
+      if (path === "/v1/pros/me") return EMPTY_PROFILE;
       if (path === JOB_PATH) {
         const found = mockApi.jobs[options?.params?.request_id ?? ""];
         if (!found) throw new ApiError(404, "not_found");
         return found;
       }
+      // A pro's History lists their jobs (#467): none here.
+      if (path === "/v1/pros/me/jobs") return { items: [], next_cursor: null };
       return CATEGORIES;
     }) as unknown as typeof apiGet);
 });
 
 afterEach(async () => {
+  dimensions.mockRestore();
   jest.useRealTimers();
   await act(() => i18n.changeLanguage("en"));
 });
@@ -253,13 +276,51 @@ describe("the tabs' job banner (#64)", () => {
     expect(new Set(asked)).toEqual(new Set([requestId(1)]));
   });
 
-  it("is hidden with no accepted request, and no job is asked for", async () => {
+  // #486: one line at 2.0 cut "Dan is booked · Sun, 9 AM" to "Da… · Sun, 9 AM" on a 320 dp screen.
+  it.each([
+    [
+      "the sentence, then its time",
+      SCHEDULED,
+      ["Dan is booked", scheduledFor(SCHEDULED.scheduled_start_at)],
+    ],
+    ["a sentence alone, on up to two lines", ARRIVED, ["Dan has arrived"]],
+  ] as const)("at large text draws %s, in a two-line pill", async (_, active, lines) => {
+    setFontScale(2);
+    mockApi.requests = [request(1, "accepted")];
+    mockApi.jobs = { [requestId(1)]: active };
+    await renderRouter(routes, { initialUrl: "/" });
+
+    const banner = await screen.findByTestId("job-banner");
+    // Still read as one line.
+    expect(banner.props.accessibilityLabel).toBe(lines.join(" · "));
+    const drawn = within(screen.getByTestId("job-banner-lines")).getAllByText(/./);
+    expect(drawn.map((node) => [node.props.children].flat().join(""))).toEqual(lines);
+    // The sentence keeps one line above a time, both lines on its own; the time never wraps.
+    expect(drawn.map((node) => node.props.numberOfLines)).toEqual(
+      lines.length === 2 ? [1, 1] : [2],
+    );
+    expect(StyleSheet.flatten(screen.getByTestId("tab-bar-accessory").props.style).height).toBe(
+      104,
+    );
+  });
+
+  it("keeps one line below the large-text scale", async () => {
+    setFontScale(1.3);
+    mockApi.requests = [request(1, "accepted")];
+    mockApi.jobs = { [requestId(1)]: SCHEDULED };
+    await renderRouter(routes, { initialUrl: "/" });
+
+    await expectBanner(`Dan is booked · ${scheduledFor(SCHEDULED.scheduled_start_at)}`);
+    expect(screen.queryByTestId("job-banner-lines")).toBeNull();
+  });
+
+  it("is hidden with no accepted request, and no job is asked for (the open request's banner shows, #474)", async () => {
     mockApi.requests = [request(1, "quote_ready"), request(2, "finding_pro")];
     await renderRouter(routes, { initialUrl: "/" });
     await settled();
 
+    expect(await screen.findByTestId("request-banner")).toBeTruthy();
     expect(screen.queryByTestId("job-banner")).toBeNull();
-    expect(screen.queryByTestId("tab-bar-accessory")).toBeNull();
     expect(jobReads()).toBe(0);
   });
 
@@ -469,5 +530,121 @@ describe("the job banner's unread messages (#74)", () => {
 
     await expectBanner(LINE);
     expect(screen.queryByTestId("job-banner-unread")).toBeNull();
+  });
+});
+
+describe("the tabs' open request banner (#474)", () => {
+  /** History's own list: the reads without a generation, the request banner's source too. */
+  const listReads = () =>
+    calls().filter(([path, options]) => path === REQUESTS_PATH && options?.generation === undefined)
+      .length;
+
+  it("a request Jack is working on shows on every tab, and a tap opens that request", async () => {
+    mockApi.requests = [request(1, "finding_pro")];
+    await renderRouter(routes, { initialUrl: "/" });
+
+    const banner = await screen.findByTestId("request-banner");
+    expect(banner.props.accessibilityLabel).toBe("Jack is finding a pro");
+    expect(banner.props.accessibilityHint).toBe("Opens your request");
+    expect(screen.queryByTestId("request-banner-tail")).toBeNull();
+    expect(screen.getByTestId("tab-bar-accessory")).toBeTruthy();
+
+    await act(async () => fireEvent.press(screen.getByTestId("tab-account")));
+    expect(await screen.findByTestId("request-banner")).toBeTruthy();
+
+    await act(async () => fireEvent.press(screen.getByTestId("request-banner")));
+    expect(await screen.findByTestId("request-stub")).toBeTruthy();
+    expect(screen.getByTestId("request-stub").props.children).toBe(`request ${requestId(1)}`);
+  });
+
+  it("says Jack got the request while it is received or being reviewed", async () => {
+    mockApi.requests = [request(1, "reviewing")];
+    await renderRouter(routes, { initialUrl: "/" });
+
+    expect((await screen.findByTestId("request-banner")).props.accessibilityLabel).toBe(
+      "Jack got your request",
+    );
+  });
+
+  it("a quote ready wins over a newer request still waiting, and ends with compare in green", async () => {
+    mockApi.requests = [request(1, "finding_pro"), request(2, "quote_ready")];
+    await renderRouter(routes, { initialUrl: "/" });
+
+    const banner = await screen.findByTestId("request-banner");
+    expect(banner.props.accessibilityLabel).toBe("Quote ready · compare");
+    const tail = screen.getByTestId("request-banner-tail");
+    expect(tail.props.children).toBe(" · compare");
+    expect(tail.props.className).toContain("text-green-500");
+
+    await act(async () => fireEvent.press(banner));
+    expect((await screen.findByTestId("request-stub")).props.children).toBe(
+      `request ${requestId(2)}`,
+    );
+  });
+
+  it("an ongoing job's banner takes the place: the open request waits", async () => {
+    mockApi.requests = [request(1, "accepted"), request(2, "quote_ready")];
+    mockApi.jobs = { [requestId(1)]: ON_THE_WAY };
+    await renderRouter(routes, { initialUrl: "/" });
+
+    await screen.findByTestId("job-banner");
+    await settled();
+    await act(async () => {
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+    expect(screen.queryByTestId("request-banner")).toBeNull();
+  });
+
+  it("asks for the list only once the job's answer is in, so it never shows before a job banner", async () => {
+    let answerJobs: (page: { items: RequestSummary[]; next_cursor: null }) => void = () => {};
+    const held = new Promise<{ items: RequestSummary[]; next_cursor: null }>((resolve) => {
+      answerJobs = resolve;
+    });
+    const fallback = jest.mocked(apiGet).getMockImplementation();
+    jest
+      .mocked(apiGet)
+      .mockImplementation(((path: string, options?: ApiOptions) =>
+        path === REQUESTS_PATH && options?.generation !== undefined
+          ? held
+          : fallback?.(path as never, options as never)) as unknown as typeof apiGet);
+    mockApi.requests = [request(1, "quote_ready")];
+    await renderRouter(routes, { initialUrl: "/" });
+    await act(async () => {
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+
+    expect(listReads()).toBe(0);
+    expect(screen.queryByTestId("request-banner")).toBeNull();
+
+    await act(async () => answerJobs({ items: mockApi.requests, next_cursor: null }));
+    expect(await screen.findByTestId("request-banner")).toBeTruthy();
+    expect(listReads()).toBe(1);
+  });
+
+  it.each(["accepted", "expired", "cancelled"] as const)(
+    "a request %s (no job showing) leaves the bar alone",
+    async (status) => {
+      mockApi.requests = [request(1, status)];
+      await renderRouter(routes, { initialUrl: "/" });
+      await settled();
+      await act(async () => {
+        for (let i = 0; i < 10; i += 1) await Promise.resolve();
+      });
+
+      expect(screen.queryByTestId("request-banner")).toBeNull();
+      expect(screen.queryByTestId("tab-bar-accessory")).toBeNull();
+    },
+  );
+
+  it("a pro never asks for requests and gets no banner", async () => {
+    jest.mocked(useSession).mockReturnValue(signedIn({ role: "pro" }));
+    mockApi.requests = [request(1, "quote_ready")];
+    await renderRouter(routes, { initialUrl: "/history" });
+    await act(async () => {
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+
+    expect(screen.queryByTestId("request-banner")).toBeNull();
+    expect(calls().filter(([path]) => path === REQUESTS_PATH)).toHaveLength(0);
   });
 });
