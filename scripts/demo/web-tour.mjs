@@ -188,6 +188,11 @@ async function scrollTo(page, y, ms = 1600) {
           else done();
         };
         requestAnimationFrame(step);
+        // A hidden or minimised window (--headed) gets no animation frames: finish anyway.
+        setTimeout(() => {
+          window.scrollTo(0, start + span);
+          done();
+        }, duration + 1500);
       }),
     [y, ms],
   );
@@ -197,6 +202,21 @@ async function scrollTo(page, y, ms = 1600) {
 async function bring(page, locator, ms = 1200) {
   const y = await locator.evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
   await scrollTo(page, Math.max(0, y - 140), ms);
+}
+
+/** Whether `url` is a web address on a host the tour may not be on. */
+const elsewhere = (url) => {
+  const { protocol, hostname } = new URL(url);
+  return protocol.startsWith("http") && !ALLOWED.has(hostname);
+};
+
+/** Opens `url`, then makes sure the page ended on an allowed host. A redirect is not seen by
+ * the route guard (Playwright continues a redirected request without asking it), so where the
+ * page ended is checked before anything is typed or pressed there. */
+async function visit(page, url) {
+  const response = await page.goto(url);
+  if (elsewhere(page.url())) throw new Error(`left for ${new URL(page.url()).hostname}`);
+  return response;
 }
 
 /** A panel page is ready when its loading frame has given way to one h1. */
@@ -247,6 +267,13 @@ async function scene(id, story, title, run) {
     return route.continue();
   });
   const page = await context.newPage();
+  // A press or a redirect that takes the page to another host ends the scene there: the page
+  // is closed, so nothing more is typed or pressed, and the host is listed.
+  page.on("framenavigated", (frame) => {
+    if (frame !== page.mainFrame() || !elsewhere(frame.url())) return;
+    foreign.add(new URL(frame.url()).hostname);
+    page.close().catch(() => {});
+  });
   page.on("pageerror", (e) => issues.push(`pageerror: ${e.message}`));
   page.on("console", (m) => m.type() === "error" && issues.push(`console: ${m.text()}`));
   page.on(
@@ -284,7 +311,7 @@ async function scene(id, story, title, run) {
 async function signIn() {
   const password = readFileSync(PASSWORD_FILE, "utf8").trim();
   await scene("login", "5", "Staff sign-in", async (page, still) => {
-    await page.goto(`${base}/admin/login`);
+    await visit(page, `${base}/admin/login`);
     await beat(page, 800);
     await type(page, page.locator('input[name="email"]'), ADMIN, 45);
     await page.locator('input[name="password"]').click();
@@ -303,7 +330,7 @@ async function signIn() {
 const SCENES = {
   // Storyboard 5 (first half) and 14 (queue actions).
   async queue(page, still) {
-    await page.goto(`${base}/admin/queue`);
+    await visit(page, `${base}/admin/queue`);
     await ready(page);
     await beat(page, 1200);
     await still("new");
@@ -346,7 +373,7 @@ const SCENES = {
 
   // Storyboard 5 (second half): the waiting pro, documents one by one, then the pro.
   async pros(page, still) {
-    await page.goto(`${base}/admin/pros`);
+    await visit(page, `${base}/admin/pros`);
     await ready(page);
     await beat(page, 1200);
     let card = page.locator('main a[href^="/admin/pros/"]', { hasText: WAITING_PRO }).first();
@@ -365,7 +392,7 @@ const SCENES = {
       const href = await file.getAttribute("href");
       await glide(page, file);
       await beat(page, 500);
-      const response = await page.goto(new URL(href, base).href);
+      const response = await visit(page, new URL(href, base).href);
       const type = response?.headers()["content-type"] ?? "";
       if (type.startsWith("image/")) {
         await beat(page, 2500);
@@ -399,7 +426,7 @@ const SCENES = {
 
   // Storyboard 14: support.
   async support(page, still) {
-    await page.goto(`${base}/admin/support`);
+    await visit(page, `${base}/admin/support`);
     await ready(page);
     await beat(page, 1200);
     const ticket = page.locator('main a[href^="/admin/support/"]').first();
@@ -419,7 +446,7 @@ const SCENES = {
 
   // Storyboard 14: KPIs (range, hover, keyboard).
   async kpis(page, still) {
-    await page.goto(`${base}/admin/kpis`);
+    await visit(page, `${base}/admin/kpis`);
     await ready(page);
     await beat(page, 1500);
     await still("30d");
@@ -451,7 +478,7 @@ const SCENES = {
 
   // Storyboard 13: the dispute, both sides, a partial, the confirmation.
   async disputes(page, still) {
-    await page.goto(`${base}/admin/disputes`);
+    await visit(page, `${base}/admin/disputes`);
     await ready(page);
     await beat(page, 1300);
     const link = DISPUTE_CODE
@@ -508,7 +535,7 @@ const SCENES = {
   // Storyboard 1: the public site.
   async site(page, still) {
     for (const path of ["/", "/app", "/for-pros"]) {
-      await page.goto(`${base}${path}`);
+      await visit(page, `${base}${path}`);
       await page.waitForLoadState("networkidle");
       await beat(page, 1500);
       await still(path === "/" ? "landing" : path.slice(1));
@@ -523,7 +550,7 @@ const SCENES = {
   // The Spanish variants: heroes only.
   async "site-es"(page, still) {
     for (const path of ["/es", "/es/app", "/es/for-pros"]) {
-      await page.goto(`${base}${path}`);
+      await visit(page, `${base}${path}`);
       await page.waitForLoadState("networkidle");
       await beat(page, 2200);
       await still(path.slice(1).replace("/", "-"));
@@ -532,7 +559,7 @@ const SCENES = {
 
   // Storyboard 15: the closing shot.
   async closing(page, still) {
-    await page.goto(`${base}/`);
+    await visit(page, `${base}/`);
     await page.waitForLoadState("networkidle");
     await page.mouse.move(VIEW.width + 50, VIEW.height + 50); // the cursor off the frame
     await beat(page, 5000);
