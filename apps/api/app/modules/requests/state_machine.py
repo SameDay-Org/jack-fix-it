@@ -77,7 +77,7 @@ def _require_clean(session: AsyncSession, request: ServiceRequest) -> None:
 _IN_FAILED_TRANSACTION: Final = "25P02"
 # The statuses are part of this service's interface: other modules take RequestStatus from here,
 # never from requests.models (ADR 0003).
-__all__ = ["LockedRequest", "RequestStateMachine", "RequestStatus"]
+__all__ = ["LockedRequest", "RequestStateMachine", "RequestStatus", "staff_moves"]
 
 _ACTOR_KIND_BY_ROLE: Final = {
     UserRole.CUSTOMER: ActorKind.CUSTOMER,
@@ -85,6 +85,12 @@ _ACTOR_KIND_BY_ROLE: Final = {
     UserRole.ADMIN: ActorKind.STAFF,
     # Pros: no kind, so every edge is a 403.
 }
+
+
+def staff_moves(status: RequestStatus) -> tuple[RequestStatus, ...]:
+    """The statuses staff may move a request in `status` to, by the transitions table (#82),
+    in the enum's order."""
+    return tuple(to for to in RequestStatus if ActorKind.STAFF in TRANSITIONS.get((status, to), ()))
 
 
 @dataclass(frozen=True)

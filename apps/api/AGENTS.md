@@ -94,6 +94,20 @@ rules apply.
 - **Claim / release** change `assigned_agent_id` only, under the request's row lock, each with
   its `audit_log` row (`record_staff_action`). They never set `first_contact_at` and never
   touch the status (`RequestStateMachine`).
+- **Hold (#82).** Asking the customer for more information parks the request in `reviewing`
+  with `info_requested_at` set; the re-dispatch (#478, the sweep and the kick) leaves a held
+  request alone. Resume, a status change and a manual assignment release it. Whatever else
+  moves a held request on releases the hold in the same transaction.
+- **Status by hand (#82).** Only along the state machine's staff edges, never into
+  `finding_pro` (dispatch owns it: the offer and the move go together) and nothing out of
+  `accepted` (the payment and its cancellation own it). `ops/actions.py::status_changes` is the
+  one list; the card's `allowed_status_changes` reads it.
+- **Manual assignment (#82).** `DispatchService.assign` is the only way to offer a request to a
+  pro staff chose: it asks what the automatic dispatch asks (approved, payouts enabled, the
+  category, an active area with the ZIP, an active pro account), answers one refusal per
+  reason (each its own 409 in `ops/errors.py`), and never sends a request to a pro twice. No
+  other module inserts a `request_dispatches` row. The eligible list (`eligible-pros`) names
+  pros by first name and last initial only.
 
 ## Live position (#350)
 
