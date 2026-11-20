@@ -91,12 +91,17 @@ class FakeSender:
     error: Exception | None = None
     on_send: Callable[[], None] | None = None
 
-    async def send(self, to: str, subject: str, text: str, html: str) -> None:
+    keys: list[str | None] = field(default_factory=list)
+
+    async def send(
+        self, to: str, subject: str, text: str, html: str, *, idempotency_key: str | None = None
+    ) -> None:
         if self.on_send:
             self.on_send()
         if self.error:
             raise self.error
         self.sent.append(SentEmail(to, subject, text, html))
+        self.keys.append(idempotency_key)
 
 
 def settings_with(**overrides: object) -> Settings:

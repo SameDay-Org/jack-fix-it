@@ -24,6 +24,7 @@ from app.config import Settings
 from app.db import get_session
 from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.integrations.stripe_payments import (
+    CardFacts,
     CreatedCustomer,
     FoundPaymentIntents,
     PaymentIntentFacts,
@@ -161,6 +162,9 @@ class FakeStripePayments:
     cancels: list[tuple[str, str]] = field(default_factory=list)
     cancel_refused: bool = False
     on_cancel_intent: Callable[[], Awaitable[None]] | None = None
+    # The card each PaymentIntent was paid with, as card_of reads it (#62); none by default.
+    cards: dict[str, CardFacts] = field(default_factory=dict)
+    card_reads: list[str] = field(default_factory=list)
 
     def add_intent(self, facts: PaymentIntentFacts) -> None:
         """An intent Stripe holds that no create of this run answered with."""
@@ -278,6 +282,12 @@ class FakeStripePayments:
             await self.on_cancel_intent()
         self.cancels.append((payment_intent_id, idempotency_key))
         return not self.cancel_refused
+
+    async def card_of(self, payment_intent_id: str) -> CardFacts | None:
+        if "card_of" in self.errors:
+            raise self.errors["card_of"]
+        self.card_reads.append(payment_intent_id)
+        return self.cards.get(payment_intent_id)
 
 
 def _fake_stripe(request: Request) -> StripePayments:
