@@ -1,14 +1,14 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { uuid } from "expo";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { KeyboardAvoidingView, ScrollView, Text, View } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { sessionGeneration } from "@/api";
-import { Button, ChoiceCard, Input, Notice, Screen, TextSkeleton } from "@/components/ui";
+import { Button, ChoiceCard, Input, Notice, Screen } from "@/components/ui";
 import { announce } from "@/components/ui/focus";
 import { BackButton } from "@/features/auth/components/BackButton";
 import { isJobRefusal, jobHref, useCustomerJob } from "@/features/jobs/api";
@@ -29,6 +29,7 @@ import {
   type Cancellation,
 } from "./api";
 import { costStatement, moneyLines } from "./CancellationStatus";
+import { CancelHeader, CancelSkeleton, CancelState } from "./CancelState";
 import { NOTE_MAX } from "./config";
 
 const TALK_TO_JACK = "/help/contact";
@@ -68,19 +69,19 @@ export function CancelJobScreen() {
   let body: ReactNode;
   if (!valid || (job.data === undefined && isJobRefusal(job.error))) {
     body = (
-      <State
-        requestId={id}
+      <CancelState
+        back={jobHref(id)}
         title={t("jobs.notFound.title")}
         body={t("jobs.notFound.body")}
         testID="cancel-gone"
       >
         <Button label={t("jobs.notFound.home")} onPress={() => router.dismissTo("/")} />
-      </State>
+      </CancelState>
     );
   } else if (cancelled) {
     body = (
-      <State
-        requestId={id}
+      <CancelState
+        back={jobHref(id)}
         title={t(sentHere ? "cancellation.sent.title" : "jobs.headline.cancelled")}
         body={sentHere ? t("cancellation.sent.body") : ""}
         testID="cancel-sent"
@@ -91,13 +92,13 @@ export function CancelJobScreen() {
           </Text>
         ))}
         <Button label={t("cancellation.sent.back")} size="lg" onPress={back} testID="cancel-back" />
-      </State>
+      </CancelState>
     );
   } else if (job.data && (!cancellable || refusal)) {
     const copy = refusal === "needsReview" ? "review" : "closed";
     body = (
-      <State
-        requestId={id}
+      <CancelState
+        back={jobHref(id)}
         title={t(`cancellation.${copy}.title`)}
         body={t(`cancellation.${copy}.body`)}
         testID="cancel-closed"
@@ -108,7 +109,7 @@ export function CancelJobScreen() {
           testID="cancel-talk"
         />
         <Button label={t("cancellation.sent.back")} variant="secondary" onPress={back} />
-      </State>
+      </CancelState>
     );
   } else if (job.data && preview.data && (sending || !failed)) {
     body = (
@@ -130,8 +131,8 @@ export function CancelJobScreen() {
   } else if (job.isError || preview.isError) {
     const copy = limited ? "busy" : "loadFailed";
     body = (
-      <State
-        requestId={id}
+      <CancelState
+        back={jobHref(id)}
         title={t(`cancellation.${copy}.title`)}
         body={t(`cancellation.${copy}.body`)}
         announced
@@ -144,64 +145,16 @@ export function CancelJobScreen() {
           onPress={job.data ? reread : () => void job.refetch()}
           testID="cancel-retry"
         />
-      </State>
+      </CancelState>
     );
   } else {
-    body = <FormSkeleton requestId={id} />;
+    body = <CancelSkeleton back={jobHref(id)} />;
   }
 
   return (
     <Screen bar="light" testID="cancel-screen">
       {body}
     </Screen>
-  );
-}
-
-function Header({ title, intro }: { title: string; intro: string }) {
-  return (
-    <View className="gap-2">
-      <Text accessibilityRole="header" className="text-title-1 text-navy-900">
-        {title}
-      </Text>
-      {intro ? <Text className="text-body text-gray-500">{intro}</Text> : null}
-    </View>
-  );
-}
-
-type StateProps = {
-  requestId: string;
-  title: string;
-  body: string;
-  children: ReactNode;
-  /** Said aloud when it shows: it can take the place of the form the reader was in. */
-  announced?: boolean;
-  testID: string;
-};
-
-/** A state of the whole screen: what happened, then what the customer can do. */
-function State({ requestId, title, body, children, announced = false, testID }: StateProps) {
-  useEffect(() => {
-    if (announced) announce(`${title}. ${body}`);
-  }, [announced, title, body]);
-  return (
-    <ScrollView contentContainerClassName="flex-grow gap-6 px-4 pb-6 pt-2" testID={testID}>
-      <BackButton fallbackHref={jobHref(requestId)} />
-      <Header title={title} intro={body} />
-      <View className="gap-4">{children}</View>
-    </ScrollView>
-  );
-}
-
-function FormSkeleton({ requestId }: { requestId: string }) {
-  return (
-    <View className="gap-6 px-4 pt-2" testID="cancel-loading">
-      <BackButton fallbackHref={jobHref(requestId)} />
-      <TextSkeleton type="title-1" width="60%" />
-      <TextSkeleton type="body" sample="Tell us why, and check what it costs." />
-      {CANCEL_REASONS.map((reason) => (
-        <TextSkeleton key={reason} type="headline" width="70%" />
-      ))}
-    </View>
   );
 }
 
@@ -315,7 +268,7 @@ function CancelForm({
         testID="cancel-form"
       >
         <BackButton fallbackHref={jobHref(requestId)} />
-        <Header title={t("cancellation.title")} intro={t("cancellation.intro")} />
+        <CancelHeader title={t("cancellation.title")} intro={t("cancellation.intro")} />
 
         <View
           className="gap-3"
