@@ -300,6 +300,24 @@
         "body": "Obtén la app y dile a Jack qué necesitas.",
         "getApp": "Obtén la app"
       }
+    },
+    "city": {
+      "meta": {
+        "title": "{{name}} en {{city}} | Jack Fix It",
+        "description": "{{name}} en {{city}}: cuéntale a Jack el trabajo, compara presupuestos de precio fijo y síguelo en la app."
+      },
+      "hero": {
+        "title": "{{name}} en {{city}}"
+      },
+      "areas": {
+        "title": "Dónde trabaja Jack en {{city}}",
+        "body": "Jack atiende estos códigos postales en {{city}}. La app revisa el tuyo cuando pides un trabajo.",
+        "zipsLabel": "Códigos postales atendidos",
+        "others": "{{name}} en otras ciudades"
+      },
+      "more": {
+        "title": "Más de Jack en {{city}}"
+      }
     }
   },
   "showcase": {
