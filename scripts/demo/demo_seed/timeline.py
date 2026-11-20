@@ -59,6 +59,8 @@ CASE_TABLES: Final[Mapping[str, str]] = {
     "disputes": _OF_JOB,
     "transfers": _OF_JOB,
     "refunds": _OF_JOB,
+    # A job cancelled by its customer or its pro (#69).
+    "job_cancellations": _OF_JOB,
     "support_tickets": _OF_JOB,
     "dispute_photos": (
         "dispute_id IN (SELECT id FROM disputes WHERE job_id IN "
