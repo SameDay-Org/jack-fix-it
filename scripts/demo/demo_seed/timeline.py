@@ -49,6 +49,10 @@ CASE_TABLES: Final[Mapping[str, str]] = {
     "addresses": "id IN (SELECT address_id FROM service_requests WHERE id = :request)",
     "request_media": "request_id = :request",
     "request_dispatches": "request_id = :request",
+    # The BDC's notes and follow-ups on a request (#82): none seeded today, dated if a step
+    # writes one.
+    "request_notes": "request_id = :request",
+    "request_followups": "request_id = :request",
     "quotes": "request_id = :request",
     "payments": "request_id = :request",
     "jobs": "request_id = :request",
