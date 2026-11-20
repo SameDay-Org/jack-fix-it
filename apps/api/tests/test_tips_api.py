@@ -1464,3 +1464,50 @@ async def test_staff_recovery_is_refused_and_changes_nothing(
     assert after is not None
     assert after.payment_intent_requested_at == before
     assert [r for r in await audit_rows(db_session) if r.action == "tip.allow_new_intent"] == []
+
+
+# An intent of a closed attempt (#510 round 2, B2): an amount then "No tip" keeps the attempt's
+# number with 0 cents, while the canceled intent keeps the amount it was made with. Its events
+# are an earlier attempt's: the amount is compared only for an intent the tip holds or adopts.
+
+
+@pytest.mark.parametrize("stripe_status", ["canceled", "succeeded"])
+async def test_the_event_of_an_amount_replaced_by_no_tip_is_not_a_mismatch(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+    caplog: pytest.LogCaptureFixture,
+    stripe_status: str,
+) -> None:
+    """12 %, then "No tip": the choice cancels the first intent and Stripe sends its
+    payment_intent.canceled, an everyday history: nothing changes. Had Stripe taken the payment
+    before the cancel (succeeded), the money is contained and flagged for staff, as an earlier
+    attempt's is. Never a mismatch."""
+    from app.modules.tips.webhooks import tip_event_handler
+    from app.modules.webhooks.events import AfterCommit
+    from tests.test_tip_webhooks import CANCELED, SUCCEEDED, event
+
+    job = await confirmed(db_session, world)
+    assert (await choose(db_client, world, job, PERCENT_12)).status_code == 200
+    first = await tip_row(db_session, job)
+    assert first is not None
+    intent = first.stripe_payment_intent_id
+    assert intent is not None
+    assert (await choose(db_client, world, job, {"choice": "none"})).status_code == 200
+    if stripe_status == "succeeded":
+        stripe_fake.tip_statuses[intent] = "succeeded"
+    event_type = CANCELED if stripe_status == "canceled" else SUCCEEDED
+
+    with caplog.at_level(logging.INFO):
+        await tip_event_handler(lambda: stripe_fake)(
+            db_session,
+            event(event_type, intent=intent, payload_status=stripe_status),
+            AfterCommit(),
+        )
+
+    row = await tip_row(db_session, job)
+    assert row is not None
+    assert (row.status, row.attempt, row.amount_cents) == (TipStatus.DECLINED, 1, 0)
+    assert "tip_event_mismatch" not in [record.getMessage() for record in caplog.records]
+    assert (row.late_success_at is not None) is (stripe_status == "succeeded")

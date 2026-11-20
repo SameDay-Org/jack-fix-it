@@ -120,20 +120,27 @@ class TipReconciler:
                 logger.warning("tip_event_unknown_intent", extra=ids)
                 return None
         facts = await self._read(intent_id)  # under the tip's lock: Stripe's state now
-        await self._check(facts, tip, ids)
         current = facts.attempt == str(tip.attempt)
-        if current and tip.stripe_payment_intent_id == intent_id:
-            return await self._settle(tip, facts, ids)
-        if (
+        holds = current and tip.stripe_payment_intent_id == intent_id
+        adopting = (
             current
             and tip.stripe_payment_intent_id is None
             and tip.payment_intent_requested_at is not None
             and tip.status in UNPAID_STATUSES
-        ):
+        )
+        # The amount is compared only while the tip holds the intent or adopts it for a lost
+        # create: an intent of a closed attempt keeps the amount it was made with (#510 round
+        # 2: an amount, then "No tip", keeps the attempt's number with 0 cents).
+        await self._check(facts, tip, ids, amount=holds or adopting)
+        if holds:
+            return await self._settle(tip, facts, ids)
+        if adopting:
             if not await self._adopt(tip, facts, ids):
                 return None
             return await self._settle(tip, facts, ids)
-        if not current:
+        if not current or tip.status not in UNPAID_STATUSES:
+            # A closed attempt's intent: an earlier attempt's, or this number's once nothing
+            # of it is to pay ("No tip", canceled, paid by another intent).
             if facts.status == "succeeded":
                 await self._contain(tip, ids)
             else:
@@ -147,15 +154,17 @@ class TipReconciler:
         # Stripe failing raises (StripeCallError): the event is rolled back and run again.
         return await self._stripe.tip_intent(intent_id)
 
-    async def _check(self, facts: TipIntentFacts, tip: Tip, ids: dict[str, str]) -> None:
-        """The intent is this locked tip's: its kind, tip, job, customer and currency, and the
-        current attempt's amount when it is that attempt's."""
+    async def _check(
+        self, facts: TipIntentFacts, tip: Tip, ids: dict[str, str], *, amount: bool
+    ) -> None:
+        """The intent is this locked tip's: its kind, tip, job, customer and currency, and,
+        with `amount`, the current attempt's amount (an intent the tip holds or adopts)."""
         differ = mismatches(
             facts,
             tip_id=tip.id,
             job_id=tip.job_id,
             attempt=tip.attempt,
-            amount_cents=tip.amount_cents,
+            amount_cents=tip.amount_cents if amount else None,
             currency=tip.currency,
             stripe_customer_id=await self._users.stripe_customer_id(tip.customer_id),
         )
