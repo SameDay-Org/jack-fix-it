@@ -1961,7 +1961,7 @@
   "cancellation": {
     "entry": "Cancel job",
     "entryFailed": "We couldn't check if this job can be cancelled.",
-    "entryBusy": "Checking if this job can be cancelled needs a moment.",
+    "entryBusy": "We need a moment to check if this job can be cancelled.",
     "retry": "Try again",
     "title": "Cancel this job?",
     "intro": "Tell us why, and check what it costs. Your pro will be told.",
@@ -2013,7 +2013,7 @@
     },
     "busy": {
       "title": "Give it a moment",
-      "body": "We can't show what cancelling costs right now. Wait a moment, then try again."
+      "body": "We can't show what cancelling costs right now. Try again shortly."
     },
     "failure": {
       "offline": {
@@ -2033,8 +2033,8 @@
         "body": "Something in it couldn't be accepted. Check it and try again."
       },
       "rateLimited": {
-        "title": "Give it a moment",
-        "body": "That was a few tries in a row. Your choice is still here: try again in a few minutes."
+        "title": "That's a lot of tries at once",
+        "body": "Nothing was cancelled, and your choice is still here. Try again a little later."
       },
       "failed": {
         "title": "That didn't go through",

@@ -1961,7 +1961,7 @@
   "cancellation": {
     "entry": "Cancelar trabajo",
     "entryFailed": "No pudimos comprobar si este trabajo se puede cancelar.",
-    "entryBusy": "Comprobar si este trabajo se puede cancelar necesita un momento.",
+    "entryBusy": "Necesitamos un momento para comprobar si este trabajo se puede cancelar.",
     "retry": "Reintentar",
     "title": "¿Cancelar este trabajo?",
     "intro": "Cuéntanos por qué y revisa cuánto cuesta. Le avisaremos a tu profesional.",
@@ -2013,7 +2013,7 @@
     },
     "busy": {
       "title": "Espera un momento",
-      "body": "Ahora no podemos mostrar cuánto cuesta cancelar. Espera un momento e inténtalo de nuevo."
+      "body": "Ahora no podemos mostrar cuánto cuesta cancelar. Inténtalo de nuevo en breve."
     },
     "failure": {
       "offline": {
@@ -2033,8 +2033,8 @@
         "body": "Algo en ella no se pudo aceptar. Revísala e inténtalo de nuevo."
       },
       "rateLimited": {
-        "title": "Espera un momento",
-        "body": "Fueron varios intentos seguidos. Tu elección sigue aquí: inténtalo de nuevo en unos minutos."
+        "title": "Son muchos intentos seguidos",
+        "body": "No se canceló nada y tu elección sigue aquí. Inténtalo de nuevo un poco más tarde."
       },
       "failed": {
         "title": "No se pudo completar",

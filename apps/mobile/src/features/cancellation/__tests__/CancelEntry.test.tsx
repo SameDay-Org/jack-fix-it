@@ -128,7 +128,7 @@ describe("Cancel job on the job screen", () => {
     answer = refuse(429, "rate_limited");
     await renderEntry();
     expect(await screen.findByTestId("job-cancel-check-failed")).toHaveTextContent(
-      "Checking if this job can be cancelled needs a moment. Try again",
+      "We need a moment to check if this job can be cancelled. Try again",
     );
     expect(screen.queryByTestId("job-cancel")).toBeNull();
     expect(screen.queryByText(/rate_limited|API request failed/)).toBeNull();
@@ -138,24 +138,28 @@ describe("Cancel job on the job screen", () => {
     expect(reads()).toBe(2);
   });
 
-  it("is taken back when a later read is asked to wait (429), and returns with the next answer", async () => {
-    const first = Date.now();
-    const rendered = await renderEntry(SCHEDULED, first);
-    expect(await screen.findByTestId("job-cancel")).toBeTruthy();
-    // The pro set off: the cost is read again and the API asks to wait. The earlier answer
-    // (free) says nothing of the cost now.
-    const onTheWay: CustomerJob = { ...SCHEDULED, status: "on_the_way" };
-    answer = refuse(429, "rate_limited");
-    await rendered.rerender(entry(onTheWay, first + 1_000));
-    expect(await screen.findByTestId("job-cancel-check-failed")).toHaveTextContent(
-      /needs a moment/,
-    );
-    expect(screen.queryByTestId("job-cancel")).toBeNull();
-    answer = respond({ ...FREE, job_status: "on_the_way", fee_applies: true, fee_cents: 1_234 });
-    await rendered.rerender(entry(onTheWay, first + 2_000));
-    expect(await screen.findByTestId("job-cancel")).toBeTruthy();
-    expect(reads()).toBe(3);
-  });
+  it.each([
+    [429, "rate_limited", "We need a moment to check if this job can be cancelled. Try again"],
+    [503, "unavailable", "We couldn't check if this job can be cancelled. Try again"],
+  ])(
+    "is taken back when a later read fails (%s), and returns with the next answer",
+    async (status, code, line) => {
+      const first = Date.now();
+      const rendered = await renderEntry(SCHEDULED, first);
+      expect(await screen.findByTestId("job-cancel")).toBeTruthy();
+      // The pro set off: the cost is read again and the read fails. The earlier answer (free)
+      // says nothing of the cost now.
+      const onTheWay: CustomerJob = { ...SCHEDULED, status: "on_the_way" };
+      answer = refuse(status, code);
+      await rendered.rerender(entry(onTheWay, first + 1_000));
+      expect(await screen.findByTestId("job-cancel-check-failed")).toHaveTextContent(line);
+      expect(screen.queryByTestId("job-cancel")).toBeNull();
+      answer = respond({ ...FREE, job_status: "on_the_way", fee_applies: true, fee_cents: 1_234 });
+      await rendered.rerender(entry(onTheWay, first + 2_000));
+      expect(await screen.findByTestId("job-cancel")).toBeTruthy();
+      expect(reads()).toBe(3);
+    },
+  );
 
   it("reads a failed preview again with the next answer for the job", async () => {
     answer = refuse(503, "unavailable");

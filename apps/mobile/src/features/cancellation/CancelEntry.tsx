@@ -17,16 +17,17 @@ type CancelEntryProps = {
 /**
  * "Cancel job", a quiet text action among the job's actions, shown only while the API's preview
  * answers (`cancel-preview`): never on the phone's own reckoning. While the preview is unknown
- * the action is left out (loading, a refusal: the job cannot be cancelled now); a read that failed
- * says so with a retry, and is read again with each new answer for the job. The job moving on
- * (the pro set off: cancelling now costs a fee) reads it again too. A read the API asked to wait
- * for (429) counts as failed even over an earlier answer: the action comes back with the next one.
+ * the action is left out (loading, a refusal: the job cannot be cancelled now). A read that
+ * failed, over an earlier answer or not, says so with a retry (the API asked to wait, a 429, in
+ * its own words) and is read again with each new answer for the job, so the action comes back on
+ * its own once the API answers. The job moving on (the pro set off: cancelling now costs a fee)
+ * reads it again too.
  */
 export function CancelEntry({ job, updatedAt, onPress }: CancelEntryProps) {
   const { t } = useTranslation();
   const { data, error, isError, isFetching, refetch } = useCancelPreview(job.id);
-  const limited = isError && isRateLimited(error);
-  const failed = isError && refusalOf(error) === null && (data === undefined || limited);
+  const failed = isError && refusalOf(error) === null;
+  const limited = failed && isRateLimited(error);
 
   const statusSeen = useRef(job.status);
   useEffect(() => {

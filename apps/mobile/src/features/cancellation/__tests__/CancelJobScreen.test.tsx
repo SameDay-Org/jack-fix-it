@@ -100,8 +100,11 @@ const cancellation = (overrides: Partial<Cancellation> = {}): Cancellation => ({
 let fetchMock: FetchMock;
 let client: QueryClient;
 let job: CustomerJob;
-/** What the preview answers: the API's numbers, or a refusal / failure as [status, code]. */
-let preview: CancelPreview | [number, string];
+/**
+ * What the preview answers: the API's numbers, a refusal / failure as [status, code], or an error
+ * the request throws (no connection).
+ */
+let preview: CancelPreview | [number, string] | Error;
 /** One entry per cancel the app sent; the test answers each. */
 let posts: Answer[];
 
@@ -129,6 +132,14 @@ async function renderScreen() {
 }
 
 const confirm = () => fireEvent.press(screen.getByTestId("cancel-confirm"));
+const announced = () => jest.spyOn(AccessibilityInfo, "announceForAccessibilityWithOptions");
+/** The job screen underneath reads the shared preview again (a status change, a retry). */
+async function previewReadElsewhere(): Promise<void> {
+  await act(async () => {
+    await client.refetchQueries({ queryKey: ["cancel-preview"] });
+    await settle();
+  });
+}
 const pick = (reason = "The pro is late") =>
   fireEvent.press(screen.getByRole("radio", { name: reason }));
 
@@ -155,6 +166,7 @@ beforeEach(async () => {
       return post.promise;
     }
     if (path === PREVIEW_PATH) {
+      if (preview instanceof Error) throw preview;
       return Array.isArray(preview)
         ? errorResponse(preview[0], preview[1])
         : jsonResponse(200, preview);
@@ -403,27 +415,41 @@ describe("CancelJobScreen", () => {
     expect(screen.queryByText(/validation_error|internal_error|API request failed/)).toBeNull();
   });
 
-  it("says when it could not load, and reads the preview again on a tap", async () => {
-    preview = [503, "unavailable"];
-    await renderScreen();
-    expect(await screen.findByTestId("cancel-load-failed")).toBeTruthy();
-    expect(screen.queryByTestId("cancel-confirm")).toBeNull();
-    preview = FREE;
-    await fireEvent.press(screen.getByTestId("cancel-retry"));
-    expect(await screen.findByTestId("cancel-form")).toBeTruthy();
-    expect(previewReads()).toBe(2);
-  });
+  it.each([
+    ["an error answer", [503, "unavailable"] as [number, string]],
+    ["no connection", new TypeError("Network request failed")],
+  ])(
+    "says when it could not load (%s) in its own words, and reads the job and the preview again on a tap",
+    async (_, failure) => {
+      preview = failure;
+      await renderScreen();
+      expect(await screen.findByTestId("cancel-load-failed")).toBeTruthy();
+      expect(screen.getByText("We couldn't load this")).toBeTruthy();
+      expect(screen.getByText("Check your connection and try again.")).toBeTruthy();
+      expect(screen.queryByText("Give it a moment")).toBeNull();
+      expect(screen.queryByTestId("cancel-confirm")).toBeNull();
+      const jobs = jobReads();
+      preview = FREE;
+      await fireEvent.press(screen.getByTestId("cancel-retry"));
+      expect(await screen.findByTestId("cancel-form")).toBeTruthy();
+      expect(previewReads()).toBe(2);
+      expect(jobReads()).toBe(jobs + 1);
+    },
+  );
 
   it("opened while the API asks to wait (429), says so calmly, offers no cancel, and reads again on a tap", async () => {
+    const announce = announced();
     preview = [429, "rate_limited"];
     await renderScreen();
     expect(await screen.findByTestId("cancel-load-failed")).toBeTruthy();
     expect(screen.getByText("Give it a moment")).toBeTruthy();
     expect(
-      screen.getByText(
-        "We can't show what cancelling costs right now. Wait a moment, then try again.",
-      ),
+      screen.getByText("We can't show what cancelling costs right now. Try again shortly."),
     ).toBeTruthy();
+    expect(announce).toHaveBeenCalledWith(
+      "Give it a moment. We can't show what cancelling costs right now. Try again shortly.",
+      { queue: true },
+    );
     expect(screen.queryByTestId("cancel-form")).toBeNull();
     expect(screen.queryByTestId("cancel-confirm")).toBeNull();
     expect(screen.queryByText(/rate_limited|API request failed|Check your connection/)).toBeNull();
@@ -437,17 +463,21 @@ describe("CancelJobScreen", () => {
     await renderScreen();
     await pick();
     await fireEvent.changeText(screen.getByTestId("cancel-note"), "Running two hours late.");
+    expect(screen.getByTestId("cancel-confirm")).toHaveTextContent("Cancel the job");
     await confirm();
     const reads = previewReads();
     await answer(0, errorResponse(429, "rate_limited", { "Retry-After": "540" }));
     expect(screen.getByTestId("cancel-failure")).toHaveTextContent(
-      /Give it a moment.*That was a few tries in a row\. Your choice is still here: try again in a few minutes\./,
+      /That's a lot of tries at once.*Nothing was cancelled, and your choice is still here\. Try again a little later\./,
     );
     expect(screen.queryByText(/rate_limited|API request failed|540/)).toBeNull();
-    expect(screen.getByText("Try again")).toBeTruthy();
+    expect(screen.getByTestId("cancel-confirm")).toHaveTextContent("Try again");
     // The form stands as it was: nothing is read again, and the cost shown is the one agreed to.
     expect(screen.getByTestId("cancel-note").props.value).toBe("Running two hours late.");
     expect(screen.getByRole("radio", { name: "The pro is late" })).toBeChecked();
+    expect(screen.getByTestId("cancel-cost-statement")).toHaveTextContent(
+      "Cancelling is free: you'll get back the full $180.50.",
+    );
     expect(previewReads()).toBe(reads);
     await confirm();
     await waitFor(() => expect(postCalls()).toHaveLength(2));
@@ -455,11 +485,47 @@ describe("CancelJobScreen", () => {
     expect(keyOf(first!)).toMatch(UUID);
     expect(keyOf(second!)).toBe(keyOf(first!));
     expect(callBody(second!)).toEqual(callBody(first!));
+    expect(previewReads()).toBe(reads);
     await answer(1, jsonResponse(200, cancellation({ fee_cents: 0, refund_cents: 18_050 })));
     expect(await screen.findByText("Your job was cancelled")).toBeTruthy();
   });
 
+  it("a cost that changes under the open form is said, and the cancel asks again before it goes", async () => {
+    await renderScreen();
+    await pick();
+    await confirm();
+    await answer(0, errorResponse(429, "rate_limited"));
+    expect(screen.getByTestId("cancel-confirm")).toHaveTextContent("Try again");
+    // While the customer waits, the pro sets off and the job screen reads the cost again.
+    preview = FEE;
+    await previewReadElsewhere();
+    expect(screen.getByTestId("cancel-cost-statement")).toHaveTextContent(
+      /^Cancelling now costs \$12\.34/,
+    );
+    expect(screen.getByTestId("cancel-failure")).toHaveTextContent(/The cost changed/);
+    expect(screen.getByTestId("cancel-confirm")).toHaveTextContent("Cancel the job");
+    await confirm();
+    await waitFor(() => expect(postCalls()).toHaveLength(2));
+    const [first, second] = postCalls();
+    expect(callBody(second!)).toMatchObject({ expected_fee_cents: 1_234 });
+    expect(keyOf(second!)).toBe(keyOf(first!));
+  });
+
+  it("a preview read that fails while the cancel is on its way leaves the form to the cancel's answer", async () => {
+    await renderScreen();
+    await pick();
+    await confirm();
+    await waitFor(() => expect(posts).toHaveLength(1));
+    preview = [429, "rate_limited"];
+    await previewReadElsewhere();
+    expect(screen.getByTestId("cancel-form")).toBeTruthy();
+    expect(screen.queryByTestId("cancel-load-failed")).toBeNull();
+    await answer(0, jsonResponse(200, cancellation({ fee_cents: 0, refund_cents: 18_050 })));
+    expect(await screen.findByText("Your job was cancelled")).toBeTruthy();
+  });
+
   it("a cost read again that the API asks to wait for (429) closes the form until it answers", async () => {
+    const announce = announced();
     await renderScreen();
     await pick();
     await confirm();
@@ -468,6 +534,16 @@ describe("CancelJobScreen", () => {
     preview = [429, "rate_limited"];
     await answer(0, errorResponse(409, "cancel_fee_changed"));
     expect(await screen.findByText("Give it a moment")).toBeTruthy();
+    expect(announce).toHaveBeenCalledWith(
+      "Give it a moment. We can't show what cancelling costs right now. Try again shortly.",
+      { queue: true },
+    );
+    expect(screen.queryByTestId("cancel-confirm")).toBeNull();
+    expect(screen.queryByText(/Cancelling is free/)).toBeNull();
+    // A later failure of another kind keeps it closed: the cost is still unknown.
+    preview = new TypeError("Network request failed");
+    await fireEvent.press(screen.getByTestId("cancel-retry"));
+    expect(await screen.findByText("We couldn't load this")).toBeTruthy();
     expect(screen.queryByTestId("cancel-confirm")).toBeNull();
     expect(screen.queryByText(/Cancelling is free/)).toBeNull();
     preview = FEE;
@@ -483,7 +559,7 @@ describe("CancelJobScreen", () => {
     expect(await screen.findByText("Espera un momento")).toBeTruthy();
     expect(
       screen.getByText(
-        "Ahora no podemos mostrar cuánto cuesta cancelar. Espera un momento e inténtalo de nuevo.",
+        "Ahora no podemos mostrar cuánto cuesta cancelar. Inténtalo de nuevo en breve.",
       ),
     ).toBeTruthy();
     preview = FREE;
@@ -492,9 +568,9 @@ describe("CancelJobScreen", () => {
     await confirm();
     await answer(0, errorResponse(429, "rate_limited"));
     expect(screen.getByTestId("cancel-failure")).toHaveTextContent(
-      /Espera un momento.*Tu elección sigue aquí: inténtalo de nuevo en unos minutos\./,
+      /Son muchos intentos seguidos.*No se canceló nada y tu elección sigue aquí\. Inténtalo de nuevo un poco más tarde\./,
     );
-    expect(screen.getByText("Reintentar")).toBeTruthy();
+    expect(screen.getByTestId("cancel-confirm")).toHaveTextContent("Reintentar");
   });
 
   it("speaks Spanish", async () => {

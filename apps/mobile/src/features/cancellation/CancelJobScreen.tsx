@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { uuid } from "expo";
 import { router, useLocalSearchParams } from "expo-router";
-import { useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { KeyboardAvoidingView, ScrollView, Text, View } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
@@ -54,9 +54,13 @@ export function CancelJobScreen() {
   const [sent, setSent] = useState<{ requestId: string; cancellation: Cancellation } | null>(null);
   const sentHere = sent?.requestId === id ? sent.cancellation : null;
   const refusal = refusalOf(preview.error);
-  // A preview the API asked to wait for (429) says nothing of the cost now, held numbers
-  // included: no form and no cancel until it answers again.
-  const limited = preview.isError && isRateLimited(preview.error);
+  // The form shows only while the latest preview read answered: a read that failed (the API
+  // asked to wait, above all: a 429) says nothing of the cost now, cached numbers included. A
+  // cancel already on its way keeps its form, with its answer, its notice and its key.
+  const failed = preview.isError && refusal === null;
+  const limited = failed && isRateLimited(preview.error);
+  const [sendingFor, setSendingFor] = useState<string | null>(null);
+  const sending = sendingFor === id;
   const cancelled = sentHere ?? job.data?.cancellation ?? null;
   const back = () => (router.canGoBack() ? router.back() : router.replace(jobHref(id)));
   const reread = () => void Promise.all([job.refetch(), preview.refetch()]);
@@ -106,7 +110,7 @@ export function CancelJobScreen() {
         <Button label={t("cancellation.sent.back")} variant="secondary" onPress={back} />
       </State>
     );
-  } else if (job.data && preview.data && !limited) {
+  } else if (job.data && preview.data && (sending || !failed)) {
     body = (
       <CancelForm
         // A form per job: its reason, note and Idempotency-Key never carry over to another.
@@ -119,6 +123,7 @@ export function CancelJobScreen() {
           announce(t("cancellation.sent.title"));
         }}
         onChanged={reread}
+        onSending={(on) => setSendingFor(on ? id : null)}
         onKeep={back}
       />
     );
@@ -129,12 +134,14 @@ export function CancelJobScreen() {
         requestId={id}
         title={t(`cancellation.${copy}.title`)}
         body={t(`cancellation.${copy}.body`)}
+        announced
         testID="cancel-load-failed"
       >
         <Button
           label={t("cancellation.retry")}
           loading={job.isFetching || preview.isFetching}
-          onPress={() => void (job.data ? preview.refetch() : job.refetch())}
+          // The job too: a cancel that went through meanwhile shows as such.
+          onPress={job.data ? reread : () => void job.refetch()}
           testID="cancel-retry"
         />
       </State>
@@ -166,11 +173,16 @@ type StateProps = {
   title: string;
   body: string;
   children: ReactNode;
+  /** Said aloud when it shows: it can take the place of the form the reader was in. */
+  announced?: boolean;
   testID: string;
 };
 
 /** A state of the whole screen: what happened, then what the customer can do. */
-function State({ requestId, title, body, children, testID }: StateProps) {
+function State({ requestId, title, body, children, announced = false, testID }: StateProps) {
+  useEffect(() => {
+    if (announced) announce(`${title}. ${body}`);
+  }, [announced, title, body]);
   return (
     <ScrollView contentContainerClassName="flex-grow gap-6 px-4 pb-6 pt-2" testID={testID}>
       <BackButton fallbackHref={jobHref(requestId)} />
@@ -200,6 +212,8 @@ type CancelFormProps = {
   onSent: (cancellation: Cancellation) => void;
   /** The API's answer changed the picture (the cost, or whether the job can be cancelled). */
   onChanged: () => void;
+  /** A cancel is on its way (true), or it answered (false). */
+  onSending: (sending: boolean) => void;
   onKeep: () => void;
 };
 
@@ -210,7 +224,15 @@ type CancelFormProps = {
  * agreed to, so a double tap or a retry cancels once and a cost that changed in between is never
  * taken unseen.
  */
-function CancelForm({ jobId, requestId, preview, onSent, onChanged, onKeep }: CancelFormProps) {
+function CancelForm({
+  jobId,
+  requestId,
+  preview,
+  onSent,
+  onChanged,
+  onSending,
+  onKeep,
+}: CancelFormProps) {
   const { t } = useTranslation();
   const { top } = useSafeAreaInsets();
   const client = useQueryClient();
@@ -220,6 +242,15 @@ function CancelForm({ jobId, requestId, preview, onSent, onChanged, onKeep }: Ca
   const [checked, setChecked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<CancelFailure | null>(null);
+  // The cost on screen is the one the cancel sends. A newer preview that changes it while the
+  // form is open (the pro set off, and the job screen read it again) is said, never slipped in:
+  // the button asks again before it goes. Adjusted while rendering (React's pattern for state
+  // derived from the previous render).
+  const [shownFee, setShownFee] = useState(preview.fee_cents);
+  if (preview.fee_cents !== shownFee) {
+    setShownFee(preview.fee_cents);
+    setFailure("feeChanged");
+  }
   const sending = useRef(false);
   const reduceMotion = useReducedMotion();
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
@@ -246,6 +277,7 @@ function CancelForm({ jobId, requestId, preview, onSent, onChanged, onKeep }: Ca
     if (sending.current) return;
     sending.current = true;
     setBusy(true);
+    onSending(true);
     setFailure(null);
     try {
       const body = {
@@ -263,6 +295,7 @@ function CancelForm({ jobId, requestId, preview, onSent, onChanged, onKeep }: Ca
     } finally {
       sending.current = false;
       setBusy(false);
+      onSending(false);
     }
   };
 
