@@ -14,13 +14,14 @@ from typing import Any, Final
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import select, text, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.integrations.storage import get_storage
 from app.modules.addresses.models import Address
 from app.modules.audit.models import AuditLog
+from app.modules.audit.service import AuditService
 from app.modules.audit.types import AuditAction
 from app.modules.categories.models import Category
 from app.modules.dispatch.models import DispatchStatus, RequestDispatch
@@ -36,13 +37,14 @@ from app.modules.pros.models import (
     ProServiceArea,
     ProVerificationStatus,
 )
-from app.modules.requests.models import RequestStatus, ServiceRequest
+from app.modules.requests.models import RequestOrigin, RequestStatus, ServiceRequest
 from app.modules.requests.queue import RequestQueueReader
 from app.modules.service_areas.models import ServiceArea
 from app.modules.users.models import User
 from app.modules.users.types import UserRole, UserStatus
 from app.rate_limit import get_rate_limiter
-from tests.conftest import InMemoryRateLimiter, make_settings
+from tests.conftest import Committed, InMemoryRateLimiter, make_settings
+from tests.helpers import letter_tag
 from tests.job_world import (
     PRO_EMAIL,
     PRO_PHONE,
@@ -1439,3 +1441,91 @@ async def test_the_eligible_list_is_cut_at_the_setting_and_says_so(
     assert (len(whole.items), whole.more) == (2, False)
     with pytest.raises(QueueRequestNotFoundError):
         await OpsActions(db_session, one).eligible_pros(uuid.uuid4())
+
+
+async def test_two_agents_assigning_one_pro_at_once_make_one_offer(
+    app: FastAPI, committed: Committed, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On real commits: the request's row lock makes the two assignments take turns, and the
+    second finds the first's offer. One offer, one push, one audit row asked for; the rows
+    are deleted afterwards (audit_log is append-only, so its write is recorded instead)."""
+    audited: list[AuditAction] = []
+
+    async def no_row(self: AuditService, actor_id: uuid.UUID, action: AuditAction, *_: Any) -> None:
+        audited.append(action)
+
+    monkeypatch.setattr(AuditService, "record_staff_action", no_row)
+    pushes = record_pushes(app)
+    tag = letter_tag()
+    # A ZIP nothing else in the test database uses.
+    zip_code = f"9{uuid.uuid4().int % 10_000:04d}"
+    async with committed.sessions() as session:
+        customer = User(email=committed.email, password_hash="x", role=UserRole.CUSTOMER)
+        agents = [
+            User(email=f"assign-{tag}-{n}@x.com", password_hash="x", role=UserRole.AGENT)
+            for n in range(2)
+        ]
+        pro_user = User(email=f"assign-{tag}-pro@x.com", password_hash="x", role=UserRole.PRO)
+        category = Category(slug=f"test-{tag}", names={"en": "Race", "es": "Carrera"})
+        area = ServiceArea(region="Test", city="Orlando", state="FL", zip_code=zip_code)
+        session.add_all([customer, *agents, pro_user, category, area])
+        await session.flush()
+        profile = ProProfile(
+            user_id=pro_user.id,
+            verification_status=ProVerificationStatus.APPROVED,
+            payouts_enabled=True,
+        )
+        address = Address(
+            user_id=customer.id, line1="1 Race Road", city="Orlando", state="FL", zip_code=zip_code
+        )
+        session.add_all([profile, address])
+        await session.flush()
+        request = ServiceRequest(
+            customer_id=customer.id,
+            address_id=address.id,
+            category_id=category.id,
+            description="race",
+            origin=RequestOrigin.APP,
+        )
+        session.add_all(
+            [
+                request,
+                ProCategory(pro_id=profile.id, category_id=category.id),
+                ProServiceArea(pro_id=profile.id, service_area_id=area.id),
+            ]
+        )
+        await session.commit()
+    url = path(request.id, "assign")
+    body = {"pro_id": str(profile.id)}
+    try:
+        async with asyncio.timeout(15):
+            responses = await asyncio.gather(
+                *(
+                    committed.client.post(url, json=body, headers=headers_for(a.id, UserRole.AGENT))
+                    for a in agents
+                )
+            )
+
+        assert sorted(r.status_code for r in responses) == [200, 409]
+        [lost] = [r for r in responses if r.status_code == 409]
+        assert lost.json() == ALREADY_OFFERED
+        async with committed.sessions() as session:
+            assert len(await offers(session, request.id)) == 1
+            assert (await request_row(session, request.id)).status is RequestStatus.FINDING_PRO
+        assert audited == [AuditAction.REQUEST_ASSIGN_PRO]
+        assert len(pushes.jobs) == 1
+    finally:
+        async with committed.sessions() as session:
+            for statement in (
+                delete(RequestDispatch).where(RequestDispatch.request_id == request.id),
+                delete(ServiceRequest).where(ServiceRequest.id == request.id),
+                delete(Address).where(Address.id == address.id),
+                delete(ProCategory).where(ProCategory.pro_id == profile.id),
+                delete(ProServiceArea).where(ProServiceArea.pro_id == profile.id),
+                delete(ProProfile).where(ProProfile.id == profile.id),
+                delete(ServiceArea).where(ServiceArea.id == area.id),
+                delete(Category).where(Category.id == category.id),
+                delete(User).where(User.id.in_([pro_user.id, *(a.id for a in agents)])),
+            ):
+                await session.execute(statement)
+            await session.commit()

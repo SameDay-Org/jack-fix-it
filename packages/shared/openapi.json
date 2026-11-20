@@ -7605,6 +7605,194 @@
         }
       }
     },
+    "/v1/admin/requests/{request_id}/eligible-pros": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "The pros a request may be assigned to (staff)",
+        "description": "The approved pros in the request's category and area, best ranked first (as dispatch\nranks them), each with whether payouts are enabled and whether they have the request\nalready: first name and last initial, no contact. At most OPS_ELIGIBLE_PROS_LIMIT (`more`\nsays when others match). Empty for a request with no category or past quoting.",
+        "operationId": "staff_eligible_pros_v1_admin_requests__request_id__eligible_pros_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EligiblePros"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a request_id that is not a UUID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only agents and admins.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/requests/{request_id}/assign": {
+      "post": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Offer a request to a pro (staff)",
+        "description": "One offer for the pro the agent chose, made by dispatch: the pro must be approved, with\npayouts enabled, in the request's category and area, and not have the request already. A\nreceived or reviewing request moves to finding a pro; one finding a pro or with quotes\nready stays where it is. Releases a hold. The pro gets the new request push. Recorded in\nthe audit log.",
+        "operationId": "staff_assign_pro_v1_admin_requests__request_id__assign_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssignOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only active agents and admins (checked again as the action is written).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: no request with this id. pro_not_found: no pro profile with this id, or its account is no longer an active pro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "request_held: another agent holds the request. invalid_transition: the request is accepted, expired or cancelled. request_not_classified: it has no category yet. One code per reason the pro cannot take it: pro_already_offered (they have, or had, this request), pro_not_approved, pro_payouts_disabled, pro_category_mismatch, pro_out_of_area. Nothing was written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/requests/{request_id}/followups": {
       "post": {
         "tags": [
@@ -9589,6 +9777,51 @@
           "no_service_area"
         ],
         "title": "ApprovalBlockerKind"
+      },
+      "AssignIn": {
+        "properties": {
+          "pro_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Pro Id",
+            "description": "The pro's profile id, from the request's eligible-pros list."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "pro_id"
+        ],
+        "title": "AssignIn"
+      },
+      "AssignOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RequestStatus"
+          },
+          "pro_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Pro Id"
+          },
+          "info_requested_at": {
+            "type": "null",
+            "title": "Info Requested At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "pro_id"
+        ],
+        "title": "AssignOut",
+        "description": "The request offered to the pro: finding a pro now if it was received or reviewing, else\nwhere it was. Off hold."
       },
       "AssignedFilter": {
         "type": "string",
@@ -11853,6 +12086,78 @@
         ],
         "title": "EarningsSummary",
         "description": "All the pro's jobs, not just this page."
+      },
+      "EligibleProOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id",
+            "description": "The pro's profile id: what an assignment takes."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "First name and last initial, as customers see the pro; null when the account has no usable name."
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/CategorySummary"
+            },
+            "type": "array",
+            "title": "Categories"
+          },
+          "payouts_enabled": {
+            "type": "boolean",
+            "title": "Payouts Enabled",
+            "description": "False: the pro cannot be paid out yet, and an assignment is refused (pro_payouts_disabled)."
+          },
+          "already_offered": {
+            "type": "boolean",
+            "title": "Already Offered",
+            "description": "True: the pro has (or had) this request, and an assignment is refused (pro_already_offered)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "categories",
+          "payouts_enabled",
+          "already_offered"
+        ],
+        "title": "EligibleProOut",
+        "description": "A pro staff may weigh for the request: approved, in its category and its area. No\ncontact, no last name."
+      },
+      "EligiblePros": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EligibleProOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "more": {
+            "type": "boolean",
+            "title": "More",
+            "description": "True when more pros match than OPS_ELIGIBLE_PROS_LIMIT lists."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "more"
+        ],
+        "title": "EligiblePros",
+        "description": "Best ranked first, as dispatch ranks pros. Empty for a request with no category, or\none past quoting (accepted, expired, cancelled)."
       },
       "ErrorDetail": {
         "properties": {
