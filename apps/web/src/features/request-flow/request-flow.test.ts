@@ -77,6 +77,7 @@ beforeEach(() => {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
+  window.history.replaceState(null, "", "/request");
 });
 
 afterEach(() => {
@@ -344,5 +345,151 @@ describe("the service's questions", () => {
     await click(field("Handyman") as HTMLInputElement);
     await click(button(TEXT.next));
     expect((field("How many rooms?") as HTMLInputElement).value).toBe("4");
+  });
+});
+
+describe("the browser's Back and Forward (#86)", () => {
+  /** The browser's Back or Forward: the history moves, then the page hears popstate. */
+  async function browser(direction: "back" | "forward"): Promise<void> {
+    const before = window.location.href;
+    await act(async () => {
+      window.history[direction]();
+      // jsdom moves the history in a later task: wait for the address to change, then to
+      // settle (passing over a screen moves it once more).
+      for (let tries = 0; tries < 200 && window.location.href === before; tries += 1) {
+        await new Promise((done) => setTimeout(done, 5));
+      }
+      let last = "";
+      while (last !== window.location.href) {
+        last = window.location.href;
+        await new Promise((done) => setTimeout(done, 30));
+      }
+    });
+  }
+  const step = () => new URLSearchParams(window.location.search).get("step");
+
+  it("moves between the screens seen, everything kept, the heading focused", async () => {
+    await mount();
+    await served();
+    expect(step()).toBe("describe");
+    await type(field(TEXT.describe.label), "Leaky faucet");
+    await click(field("Handyman") as HTMLInputElement);
+    await click(button(TEXT.next));
+    expect(step()).toBe("questions");
+
+    await browser("back");
+    expect(heading().textContent).toBe(TEXT.describe.title);
+    expect(field(TEXT.describe.label).value).toBe("Leaky faucet");
+    expect(document.activeElement).toBe(heading());
+
+    await browser("back");
+    expect(step()).toBeNull();
+    expect(heading().textContent).toBe(TEXT.zip.title);
+    expect((field(TEXT.zip.label) as HTMLInputElement).value).toBe("33301");
+
+    await browser("forward");
+    expect(heading().textContent).toBe(TEXT.describe.title);
+    await browser("forward");
+    expect(heading().textContent).toBe("Handyman");
+    expect(checkZip).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays put when the screen cannot show any more, and puts its address back", async () => {
+    await mount();
+    await served();
+    await type(field(TEXT.describe.label), "Leaky faucet");
+    await click(field("Handyman") as HTMLInputElement);
+    await click(button(TEXT.next));
+    await browser("back");
+    await type(field(TEXT.describe.label), "   ");
+
+    await browser("forward");
+
+    // No description: the questions cannot come before it.
+    expect(heading().textContent).toBe(TEXT.describe.title);
+    expect(step()).toBe("describe");
+  });
+
+  it("passes over a screen that cannot show any more, going back", async () => {
+    checkZip.mockResolvedValueOnce({ kind: "not_served", zip: "10001" });
+    await mount();
+    await served("10001");
+    expect(step()).toBe("waitlist");
+    await click(button(TEXT.waitlist.otherZip));
+    await served("33301");
+    expect(step()).toBe("describe");
+
+    const seen: string[] = [];
+    await browser("back");
+    seen.push(heading().textContent ?? "");
+    // The waitlist was for 10001; 33301 is served now: Back goes on to the ZIP before it.
+    await browser("back");
+    seen.push(heading().textContent ?? "");
+
+    expect(seen).toEqual([TEXT.zip.title, TEXT.zip.title]);
+    expect(step()).toBeNull();
+  });
+
+  it("goes back from the waitlist to the ZIP", async () => {
+    checkZip.mockResolvedValueOnce({ kind: "not_served", zip: "10001" });
+    await mount();
+    await served("10001");
+    expect(step()).toBe("waitlist");
+
+    await browser("back");
+
+    expect(heading().textContent).toBe(TEXT.zip.title);
+  });
+
+  it("leaves the page with Back from the ZIP, and stays where it went", async () => {
+    window.history.replaceState(null, "", "/home");
+    window.history.pushState(null, "", "/request");
+    await mount();
+
+    await browser("back");
+    await act(async () => new Promise((done) => setTimeout(done, 50)));
+
+    // Another page's entry is not the flow's to handle: no step back further.
+    expect(window.location.pathname).toBe("/home");
+  });
+
+  it("keeps the router's own keys on every entry it marks", async () => {
+    // Next keeps its state in each entry; an entry without it makes Back reload the page.
+    window.history.replaceState({ __NA: true, tree: "t" }, "", "/request");
+
+    await mount();
+    expect(window.history.state).toMatchObject({ __NA: true, tree: "t" });
+    await served();
+
+    expect(window.history.state).toMatchObject({ __NA: true, tree: "t" });
+    expect(step()).toBe("describe");
+  });
+
+  it("after a reload, Back leaves past the screens of the earlier load", async () => {
+    // Before the reload: the home page, then this page at the ZIP and at the description.
+    window.history.replaceState(null, "", "/home");
+    window.history.pushState({ jfiRequestFlow: "earlier-load" }, "", "/request");
+    window.history.pushState({ jfiRequestFlow: "earlier-load" }, "", "/request?step=describe");
+
+    await mount();
+    expect(heading().textContent).toBe(TEXT.zip.title);
+    await act(async () => {
+      window.history.back();
+      for (let tries = 0; tries < 200 && window.location.pathname !== "/home"; tries += 1) {
+        await new Promise((done) => setTimeout(done, 5));
+      }
+    });
+
+    // The earlier load's ZIP entry is passed over too: one Back, and the visitor is home.
+    expect(window.location.pathname).toBe("/home");
+  });
+
+  it("starts at the ZIP when the address names a later screen (a reload keeps nothing)", async () => {
+    window.history.replaceState(null, "", "/request?service=handyman&step=questions");
+
+    await mount();
+
+    expect(heading().textContent).toBe(TEXT.zip.title);
+    expect(window.location.search).toBe("?service=handyman");
   });
 });
