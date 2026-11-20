@@ -285,7 +285,7 @@
           "auth"
         ],
         "summary": "Log out",
-        "description": "Revokes the session the refresh token belongs to. No bearer token is needed.\n\nAlways 204, so the endpoint cannot be used to test tokens. The access token is not revoked\non the server: it stops working when it expires (`expires_in`).",
+        "description": "Revokes the session the refresh token belongs to. No bearer token is needed.\n\nAlways 204, so the endpoint cannot be used to test tokens. The session's access tokens stop\nworking at once too: every bearer route refuses them with 401 invalid_token (#161).",
         "operationId": "logout_v1_auth_logout_post",
         "requestBody": {
           "content": {
@@ -362,7 +362,7 @@
             }
           },
           "401": {
-            "description": "invalid_token: missing, invalid or expired access token.",
+            "description": "invalid_token: missing, invalid or expired access token, or its session ended (logout, password reset).",
             "content": {
               "application/json": {
                 "schema": {
@@ -417,7 +417,7 @@
             }
           },
           "401": {
-            "description": "invalid_token: missing, invalid or expired access token.",
+            "description": "invalid_token: missing, invalid or expired access token, or its session ended (logout, password reset).",
             "content": {
               "application/json": {
                 "schema": {

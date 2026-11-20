@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CHAR, DateTime, ForeignKey
+from sqlalchemy import CHAR, DateTime, ForeignKey, Index, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, IdTimestampsMixin
@@ -15,6 +15,15 @@ class RefreshToken(IdTimestampsMixin, Base):
     """
 
     __tablename__ = "refresh_tokens"
+    __table_args__ = (
+        # Every authenticated request asks whether its access token's family is still live
+        # (#161): one entry per live family, however many rotations the family has made.
+        Index(
+            "ix_refresh_tokens_live_family_id",
+            "family_id",
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+    )
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
     family_id: Mapped[uuid.UUID] = mapped_column(index=True)

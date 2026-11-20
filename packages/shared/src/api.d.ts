@@ -122,8 +122,8 @@ export interface paths {
          * Log out
          * @description Revokes the session the refresh token belongs to. No bearer token is needed.
          *
-         *     Always 204, so the endpoint cannot be used to test tokens. The access token is not revoked
-         *     on the server: it stops working when it expires (`expires_in`).
+         *     Always 204, so the endpoint cannot be used to test tokens. The session's access tokens stop
+         *     working at once too: every bearer route refuses them with 401 invalid_token (#161).
          */
         post: operations["logout_v1_auth_logout_post"];
         delete?: never;
@@ -7245,7 +7245,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserOut"];
                 };
             };
-            /** @description invalid_token: missing, invalid or expired access token. */
+            /** @description invalid_token: missing, invalid or expired access token, or its session ended (logout, password reset). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -7287,7 +7287,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserOut"];
                 };
             };
-            /** @description invalid_token: missing, invalid or expired access token. */
+            /** @description invalid_token: missing, invalid or expired access token, or its session ended (logout, password reset). */
             401: {
                 headers: {
                     [name: string]: unknown;
