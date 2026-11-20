@@ -445,7 +445,7 @@ async def push_chat_message_to_customer(
         message_id=f"chat_message:{chat_message_id}",
         kind="chat_message",
         params={"public_code": public_code},
-        deep_link=f"/requests/{request_id}/job",
+        deep_link=f"/requests/{request_id}/job/chat",
         timeout_seconds=timeout_seconds,
     )
 
@@ -468,7 +468,7 @@ async def push_chat_message_to_pro(
         message_id=f"chat_message:{chat_message_id}",
         kind="chat_message",
         params={"public_code": public_code},
-        deep_link=f"/jobs/{job_id}",
+        deep_link=f"/jobs/{job_id}/chat",
         timeout_seconds=timeout_seconds,
     )
 
