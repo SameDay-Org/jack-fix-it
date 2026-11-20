@@ -52,6 +52,8 @@ class AuditAction(StrEnum):
     REQUEST_ASK_INFO = "service_request.ask_info"
     REQUEST_RESUME = "service_request.resume"
     REQUEST_CHANGE_STATUS = "service_request.change_status"
+    # The BDC offered the request to a pro they chose (#82 part 2).
+    REQUEST_ASSIGN_PRO = "service_request.assign_pro"
     # A staff read of a dispute: both sides' text and the photos' URLs (#76).
     DISPUTE_READ = "dispute.read"
     # An admin resolved a dispute: released, partly released or refunded money (#76). For a

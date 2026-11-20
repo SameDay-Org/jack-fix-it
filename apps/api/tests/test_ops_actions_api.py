@@ -6,7 +6,9 @@ import asyncio
 import logging
 import re
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any, Final
 
 import httpx
@@ -21,11 +23,19 @@ from app.modules.addresses.models import Address
 from app.modules.audit.models import AuditLog
 from app.modules.audit.types import AuditAction
 from app.modules.categories.models import Category
+from app.modules.dispatch.models import DispatchStatus, RequestDispatch
 from app.modules.dispatch.tasks import redispatch_for_pro, sweep_stalled
 from app.modules.jobs.models import JobStatus
+from app.modules.ops.actions import ActionsConfig, OpsActions
+from app.modules.ops.errors import QueueRequestNotFoundError
 from app.modules.ops.models import RequestFollowup, RequestNote
 from app.modules.ops.router import get_ops_clock
-from app.modules.pros.models import ProCategory, ProServiceArea
+from app.modules.pros.models import (
+    ProCategory,
+    ProProfile,
+    ProServiceArea,
+    ProVerificationStatus,
+)
 from app.modules.requests.models import RequestStatus, ServiceRequest
 from app.modules.requests.queue import RequestQueueReader
 from app.modules.service_areas.models import ServiceArea
@@ -33,7 +43,16 @@ from app.modules.users.models import User
 from app.modules.users.types import UserRole, UserStatus
 from app.rate_limit import get_rate_limiter
 from tests.conftest import InMemoryRateLimiter, make_settings
-from tests.job_world import JobWorld, Party, headers_for, make_job, record_pushes
+from tests.job_world import (
+    PRO_EMAIL,
+    PRO_PHONE,
+    JobWorld,
+    Party,
+    Pro,
+    headers_for,
+    make_job,
+    record_pushes,
+)
 from tests.test_dispatch import sessions_of
 from tests.test_ops_queue_api import (
     BASE,
@@ -122,13 +141,21 @@ ACTIONS: Final = [
 # A status change cannot be made twice (the holder's, then the admin's): its roles have their
 # own test; the demoted actor's is in the table.
 STATUS_CHANGE: Final = ("status", {"to": "cancelled", "reason": "x"})
+# An assignment needs a pro who can take the request (its roles have their own test); the
+# demoted actor is refused before the pro is looked at.
+ASSIGNMENT: Final = ("assign", {"pro_id": "PRO"})
+_FROM_THE_WORLD: Final = {
+    "CATEGORY": lambda world: str(world.category_id),
+    "PRO": lambda world: str(world.pro.profile_id),
+}
 
 
 def body_of(spec: Any, world: JobWorld) -> dict[str, Any]:
     if spec == "FOLLOWUP":
         return followup_body()
     return {
-        key: str(world.category_id) if value == "CATEGORY" else value for key, value in spec.items()
+        key: _FROM_THE_WORLD[value](world) if value in _FROM_THE_WORLD else value
+        for key, value in spec.items()
     }
 
 
@@ -165,8 +192,9 @@ async def test_only_staff_act_and_a_held_request_needs_its_holder_or_an_admin(
         assert response.headers["cache-control"] == "no-store"
 
 
-@pytest.mark.parametrize(("action", "spec"), [*ACTIONS, STATUS_CHANGE])
+@pytest.mark.parametrize(("action", "spec"), [*ACTIONS, STATUS_CHANGE, ASSIGNMENT])
 async def test_an_actor_demoted_since_authentication_writes_nothing(
+    app: FastAPI,
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
     world: JobWorld,
@@ -180,6 +208,7 @@ async def test_an_actor_demoted_since_authentication_writes_nothing(
     request = await make_request(db_session, world)
     request_id = request.id
     await db_session.commit()
+    pushes = record_pushes(app)  # an assignment's route takes the queue
     original = RequestQueueReader.lock
 
     async def demote_then_lock(self: RequestQueueReader, request_id: uuid.UUID) -> Any:
@@ -207,6 +236,12 @@ async def test_an_actor_demoted_since_authentication_writes_nothing(
             select(RequestFollowup).where(RequestFollowup.request_id == request_id)
         )
     ).all() == []
+    assert (
+        await db_session.scalars(
+            select(RequestDispatch).where(RequestDispatch.request_id == request_id)
+        )
+    ).all() == []
+    assert pushes.jobs == {}
 
 
 # --- Notes ------------------------------------------------------------------------------------
@@ -945,3 +980,462 @@ async def test_the_question_and_the_reason_are_plain_text_of_1_to_2000_character
         response = await act(db_client, world.agent, request_id, action, **{field: bad}, **extra)
         assert response.status_code == 422, (bad[:5], response.text)
     assert (await request_row(db_session, request_id)).status is RequestStatus.RECEIVED
+
+
+# --- Assign a pro by hand (part 2) ---------------------------------------------------------
+
+
+def refusal(code: str, message: str) -> dict[str, dict[str, str]]:
+    return {"error": {"code": code, "message": message}}
+
+
+PRO_NOT_FOUND: Final = refusal("pro_not_found", "Pro not found.")
+ALREADY_OFFERED: Final = refusal("pro_already_offered", "This pro already has this request.")
+# What a manual assignment leaves a request in: finding a pro once it has an offer, else where
+# it was. Accepted, expired and cancelled requests take none.
+ASSIGNED_FROM: Final = {
+    RequestStatus.RECEIVED: "finding_pro",
+    RequestStatus.REVIEWING: "finding_pro",
+    RequestStatus.FINDING_PRO: "finding_pro",
+    RequestStatus.QUOTE_READY: "quote_ready",
+}
+
+
+async def cover_with(session: AsyncSession, world: JobWorld, pro: Pro) -> None:
+    """`pro` takes requests in the world's category and at its address's ZIP."""
+    zip_code = await session.scalar(select(Address.zip_code).where(Address.id == world.address_id))
+    assert zip_code is not None
+    area = await session.scalar(select(ServiceArea).where(ServiceArea.zip_code == zip_code[:5]))
+    if area is None:
+        area = ServiceArea(region="Test", city="Orlando", state="FL", zip_code=zip_code[:5])
+        session.add(area)
+    area.active = True
+    await session.flush()
+    session.add_all(
+        [
+            ProCategory(pro_id=pro.profile_id, category_id=world.category_id),
+            ProServiceArea(pro_id=pro.profile_id, service_area_id=area.id),
+        ]
+    )
+    await session.flush()
+
+
+async def offers(session: AsyncSession, request_id: uuid.UUID) -> list[RequestDispatch]:
+    statement = select(RequestDispatch).where(RequestDispatch.request_id == request_id)
+    return list((await session.scalars(statement)).all())
+
+
+async def assign(
+    client: httpx.AsyncClient, party: Party, request_id: uuid.UUID, pro: Pro | uuid.UUID
+) -> httpx.Response:
+    pro_id = pro.profile_id if isinstance(pro, Pro) else pro
+    return await act(client, party, request_id, "assign", pro_id=str(pro_id))
+
+
+@pytest.mark.parametrize("start", list(ASSIGNED_FROM))
+async def test_an_assignment_offers_the_request_to_the_pro_and_tells_them(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    storage: FakeStorage,
+    start: RequestStatus,
+) -> None:
+    """One offer for the chosen pro, made by dispatch; a request not yet with pros moves to
+    finding_pro (the state machine, as the agent's move); the pro gets the new request push
+    once it is committed; one audit row with ids and statuses."""
+    await cover_with(db_session, world, world.pro)
+    pushes = record_pushes(app)
+    app.dependency_overrides[get_storage] = lambda: storage  # the pro's feed signs media
+    request = await make_request(db_session, world, start)
+    request_id, code = request.id, request.public_code
+    await db_session.commit()
+
+    response = await assign(db_client, world.agent, request_id, world.pro)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "id": str(request_id),
+        "status": ASSIGNED_FROM[start],
+        "pro_id": str(world.pro.profile_id),
+        "info_requested_at": None,
+    }
+    assert response.headers["cache-control"] == "no-store"
+    [offer] = await offers(db_session, request_id)
+    assert (offer.pro_id, offer.status) == (world.pro.profile_id, DispatchStatus.SENT)
+    assert (await request_row(db_session, request_id)).status.value == ASSIGNED_FROM[start]
+    [audit] = await audits(db_session, request_id, AuditAction.REQUEST_ASSIGN_PRO)
+    assert audit.actor_user_id == world.agent.id
+    assert (audit.before, audit.after) == (
+        {"status": start.value, "info_requested_at": None},
+        {
+            "status": ASSIGNED_FROM[start],
+            "info_requested_at": None,
+            "pro_id": str(world.pro.profile_id),
+            "dispatch_id": str(offer.id),
+        },
+    )
+    assert pushes.jobs == {
+        f"push:dispatch:{offer.id}": (
+            "send_push",
+            (
+                str(world.pro.id),
+                f"dispatch:{offer.id}",
+                "push.new_request.title",
+                "push.new_request.body",
+                {"public_code": code},
+                f"/opportunities/{offer.id}",
+            ),
+        )
+    }
+    # The pro finds it among their opportunities, like any request dispatch sent them.
+    feed = await db_client.get("/v1/pros/me/opportunities", headers=world.pro.headers)
+    assert [item["dispatch_id"] for item in feed.json()["items"]] == [str(offer.id)]
+
+
+async def test_an_assignment_releases_the_hold(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+) -> None:
+    await cover_with(db_session, world, world.pro)
+    record_pushes(app)
+    request = await make_request(db_session, world)
+    request_id = request.id
+    await db_session.commit()
+    asked = await act(db_client, world.agent, request_id, "more-info", question=QUESTION)
+    assert asked.status_code == 200, asked.text
+
+    response = await assign(db_client, world.agent, request_id, world.pro)
+
+    assert response.status_code == 200, response.text
+    row = await request_row(db_session, request_id)
+    assert (row.status, row.info_requested_at) == (RequestStatus.FINDING_PRO, None)
+    [audit] = await audits(db_session, request_id, AuditAction.REQUEST_ASSIGN_PRO)
+    assert audit.before == {"status": "reviewing", "info_requested_at": NOW.isoformat()}
+    assert audit.after["info_requested_at"] is None
+
+
+async def _not_approved(session: AsyncSession, world: JobWorld) -> None:
+    await session.execute(
+        update(ProProfile)
+        .where(ProProfile.id == world.pro.profile_id)
+        .values(verification_status=ProVerificationStatus.PENDING)
+    )
+
+
+async def _payouts_disabled(session: AsyncSession, world: JobWorld) -> None:
+    await session.execute(
+        update(ProProfile)
+        .where(ProProfile.id == world.pro.profile_id)
+        .values(payouts_enabled=False)
+    )
+
+
+async def _another_category(session: AsyncSession, world: JobWorld) -> None:
+    await session.execute(
+        text("DELETE FROM pro_categories WHERE pro_id = :pro"), {"pro": world.pro.profile_id}
+    )
+
+
+async def _another_area(session: AsyncSession, world: JobWorld) -> None:
+    await session.execute(
+        text("DELETE FROM pro_service_areas WHERE pro_id = :pro"), {"pro": world.pro.profile_id}
+    )
+
+
+async def _area_switched_off(session: AsyncSession, world: JobWorld) -> None:
+    await session.execute(update(ServiceArea).values(active=False))
+
+
+async def _suspended(session: AsyncSession, world: JobWorld) -> None:
+    await session.execute(
+        update(User).where(User.id == world.pro.id).values(status=UserStatus.SUSPENDED)
+    )
+
+
+@pytest.mark.parametrize(
+    ("spoil", "status", "expected"),
+    [
+        (_not_approved, 409, refusal("pro_not_approved", "This pro is not approved.")),
+        (
+            _payouts_disabled,
+            409,
+            refusal("pro_payouts_disabled", "This pro's payouts are not enabled."),
+        ),
+        (
+            _another_category,
+            409,
+            refusal("pro_category_mismatch", "This pro does not take this category."),
+        ),
+        (_another_area, 409, refusal("pro_out_of_area", "This pro does not serve this area.")),
+        (
+            _area_switched_off,
+            409,
+            refusal("pro_out_of_area", "This pro does not serve this area."),
+        ),
+        (_suspended, 404, PRO_NOT_FOUND),
+    ],
+)
+async def test_each_reason_a_pro_cannot_take_a_request_is_its_own_refusal(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    spoil: Any,
+    status: int,
+    expected: dict[str, Any],
+) -> None:
+    """What the automatic dispatch asks of a pro, the manual one asks too, one condition at a
+    time: approved, payouts enabled, the category, an active area with the ZIP, an active pro
+    account. A refusal writes nothing and tells nobody."""
+    await cover_with(db_session, world, world.pro)
+    pushes = record_pushes(app)
+    request = await make_request(db_session, world)
+    request_id = request.id
+    await spoil(db_session, world)
+    await db_session.commit()
+
+    response = await assign(db_client, world.agent, request_id, world.pro)
+
+    assert (response.status_code, response.json()) == (status, expected), response.text
+    assert await offers(db_session, request_id) == []
+    assert (await request_row(db_session, request_id)).status is RequestStatus.RECEIVED
+    assert await audits(db_session, request_id, AuditAction.REQUEST_ASSIGN_PRO) == []
+    assert pushes.jobs == {}
+
+
+async def test_a_pro_is_never_given_the_same_request_twice_nor_an_unknown_pro_any(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+) -> None:
+    await cover_with(db_session, world, world.pro)
+    pushes = record_pushes(app)
+    request = await make_request(db_session, world)
+    request_id = request.id
+    await db_session.commit()
+
+    unknown = await assign(db_client, world.agent, request_id, uuid.uuid4())
+    # A user's id is not a profile's.
+    by_user_id = await assign(db_client, world.agent, request_id, world.pro.id)
+    first = await assign(db_client, world.agent, request_id, world.pro)
+    again = await assign(db_client, world.admin, request_id, world.pro)
+
+    assert (unknown.status_code, unknown.json()) == (404, PRO_NOT_FOUND)
+    assert (by_user_id.status_code, by_user_id.json()) == (404, PRO_NOT_FOUND)
+    assert first.status_code == 200, first.text
+    assert (again.status_code, again.json()) == (409, ALREADY_OFFERED)
+    assert len(await offers(db_session, request_id)) == 1
+    assert len(await audits(db_session, request_id, AuditAction.REQUEST_ASSIGN_PRO)) == 1
+    assert len(pushes.jobs) == 1
+
+
+@pytest.mark.parametrize(
+    "status", [RequestStatus.ACCEPTED, RequestStatus.EXPIRED, RequestStatus.CANCELLED]
+)
+async def test_a_request_past_quoting_takes_no_assignment(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+    status: RequestStatus,
+) -> None:
+    await cover_with(db_session, world, world.pro)
+    record_pushes(app)
+    request = await make_request(db_session, world, status)
+    request_id = request.id
+    await db_session.commit()
+
+    response = await assign(db_client, world.agent, request_id, world.pro)
+    listed = await db_client.get(path(request_id, "eligible-pros"), headers=world.agent.headers)
+
+    assert (response.status_code, response.json()) == (409, INVALID_TRANSITION)
+    assert await offers(db_session, request_id) == []
+    assert (listed.status_code, listed.json()) == (200, {"items": [], "more": False})
+
+
+async def test_a_request_with_no_category_is_classified_before_it_is_assigned(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+) -> None:
+    await cover_with(db_session, world, world.pro)
+    record_pushes(app)
+    request = await make_request(db_session, world, RequestStatus.REVIEWING, category_id=None)
+    request_id = request.id
+    await db_session.commit()
+
+    response = await assign(db_client, world.agent, request_id, world.pro)
+    listed = await db_client.get(path(request_id, "eligible-pros"), headers=world.agent.headers)
+
+    assert (response.status_code, response.json()) == (
+        409,
+        refusal("request_not_classified", "Classify the request before assigning a pro."),
+    )
+    assert await offers(db_session, request_id) == []
+    assert (listed.status_code, listed.json()) == (200, {"items": [], "more": False})
+
+
+async def test_only_staff_assign_and_a_held_request_needs_its_holder_or_an_admin(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+) -> None:
+    await cover_with(db_session, world, world.pro)
+    await cover_with(db_session, world, world.other_pro)
+    record_pushes(app)
+    request = await make_request(db_session, world, assigned_agent_id=world.agent.id)
+    request_id = request.id
+    other_agent = await staff(db_session, UserRole.AGENT)
+    await db_session.commit()
+    body = {"pro_id": str(world.pro.profile_id)}
+
+    anonymous = await db_client.post(path(request_id, "assign"), json=body)
+    customer = await assign(db_client, world.customer, request_id, world.pro)
+    pro = await assign(db_client, world.pro, request_id, world.pro)
+    held = await assign(db_client, other_agent, request_id, world.pro)
+    holder = await assign(db_client, world.agent, request_id, world.pro)
+    admin = await assign(db_client, world.admin, request_id, world.other_pro)
+
+    assert (anonymous.status_code, customer.status_code, pro.status_code) == (401, 403, 403)
+    assert (held.status_code, held.json()) == (409, HELD)
+    assert holder.status_code == 200, holder.text
+    assert admin.status_code == 200, admin.text
+    assert {offer.pro_id for offer in await offers(db_session, request_id)} == {
+        world.pro.profile_id,
+        world.other_pro.profile_id,
+    }
+    malformed = await act(db_client, world.agent, request_id, "assign", pro_id="not-a-uuid")
+    extra = await act(
+        db_client, world.agent, request_id, "assign", pro_id=str(uuid.uuid4()), note="x"
+    )
+    assert (malformed.status_code, extra.status_code) == (422, 422)
+
+
+async def test_the_eligible_list_names_who_may_be_assigned_best_ranked_first(
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    clock: Clock,
+) -> None:
+    """Approved pros in the request's category and area, with an active account: the rated one
+    first, each with whether payouts are enabled and whether they have the request. First name
+    and last initial, the active categories, and nothing else about them."""
+    record_pushes(app)
+    await cover_with(db_session, world, world.pro)
+    await cover_with(db_session, world, world.other_pro)
+    await db_session.execute(
+        update(ProProfile)
+        .where(ProProfile.id == world.pro.profile_id)
+        .values(rating_avg=Decimal("4.80"))
+    )
+    await db_session.execute(
+        update(ProProfile)
+        .where(ProProfile.id == world.other_pro.profile_id)
+        .values(payouts_enabled=False)
+    )
+    # Left out: not approved, and an approved pro of this area in another category.
+    pending = await staff(db_session, UserRole.PRO)
+    elsewhere = await staff(db_session, UserRole.PRO)
+    other_category = Category(slug="test-zqother", names={"en": "Other", "es": "Otra"})
+    db_session.add(other_category)
+    await db_session.flush()
+    for user, state in (
+        (pending, ProVerificationStatus.PENDING),
+        (elsewhere, ProVerificationStatus.APPROVED),
+    ):
+        profile = ProProfile(user_id=user.id, verification_status=state, payouts_enabled=True)
+        db_session.add(profile)
+        await db_session.flush()
+        left_out = Pro(user.id, user.headers, profile.id)
+        await cover_with(db_session, world, left_out)
+        if user is elsewhere:
+            await db_session.execute(
+                update(ProCategory)
+                .where(ProCategory.pro_id == profile.id)
+                .values(category_id=other_category.id)
+            )
+    request = await make_request(db_session, world, assigned_agent_id=world.agent.id)
+    request_id = request.id
+    other_agent = await staff(db_session, UserRole.AGENT)
+    await db_session.commit()
+    url = path(request_id, "eligible-pros")
+
+    anonymous = await db_client.get(url)
+    customer = await db_client.get(url, headers=world.customer.headers)
+    pro = await db_client.get(url, headers=world.pro.headers)
+    # A read: a request another agent holds is still read.
+    listed = await db_client.get(url, headers=other_agent.headers)
+
+    assert (anonymous.status_code, customer.status_code, pro.status_code) == (401, 403, 403)
+    assert listed.status_code == 200, listed.text
+    assert listed.headers["cache-control"] == "no-store"
+    category = await db_session.get(Category, world.category_id)
+    assert category is not None
+    summary = {"id": str(category.id), "slug": category.slug, "names": category.names}
+    assert listed.json() == {
+        "items": [
+            {
+                "id": str(world.pro.profile_id),
+                "name": "María P.",
+                "categories": [summary],
+                "payouts_enabled": True,
+                "already_offered": False,
+            },
+            {
+                "id": str(world.other_pro.profile_id),
+                "name": None,
+                "categories": [summary],
+                "payouts_enabled": False,
+                "already_offered": False,
+            },
+        ],
+        "more": False,
+    }
+    for private in (PRO_EMAIL, PRO_PHONE, "Pérez"):
+        assert private not in listed.text
+
+    assigned = await assign(db_client, world.agent, request_id, world.pro)
+    assert assigned.status_code == 200, assigned.text
+    after = await db_client.get(url, headers=world.agent.headers)
+    assert [item["already_offered"] for item in after.json()["items"]] == [True, False]
+    # The list writes nothing.
+    assert len((await db_session.scalars(select(AuditLog))).all()) == 1
+
+    unknown = await db_client.get(path(uuid.uuid4(), "eligible-pros"), headers=world.agent.headers)
+    assert unknown.status_code == 404
+    assert unknown.json()["error"]["code"] == "request_not_found"
+
+
+async def test_the_eligible_list_is_cut_at_the_setting_and_says_so(
+    db_session: AsyncSession, world: JobWorld, settings: Settings
+) -> None:
+    await cover_with(db_session, world, world.pro)
+    await cover_with(db_session, world, world.other_pro)
+    request = await make_request(db_session, world)
+    request_id = request.id
+    await db_session.commit()
+    one = replace(ActionsConfig.from_settings(settings), eligible_pros_limit=1)
+
+    cut = await OpsActions(db_session, one).eligible_pros(request_id)
+    whole = await OpsActions(db_session, replace(one, eligible_pros_limit=2)).eligible_pros(
+        request_id
+    )
+
+    assert (len(cut.items), cut.more) == (1, True)
+    assert (len(whole.items), whole.more) == (2, False)
+    with pytest.raises(QueueRequestNotFoundError):
+        await OpsActions(db_session, one).eligible_pros(uuid.uuid4())

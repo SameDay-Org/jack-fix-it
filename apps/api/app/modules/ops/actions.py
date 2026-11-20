@@ -33,6 +33,14 @@ takes, so two staff members acting on one request take turns), and in that trans
 - Resume: releases the hold; the next re-dispatch sweep takes the request when it can.
 - Status: only to the statuses status_changes() lists, through the state machine, with the
   reason kept as a note. It releases a hold.
+- Assign a pro (part 2): one offer for a pro the agent chose, made by the dispatch module
+  (DispatchService.assign), which checks the pro as the automatic dispatch does and refuses
+  with one reason: each has its own 409. A received or reviewing request moves to finding_pro
+  with the offer. It releases a hold. Once committed, the pro gets the new request push, as
+  from the automatic dispatch; a push that cannot be queued is logged, never undone.
+- Eligible pros (part 2): who an assignment may name, best ranked first: approved pros in
+  the request's category and area, each with whether payouts are enabled and whether they
+  have the request already. First name and last initial only. A read: nothing is locked.
 
 Logs carry ids and actions only: never a note, a name or a contact.
 """
@@ -41,7 +49,7 @@ import base64
 import binascii
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Final
@@ -50,7 +58,7 @@ from sqlalchemy import TIMESTAMP, Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.errors import ForbiddenError
+from app.errors import AppError, ForbiddenError
 from app.modules.audit.service import AuditService
 from app.modules.audit.types import (
     ActorNotStaffError,
@@ -60,21 +68,33 @@ from app.modules.audit.types import (
     AuditState,
 )
 from app.modules.categories.service import CategoryService
+from app.modules.dispatch.service import ASSIGNABLE, AssignRefusal, DispatchService
+from app.modules.notifications.events import push_new_request
 from app.modules.ops.errors import (
     AssigneeNotStaffError,
     CategoryInactiveError,
     FollowupDueOutOfRangeError,
     FollowupNotFoundError,
     InvalidQueueQueryError,
+    ProAlreadyOfferedError,
+    ProCategoryMismatchError,
+    ProNotApprovedError,
+    ProNotFoundError,
+    ProOutOfAreaError,
+    ProPayoutsDisabledError,
     QueueRequestNotFoundError,
     RequestHeldError,
     RequestNotClassifiableError,
+    RequestNotClassifiedError,
 )
 from app.modules.ops.models import RequestFollowup, RequestNote
 from app.modules.ops.repository import FollowupRepository, NoteRepository
 from app.modules.ops.schemas import (
+    AssignOut,
     ClassifyOut,
     ContactedOut,
+    EligibleProOut,
+    EligiblePros,
     FollowupDue,
     FollowupIn,
     FollowupItem,
@@ -89,11 +109,13 @@ from app.modules.ops.schemas import (
     StaffMemberOut,
     StatusChangeOut,
 )
+from app.modules.pros.service import ProService
 from app.modules.requests.errors import InvalidTransitionError
 from app.modules.requests.queue import LockedRequest, RequestQueueReader, RequestStatus
 from app.modules.requests.state_machine import RequestStateMachine, staff_moves
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount, UserRole, UserStatus
+from app.queue import JobQueue
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +128,19 @@ _STAFF: Final = frozenset({UserRole.AGENT, UserRole.ADMIN})
 # request is accepted.
 _DISPATCH_OWNED: Final = frozenset({RequestStatus.FINDING_PRO})
 _MONEY_OWNED: Final = frozenset({RequestStatus.ACCEPTED})
+# What each refusal of a manual assignment answers: a request past quoting is the state
+# machine's invalid_transition, and each reason a pro cannot take it has its own code.
+_ASSIGN_REFUSALS: Final[Mapping[AssignRefusal, type[AppError]]] = {
+    AssignRefusal.UNKNOWN_REQUEST: QueueRequestNotFoundError,
+    AssignRefusal.NOT_ASSIGNABLE: InvalidTransitionError,
+    AssignRefusal.NOT_CLASSIFIED: RequestNotClassifiedError,
+    AssignRefusal.UNKNOWN_PRO: ProNotFoundError,
+    AssignRefusal.ALREADY_OFFERED: ProAlreadyOfferedError,
+    AssignRefusal.NOT_APPROVED: ProNotApprovedError,
+    AssignRefusal.PAYOUTS_DISABLED: ProPayoutsDisabledError,
+    AssignRefusal.CATEGORY_MISMATCH: ProCategoryMismatchError,
+    AssignRefusal.OUT_OF_AREA: ProOutOfAreaError,
+}
 
 
 def status_changes(status: RequestStatus) -> tuple[RequestStatus, ...]:
@@ -130,6 +165,9 @@ class ActionsConfig:
     time_zone: str
     list_default_limit: int
     list_max_limit: int
+    # The most pros the eligible list names, and the seconds a push may take to queue.
+    eligible_pros_limit: int
+    enqueue_timeout_seconds: float
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "ActionsConfig":
@@ -138,6 +176,8 @@ class ActionsConfig:
             time_zone=settings.business_time_zone,
             list_default_limit=settings.request_list_default_limit,
             list_max_limit=settings.request_list_max_limit,
+            eligible_pros_limit=settings.ops_eligible_pros_limit,
+            enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
         )
 
 
@@ -192,6 +232,8 @@ class OpsActions:
         self._users = UserService(session)
         self._audit = AuditService(session)
         self._records = OpsRecords(session)
+        self._dispatch = DispatchService(session)
+        self._pros = ProService(session)
 
     async def add_note(self, staff: UserAccount, request_id: uuid.UUID, body: str) -> NoteOut:
         locked = await self._acting(staff, request_id)
@@ -322,6 +364,67 @@ class OpsActions:
             {"status": to.value, "info_requested_at": None, "note_id": str(note.id)},
         )
         return StatusChangeOut(id=locked.id, status=to, note=note)
+
+    async def assign_pro(
+        self, staff: UserAccount, request_id: uuid.UUID, pro_id: uuid.UUID, queue: JobQueue
+    ) -> AssignOut:
+        locked = await self._acting(staff, request_id)
+        made = await self._dispatch.assign(locked.id, pro_id, staff)
+        if isinstance(made, AssignRefusal):
+            await self._session.rollback()
+            raise _ASSIGN_REFUSALS[made]
+        if locked.info_requested_at is not None:
+            await self._requests.hold(locked, None)
+        await self._audited(
+            staff,
+            AuditAction.REQUEST_ASSIGN_PRO,
+            locked.id,
+            {"status": locked.status.value, "info_requested_at": _iso(locked.info_requested_at)},
+            {
+                "status": made.status.value,
+                "info_requested_at": None,
+                "pro_id": str(pro_id),
+                "dispatch_id": str(made.dispatch.id),
+            },
+        )
+        # Committed: the pro hears about it as from the automatic dispatch (#55).
+        await push_new_request(
+            queue,
+            pro_user_id=made.dispatch.pro_user_id,
+            dispatch_id=made.dispatch.id,
+            public_code=made.dispatch.public_code,
+            timeout_seconds=self._config.enqueue_timeout_seconds,
+        )
+        return AssignOut(id=locked.id, status=made.status, pro_id=pro_id)
+
+    async def eligible_pros(self, request_id: uuid.UUID) -> EligiblePros:
+        """Who a manual assignment of this request may name. Ends its transaction."""
+        scope = await self._requests.scope(request_id)
+        if scope is None:
+            await self._session.rollback()
+            raise QueueRequestNotFoundError
+        if scope.category_id is None or scope.status not in ASSIGNABLE:
+            await self._session.rollback()
+            return EligiblePros(items=[], more=False)
+        found = await self._dispatch.assignable(request_id, scope.category_id, scope.address_id)
+        listed = found[: self._config.eligible_pros_limit]
+        pro_ids = [pro.pro_id for pro in listed]
+        cards = await self._pros.cards(pro_ids)
+        categories = await self._pros.categories_of(pro_ids)
+        await self._session.rollback()
+        return EligiblePros(
+            items=[
+                EligibleProOut(
+                    id=pro.pro_id,
+                    name=cards[pro.pro_id].name if pro.pro_id in cards else None,
+                    categories=categories.get(pro.pro_id, []),
+                    payouts_enabled=pro.payouts_enabled,
+                    already_offered=pro.already_offered,
+                )
+                for pro in listed
+            ],
+            more=len(found) > len(listed),
+        )
 
     async def schedule_followup(
         self, staff: UserAccount, request_id: uuid.UUID, data: FollowupIn

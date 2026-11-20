@@ -68,6 +68,15 @@ class RequestBrief:
 
 
 @dataclass(frozen=True)
+class RequestScope:
+    """What decides who may take a request (#82): its status, its category and where it is."""
+
+    status: RequestStatus
+    category_id: uuid.UUID | None
+    address_id: uuid.UUID
+
+
+@dataclass(frozen=True)
 class LockedRequest:
     """A request whose row this transaction holds FOR UPDATE: its id, who holds it now, and
     what the BDC's actions read (#82). Handed back to `RequestQueueReader` to change it."""
@@ -140,6 +149,14 @@ class RequestQueueReader:
         its customer (#82)."""
         rows = await self._requests.get_many(request_ids)
         return {row.id: RequestBrief(row.public_code, row.status) for row in rows}
+
+    async def scope(self, request_id: uuid.UUID) -> RequestScope | None:
+        """The request's status, category and address, read without a lock (#82); None for an
+        unknown request."""
+        rows = await self._requests.get_many([request_id])
+        if not rows:
+            return None
+        return RequestScope(rows[0].status, rows[0].category_id, rows[0].address_id)
 
     async def contacted(self, locked: LockedRequest, at: datetime) -> None:
         """Writes the BDC's first contact with the customer on the locked request (#82). The

@@ -282,6 +282,52 @@ class StatusChangeOut(BaseModel):
     note: "NoteOut"
 
 
+class AssignIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pro_id: uuid.UUID = Field(
+        description="The pro's profile id, from the request's eligible-pros list."
+    )
+
+
+class AssignOut(BaseModel):
+    """The request offered to the pro: finding a pro now if it was received or reviewing, else
+    where it was. Off hold."""
+
+    id: uuid.UUID
+    status: RequestStatus
+    pro_id: uuid.UUID
+    info_requested_at: None = None
+
+
+class EligibleProOut(BaseModel):
+    """A pro staff may weigh for the request: approved, in its category and its area. No
+    contact, no last name."""
+
+    id: uuid.UUID = Field(description="The pro's profile id: what an assignment takes.")
+    name: str | None = Field(
+        description="First name and last initial, as customers see the pro; null when the "
+        "account has no usable name."
+    )
+    categories: list[CategorySummary]
+    payouts_enabled: bool = Field(
+        description="False: the pro cannot be paid out yet, and an assignment is refused "
+        "(pro_payouts_disabled)."
+    )
+    already_offered: bool = Field(
+        description="True: the pro has (or had) this request, and an assignment is refused "
+        "(pro_already_offered)."
+    )
+
+
+class EligiblePros(BaseModel):
+    """Best ranked first, as dispatch ranks pros. Empty for a request with no category, or
+    one past quoting (accepted, expired, cancelled)."""
+
+    items: list[EligibleProOut]
+    more: bool = Field(description="True when more pros match than OPS_ELIGIBLE_PROS_LIMIT lists.")
+
+
 class ClassifyIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
