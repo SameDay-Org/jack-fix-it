@@ -60,6 +60,30 @@ export function refund(extra: Partial<Refund> = {}): Refund {
   };
 }
 
+type Transfer = components["schemas"]["TransferOut"];
+
+/** The job's transfer to its pro, made. */
+export function transfer(extra: Partial<Transfer> = {}): Transfer {
+  return {
+    id: "6a1b2c3d-3333-4444-8555-666677778888",
+    job_id: JOB_ID,
+    payment_id: "5f0e3c1a-3333-4444-8555-666677778888",
+    pro_id: "7c2d3e4f-3333-4444-8555-666677778888",
+    amount_cents: 10_000,
+    currency: "usd",
+    status: "created",
+    stripe_transfer_id: "tr_probe",
+    attempts: 1,
+    last_error_code: null,
+    requested_at: hoursAgo(5),
+    create_may_have_been_issued_at: null,
+    needs_reversal_at: null,
+    created_at: hoursAgo(5),
+    updated_at: hoursAgo(5),
+    ...extra,
+  };
+}
+
 type Payment = components["schemas"]["PaymentSummaryOut"];
 
 export function payment(extra: Partial<Payment> = {}): Payment {
