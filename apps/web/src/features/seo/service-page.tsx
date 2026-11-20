@@ -31,15 +31,19 @@ import { getT } from "@/i18n/server";
 import { cn } from "@/lib/utils";
 
 import {
+  type Catalog,
   type Category,
+  cityLabel,
+  cityServicePaths,
+  findCityService,
   findService,
   type IntakeQuestion,
   loadCatalog,
   localized,
-  type Region,
+  type ServedCity,
   serviceCategories,
+  servedCities,
   servedPlace,
-  servedRegions,
   servicePaths,
 } from "./catalog";
 import { serviceLine } from "./copy";
@@ -186,8 +190,27 @@ function WhatJackAsks({
   );
 }
 
-/** The served cities, as the API lists them; a region's name only when there are several. */
-function WhereJackWorks({ t, regions }: { t: TFunction; regions: Region[] }) {
+const PILL_LINK = cn(
+  "inline-flex h-11 items-center gap-2 rounded-pill border-2 border-navy-900/15 bg-white px-5 font-semibold transition-colors hover:border-navy-900",
+  FOCUS_ON_LIGHT,
+);
+
+/**
+ * A service's page: the served cities, each a link to the service in that city; a region's
+ * name only when there are several.
+ */
+function WhereJackWorks({
+  t,
+  locale,
+  slug,
+  cities,
+}: {
+  t: TFunction;
+  locale: Locale;
+  slug: string;
+  cities: ServedCity[];
+}) {
+  const regions = [...new Set(cities.map((city) => city.region))];
   return (
     <section id={SERVICE_ANCHORS.areas} aria-labelledby="areas-title" className="bg-gray-50 py-20">
       <div className={CONTAINER}>
@@ -195,18 +218,23 @@ function WhereJackWorks({ t, regions }: { t: TFunction; regions: Region[] }) {
         <p className="mt-4 max-w-2xl text-lg text-gray-500">{t("seo.service.areas.body")}</p>
         <div className="mt-10 flex flex-col gap-8">
           {regions.map((region) => (
-            <div key={region.region} className="flex flex-col gap-4">
-              {regions.length > 1 ? <h3 className="text-xl font-bold">{region.region}</h3> : null}
+            <div key={region} className="flex flex-col gap-4">
+              {regions.length > 1 ? <h3 className="text-xl font-bold">{region}</h3> : null}
               <ul className="flex flex-wrap gap-2">
-                {region.cities.map((city) => (
-                  <li
-                    key={`${city.city}-${city.state}`}
-                    className="inline-flex items-center gap-2 rounded-pill bg-white px-4 py-2 font-semibold"
-                  >
-                    <MapPin aria-hidden className="size-4 shrink-0 text-green-700" />
-                    {`${city.city}, ${city.state}`}
-                  </li>
-                ))}
+                {cities
+                  .filter((city) => city.region === region)
+                  .map((city) => (
+                    <li key={city.slug}>
+                      <Link
+                        href={cityServicePaths(city.slug, slug)[locale]}
+                        prefetch={false}
+                        className={PILL_LINK}
+                      >
+                        <MapPin aria-hidden className="size-4 shrink-0 text-green-700" />
+                        {cityLabel(city)}
+                      </Link>
+                    </li>
+                  ))}
               </ul>
             </div>
           ))}
@@ -216,25 +244,99 @@ function WhereJackWorks({ t, regions }: { t: TFunction; regions: Region[] }) {
   );
 }
 
-/** The other services' pages: the reader's next step when this is not the job. */
-function MoreServices({ t, locale, others }: { t: TFunction; locale: Locale; others: Category[] }) {
+/** A city's page: the ZIP codes Jack serves there, then the same service in the other cities. */
+function CityAreas({
+  t,
+  locale,
+  slug,
+  name,
+  city,
+  others,
+}: {
+  t: TFunction;
+  locale: Locale;
+  slug: string;
+  name: string;
+  city: ServedCity;
+  others: ServedCity[];
+}) {
+  const label = cityLabel(city);
+  return (
+    <section id={SERVICE_ANCHORS.areas} aria-labelledby="areas-title" className="bg-gray-50 py-20">
+      <div className={CONTAINER}>
+        <div className="flex max-w-2xl flex-col gap-3">
+          <p className={cn(EYEBROW, "text-green-700")}>{t("seo.service.areas.eyebrow")}</p>
+          <h2 id="areas-title" className={SECTION_TITLE}>
+            {t("seo.city.areas.title", { city: label })}
+          </h2>
+        </div>
+        <p className="mt-4 max-w-2xl text-lg text-gray-500">
+          {t("seo.city.areas.body", { city: label })}
+        </p>
+        <ul aria-label={t("seo.city.areas.zipsLabel")} className="mt-10 flex flex-wrap gap-2">
+          {city.zips.map((zip) => (
+            <li
+              key={zip}
+              className="inline-flex items-center gap-2 rounded-pill bg-white px-4 py-2 font-semibold tabular-nums"
+            >
+              <MapPin aria-hidden className="size-4 shrink-0 text-green-700" />
+              {zip}
+            </li>
+          ))}
+        </ul>
+        {others.length > 0 ? (
+          <>
+            <h3 className="mt-12 text-xl font-bold">{t("seo.city.areas.others", { name })}</h3>
+            <ul className="mt-4 flex flex-wrap gap-2">
+              {others.map((other) => (
+                <li key={other.slug}>
+                  <Link
+                    href={cityServicePaths(other.slug, slug)[locale]}
+                    prefetch={false}
+                    className={PILL_LINK}
+                  >
+                    {cityLabel(other)}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+/** The other services' pages (in this city, on a city's page): the reader's next step. */
+function MoreServices({
+  t,
+  locale,
+  others,
+  city,
+}: {
+  t: TFunction;
+  locale: Locale;
+  others: Category[];
+  city: ServedCity | null;
+}) {
   if (others.length === 0) return null;
   return (
     <nav aria-labelledby="more-title" className="py-20">
       <div className={CONTAINER}>
         <h2 id="more-title" className="text-2xl font-extrabold tracking-tight">
-          {t("seo.service.more.title")}
+          {city ? t("seo.city.more.title", { city: cityLabel(city) }) : t("seo.service.more.title")}
         </h2>
         <ul className="mt-6 flex flex-wrap gap-3">
           {others.map((other) => (
             <li key={other.slug}>
               <Link
-                href={servicePaths(other.slug)[locale]}
+                href={
+                  (city ? cityServicePaths(city.slug, other.slug) : servicePaths(other.slug))[
+                    locale
+                  ]
+                }
                 prefetch={false}
-                className={cn(
-                  "inline-flex h-11 items-center rounded-pill border-2 border-navy-900/15 px-5 font-semibold transition-colors hover:border-navy-900",
-                  FOCUS_ON_LIGHT,
-                )}
+                className={PILL_LINK}
               >
                 {localized(other.names, locale, other.slug)}
               </Link>
@@ -274,21 +376,54 @@ export function serviceTitle(t: TFunction, name: string, place: string | null): 
     : t("seo.service.hero.titleAnywhere", { name });
 }
 
+/** A city's page headline: the service in the city ("Handyman in Fort Lauderdale, FL"). */
+export function cityServiceTitle(t: TFunction, name: string, city: ServedCity): string {
+  return t("seo.city.hero.title", { name, city: cityLabel(city) });
+}
+
 /**
- * A service's page (#87, D17.3) in one language, at `/<slug>` and `/es/<slug>`: what the
- * service is, what the app asks about the job, how it works and where Jack works, ending on the
- * app (the web request flow, #86, takes its place once it ships). Everything on it is the API's
- * catalog or approved copy: no price, no count of pros or jobs, no reviews or ratings, no
- * promise the legal texts have not approved. An inactive, unserved or unknown slug is a 404;
- * an unreachable API throws (catalog.ts), it never yields an empty page.
+ * The service of `/<slug>`, or of `/<city>/<slug>` when a city is given, with its city: what the
+ * page, its metadata and its card show. Null when the page does not exist (a 404).
  */
-export async function ServicePage({ locale, slug }: { locale: Locale; slug: string }) {
+export function pageSubject(
+  catalog: Catalog,
+  slug: string,
+  city?: string,
+): { category: Category; city: ServedCity | null } | null {
+  if (city === undefined) {
+    const category = findService(catalog, slug);
+    return category ? { category, city: null } : null;
+  }
+  return findCityService(catalog, city, slug);
+}
+
+/**
+ * A service's page (#87, D17.3) in one language: at `/<slug>` and `/es/<slug>`, or for one city
+ * at `/<city>/<slug>` and `/es/<city>/<slug>`. What the service is, what the app asks about the
+ * job, how it works and where Jack works (the cities, or the city's ZIP codes), ending on the app
+ * (the web request flow, #86, takes its place once it ships). Everything on it is the API's
+ * catalog or approved copy: no price, no count of pros or jobs, no reviews or ratings, no promise
+ * the legal texts have not approved. A service, city or pair without a page is a 404; an
+ * unreachable API throws (catalog.ts), it never yields an empty page.
+ */
+export async function ServicePage({
+  locale,
+  slug,
+  city: citySlug,
+}: {
+  locale: Locale;
+  slug: string;
+  city?: string;
+}) {
   const catalog = await loadCatalog();
-  const category = findService(catalog, slug);
-  if (!category) notFound();
+  const subject = pageSubject(catalog, slug, citySlug);
+  if (!subject) notFound();
+  const { category, city } = subject;
   const t = await getT(locale);
   const name = localized(category.names, locale, category.slug);
   const others = serviceCategories(catalog).filter((other) => other.slug !== category.slug);
+  const cities = servedCities(catalog);
+  const paths = city ? cityServicePaths(city.slug, category.slug) : servicePaths(category.slug);
 
   return (
     <div lang={locale}>
@@ -302,18 +437,31 @@ export async function ServicePage({ locale, slug }: { locale: Locale; slug: stri
       >
         {t("landing.skipToContent")}
       </a>
-      <LandingHeader t={t} locale={locale} page="service" paths={servicePaths(category.slug)} />
+      <LandingHeader t={t} locale={locale} page="service" paths={paths} />
       <main id={MAIN_ID}>
         <Hero
           t={t}
           locale={locale}
-          title={serviceTitle(t, name, servedPlace(catalog))}
+          title={
+            city ? cityServiceTitle(t, name, city) : serviceTitle(t, name, servedPlace(catalog))
+          }
           line={serviceLine(t, category.slug)}
         />
         <WhatJackAsks t={t} locale={locale} category={category} />
         <HowItWorks t={t} />
-        <WhereJackWorks t={t} regions={servedRegions(catalog)} />
-        <MoreServices t={t} locale={locale} others={others} />
+        {city ? (
+          <CityAreas
+            t={t}
+            locale={locale}
+            slug={category.slug}
+            name={name}
+            city={city}
+            others={cities.filter((other) => other.slug !== city.slug)}
+          />
+        ) : (
+          <WhereJackWorks t={t} locale={locale} slug={category.slug} cities={cities} />
+        )}
+        <MoreServices t={t} locale={locale} others={others} city={city} />
         <FinalCall t={t} locale={locale} />
       </main>
       <LandingFooter
@@ -321,7 +469,7 @@ export async function ServicePage({ locale, slug }: { locale: Locale; slug: stri
         locale={locale}
         contact={contactEmail()}
         year={new Date().getFullYear()}
-        paths={servicePaths(category.slug)}
+        paths={paths}
       />
     </div>
   );

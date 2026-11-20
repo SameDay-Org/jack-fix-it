@@ -1,0 +1,16 @@
+{
+  "name": "jack-fix-it-demo-tools",
+  "private": true,
+  "description": "Tooling for the demo video (docs/demo-video.md). Not part of the pnpm workspace: install with `pnpm install --ignore-workspace` from this folder.",
+  "type": "module",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "tour": "node web-tour.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "playwright-core": "1.57.0"
+  }
+}

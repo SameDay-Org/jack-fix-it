@@ -60,6 +60,13 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy .
+      # The demo video's scripts (docs/demo-video.md) run in this environment and follow the
+      # same rules; tests/test_demo_seed.py runs the seed itself.
+      - name: Demo scripts (lint, format, types)
+        run: |
+          uv run ruff check ../../scripts/demo
+          uv run ruff format --check ../../scripts/demo
+          uv run mypy ../../scripts/demo
       - name: Migrations upgrade, downgrade, upgrade
         run: uv run alembic upgrade head && uv run alembic downgrade base && uv run alembic upgrade head
       # The media copy tests run ffmpeg and ffprobe (#173); in CI they fail without them.
@@ -113,6 +120,16 @@ jobs:
       - run: pnpm -r typecheck
       - run: pnpm -r lint
       - run: pnpm -r test
+      # The demo tour's host guard, proven in a real browser (docs/demo-video.md): the runner's
+      # own Chrome, nothing downloaded. Its one dependency is outside the workspace.
+      - name: Demo tour guard
+        working-directory: scripts/demo
+        timeout-minutes: 5
+        env:
+          DEMO_BROWSER_CHANNEL: chrome
+        run: |
+          pnpm install --ignore-workspace --frozen-lockfile
+          node --test
       - run: pnpm --filter @jack/web build
       # First-load JavaScript of the showcase page against its budget (#403); needs the build.
       - run: pnpm --filter @jack/web check:bundle

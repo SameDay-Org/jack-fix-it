@@ -44,7 +44,7 @@ from app.modules.categories.service import CategoryService
 from app.modules.dispatch.opportunities import sign_safe_media
 from app.modules.jobs.service import JobStaffReader, JobStatus, StaffJob
 from app.modules.jobs.transitions import CUSTOMER_STATUS
-from app.modules.ops.actions import OpsRecords
+from app.modules.ops.actions import OpsRecords, status_changes
 from app.modules.ops.errors import (
     InvalidQueueQueryError,
     QueueRequestNotFoundError,
@@ -214,6 +214,8 @@ class OpsQueueService:
         card.actions_allowed = (
             holder is None or holder.id == viewer.id or viewer.role is UserRole.ADMIN
         )
+        card.info_requested_at = row.info_requested_at
+        card.allowed_status_changes = list(status_changes(row.status))
         # Committed before the answer: an audit write that fails answers 500, so no contact
         # is shown unaudited.
         try:
