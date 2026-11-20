@@ -8,15 +8,17 @@ earnings; a second job has a problem that an admin resolves; the panel tour; the
 This page is the kit: the demo data, the pre-flight checklist, the storyboard and the recorded web
 tour. Everything lives in `scripts/demo/`.
 
-**Never record production data.** The seed refuses anything but a local `jackdemo*` database, the
-web tour refuses any host but `localhost`, `127.0.0.1` and one named staging host, and Stripe is
-always in TEST mode.
+**Never record production data.** The seed refuses anything but a local `jackdemo*` database (and
+a storage that is not on this machine, a deployed `APP_ENV`, a Stripe key that is not a TEST
+key), the web tour refuses any host but `localhost`, `127.0.0.1` and one named staging host, and
+Stripe is always in TEST mode.
 
 ## The cast
 
 `seed_demo.py` makes these accounts. They are made-up people on `example.com`; every one of them
-has the same demo password, generated on the first run and kept in `scripts/demo/.demo-password`
-(untracked, printed once).
+has the same demo password, generated when the accounts are made and kept in
+`scripts/demo/.demo-password` (untracked, printed that once). Later seeds reuse the file. If it
+is lost, the accounts keep their password: `--reset` makes a new one.
 
 | Who   | Sign in             | Role                                                                                                                 |
 | ----- | ------------------- | -------------------------------------------------------------------------------------------------------------------- |
@@ -61,8 +63,12 @@ Things to know:
   `OPS_FIRST_CONTACT_SLA_MINUTES` (5), then Urgent; "scheduled today" means today.
   `--fresh` adds a new request without reseeding.
 - **Stripe.** The history's payments are stand-ins (`demo_seed/stripe_standins.py`: ids that say
-  `demo`, nothing reaches Stripe). Without a TEST key, or with `--stand-in-stripe`, Jamie's two
-  jobs are stand-ins too, and the panel cannot refund the dispute.
+  `demo`; the seed calls Stripe for none of them, and Stripe knows none). Without a TEST key, or
+  with `--stand-in-stripe`, Jamie's two jobs are stand-ins too, and the panel cannot refund the
+  dispute.
+- **A demo database is for the day it was seeded.** The running worker cannot act on a stand-in
+  payment: a seeded job still waiting for its confirmation fails its transfer when the 48 h
+  auto-confirm comes, and is retried at every sweep. Reseed rather than let one age.
 - **Dan's payout account** is a stand-in id unless `DEMO_PRO_STRIPE_ACCOUNT` names a real TEST
   connected account (`acct_…`, onboarded once in TEST mode). With the stand-in, the pro's part of
   a dispute decided on camera fails to transfer (the refund still works), and Dan's Payouts
@@ -86,11 +92,15 @@ docker run -d --name jack-demo-s3 -p 127.0.0.1:9000:9000 -v jack-demo-s3:/data \
 | -------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `DATABASE_URL`                                           | `postgresql://jack:jack@127.0.0.1:5432/jackdemo` (local, the name starts with `jackdemo`) |
 | `JWT_SECRET`                                             | any long random value                                                                     |
-| `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, …    | the local S3 above; the seed creates the bucket when it is missing                        |
+| `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, …    | the local S3 above (the seed refuses one elsewhere, and creates the bucket when missing)  |
 | `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`            | TEST keys (`sk_test_…`, `pk_test_…`)                                                      |
 | `STRIPE_WEBHOOK_SECRET`, `STRIPE_CONNECT_WEBHOOK_SECRET` | the signing secret `stripe listen` prints (below), in both                                |
 | `PUBLIC_API_URL`                                         | where the phone reaches the API (Stripe's onboarding returns to it)                       |
 | `MAPBOX_ACCESS_TOKEN`                                    | the route and the live map                                                                |
+
+`apps/web/.env.local` (untracked), from `apps/web/.env.example`, with
+`API_INTERNAL_URL=http://127.0.0.1:8000`: the panel's server reads it on every request, so it must
+be set where `start` runs, not only for `build`.
 
 Then, each in its own terminal:
 
@@ -100,11 +110,17 @@ cd apps/api && uv run python -m app.serve
 cd apps/api && uv run arq app.worker.WorkerSettings --custom-log-dict app.observability.WORKER_LOG_CONFIG
 stripe listen --forward-to localhost:8000/v1/webhooks/stripe \
   --forward-connect-to localhost:8000/v1/webhooks/stripe/connect
-API_INTERNAL_URL=http://127.0.0.1:8000 pnpm --filter @jack/web build && pnpm --filter @jack/web start
-# The app: the dev client on the emulator, Metro pointed at the API
-EXPO_PUBLIC_API_URL=http://10.0.2.2:8000 EXPO_PUBLIC_PRO_LOCATION_SHARING=on \
+pnpm --filter @jack/web build && pnpm --filter @jack/web start
+# The app: the dev client on the emulator, reaching the API and the storage on this machine
+adb reverse tcp:8000 tcp:8000 && adb reverse tcp:9000 tcp:9000
+EXPO_PUBLIC_API_URL=http://127.0.0.1:8000 EXPO_PUBLIC_PRO_LOCATION_SHARING=on \
   pnpm --filter @jack/mobile exec expo start --dev-client
 ```
+
+Start the API and the worker from the same `.env`: the pre-flight proves the API is on the demo
+database (the demo accounts sign in), but of the worker only that one is listening on the same
+Redis. `adb reverse` lets the emulator use the same `127.0.0.1` addresses as this machine, so the
+photo and document links the API signs for the local storage open in the app too.
 
 Record the web app from a production build (`build` + `start`), not `next dev`: the dev overlay
 would be in the shot.
@@ -126,7 +142,7 @@ A green/red checklist; exit 0 when nothing is red. It never prints a key, a toke
 | API, API dependencies                | the API answers, Postgres and Redis ready                                                                           |
 | Admin, Agent, Jamie, Dan, Maria      | each signs in to the running API with the demo password; staff in English; Dan approved with payouts, Maria pending |
 | Demo address, Categories             | Jamie's ZIP is served; the five launch categories exist                                                             |
-| Worker                               | a worker took a `ping` job off the queue                                                                            |
+| Worker                               | a worker on the API's Redis took a `ping` job (it cannot tell which database that worker writes)                    |
 | Stripe keys, webhook secrets         | TEST keys that Stripe accepts; the signing secrets are set                                                          |
 | Mapbox token (API), Storage, Web app | the route can be computed, the bucket answers, the panel and the landing answer                                     |
 
