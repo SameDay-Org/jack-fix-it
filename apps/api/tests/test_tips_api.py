@@ -1511,3 +1511,32 @@ async def test_the_event_of_an_amount_replaced_by_no_tip_is_not_a_mismatch(
     assert (row.status, row.attempt, row.amount_cents) == (TipStatus.DECLINED, 1, 0)
     assert "tip_event_mismatch" not in [record.getMessage() for record in caplog.records]
     assert (row.late_success_at is not None) is (stripe_status == "succeeded")
+
+
+async def test_a_late_success_flagged_before_the_create_holds_the_create(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#510 round 2 (the Vault, N1): an earlier attempt's success flagged between the choice
+    and its create (the webhook contains it) holds the create: 409 tip_needs_review, no
+    PaymentIntent, the flag kept for staff."""
+    from app.modules.tips.service import TipService
+
+    job = await confirmed(db_session, world)
+    customer = TipService._customer
+
+    async def flagged_meanwhile(self: TipService, *args: Any, **kwargs: Any) -> str:
+        await set_tip(db_session, job, late_success_at=func.now())
+        return await customer(self, *args, **kwargs)
+
+    monkeypatch.setattr(TipService, "_customer", flagged_meanwhile)
+    response = await choose(db_client, world, job, PERCENT_12)
+
+    assert (response.status_code, code(response)) == (409, NEEDS_REVIEW)
+    assert stripe_fake.intent_calls == []
+    row = await tip_row(db_session, job)
+    assert row is not None
+    assert row.late_success_at is not None

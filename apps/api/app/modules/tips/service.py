@@ -388,13 +388,21 @@ class TipService:
         (None for "No tip"). The caller commits."""
         if key is None:
             return
-        await self._tips.add_request(
+        stored = await self._tips.add_request(
             job_id=job_id,
             customer_id=key.customer_id,
             idempotency_key=key.idempotency_key,
             fingerprint=key.fingerprint,
             attempt=attempt,
         )
+        if stored is not None and (
+            stored.job_id != job_id or not same_body(stored.fingerprint, key.fingerprint)
+        ):
+            # The key was recorded meanwhile for another job or body, where no lock ordered
+            # the two calls (#510 round 2): refused, and nothing of this call stays.
+            await self._session.rollback()
+            logger.info("tip_idempotency_key_reused", extra={"job_id": str(job_id)})
+            raise TipIdempotencyKeyReusedError
 
     async def _repeat_changes_nothing(self, key: "_Key", facts: JobTipFacts, tip: Tip) -> bool:
         """Under the tip's lock (#510 round 2): whether this keyed call repeats a choice already
@@ -676,8 +684,13 @@ class TipService:
 
     async def _locked_attempt(self, record: TipRecord) -> Tip:
         """The tip locked, still at the attempt `record` settled and still to pay; 409 when
-        another call moved it on meanwhile."""
+        another call moved it on meanwhile, and 409 tip_needs_review once an earlier attempt's
+        success was flagged (#510 round 2: the create is held, the flag stays for staff)."""
         tip = await self._tips.get_by_job_for_update(record.job_id)
+        if tip is not None and tip.late_success_at is not None:
+            await self._session.rollback()
+            logger.warning("tip_create_held_for_review", extra=record.ids)
+            raise TipNeedsReviewError
         if (
             tip is None
             or tip.attempt != record.attempt

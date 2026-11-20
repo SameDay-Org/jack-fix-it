@@ -186,10 +186,12 @@ class TipRepository:
         idempotency_key: uuid.UUID,
         fingerprint: str,
         attempt: int | None,
-    ) -> None:
-        """Records a choice made with a key, unless the key is recorded (a concurrent call with
-        the same key and body made it too: the first record stands)."""
-        await self._session.execute(
+    ) -> TipRequest | None:
+        """Records a choice made with a key. None when this call recorded it; else the record
+        already there (the first record stands), for the caller to compare: the same job and
+        body is a concurrent call of the same choice, anything else a reused key (#510 round
+        2: the conflict is read, never silent)."""
+        inserted = await self._session.scalar(
             insert(TipRequest)
             .values(
                 job_id=job_id,
@@ -201,7 +203,19 @@ class TipRepository:
             .on_conflict_do_nothing(
                 index_elements=[TipRequest.customer_id, TipRequest.idempotency_key]
             )
+            .returning(TipRequest.id)
         )
+        if inserted is not None:
+            return None
+        statement = (
+            select(TipRequest)
+            .where(
+                TipRequest.customer_id == customer_id,
+                TipRequest.idempotency_key == idempotency_key,
+            )
+            .execution_options(populate_existing=True)
+        )
+        return (await self._session.scalars(statement)).one()
 
     async def retry_failed(self, tip_id: uuid.UUID, intent_id: str) -> None:
         """failed -> requires_payment: the same PaymentIntent is confirmed again (Stripe keeps

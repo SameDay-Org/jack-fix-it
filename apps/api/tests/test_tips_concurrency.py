@@ -8,12 +8,15 @@ import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from sqlalchemy import delete, select, update
 
+from app.idempotency import body_fingerprint
 from app.modules.jobs.models import Job, JobStatus
 from app.modules.jobs.service import JobTipFacts
+from app.modules.tips.errors import TipIdempotencyKeyReusedError
 from app.modules.tips.models import Tip, TipRequest
 from app.modules.tips.repository import TipRepository
 from app.modules.tips.schemas import CustomTipIn, NoTipIn, PercentTipIn, TipCreateOut
@@ -259,3 +262,67 @@ async def test_a_repeat_that_missed_its_first_calls_record_never_undoes_a_newer_
     assert second.sheet is None
     assert len(stripe.cancels) == 1  # the first's intent, by the newer choice
     assert len(stripe.intents) == 2
+
+
+# The same key with another body (#510 round 2, the Vault): one of the two is refused, whatever
+# their timing, and never silently by the record's ON CONFLICT.
+
+
+async def test_the_same_key_with_two_bodies_at_once_settles_one_and_refuses_the_other(
+    tip_job: TipJob,
+) -> None:
+    stripe = FakeStripePayments()
+    pids: dict[str, int] = {}
+    key = uuid.uuid4()
+
+    answers = await asyncio.gather(
+        choose(tip_job, stripe, TEN_PERCENT, pids, "a", key=key),
+        choose(tip_job, stripe, TWELVE_FIFTY, pids, "b", key=key),
+        return_exceptions=True,
+    )
+
+    settled = [answer for answer in answers if isinstance(answer, TipCreateOut)]
+    refused = [answer for answer in answers if isinstance(answer, TipIdempotencyKeyReusedError)]
+    assert (len(settled), len(refused)) == (1, 1), answers
+    tip = await tip_row(tip_job)
+    [answer] = settled
+    assert answer.sheet is not None
+    assert tip.amount_cents == answer.sheet.amount_cents
+    assert len(stripe.intents) == 1
+
+
+async def test_a_record_of_another_body_landing_during_the_insert_refuses_the_choice(
+    tip_job: TipJob, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Where no lock orders the two calls (another job's tip, or reads that came too early),
+    the key's record can land between this call's reads and its insert. The insert's conflict
+    is read, not ignored: another job or body is a reused key, and nothing of this call
+    stays."""
+    stripe = FakeStripePayments()
+    pids: dict[str, int] = {}
+    key = uuid.uuid4()
+    insert = TipRepository.add_request
+
+    async def another_body_lands_first(self: TipRepository, **values: Any) -> TipRequest | None:
+        async with tip_job.world.sessions() as other:
+            other.add(
+                TipRequest(
+                    job_id=tip_job.world.job_id,
+                    customer_id=tip_job.world.customer.id,
+                    idempotency_key=key,
+                    fingerprint=body_fingerprint(TWELVE_FIFTY),
+                    attempt=None,
+                )
+            )
+            await other.commit()
+        return await insert(self, **values)
+
+    monkeypatch.setattr(TipRepository, "add_request", another_body_lands_first)
+
+    with pytest.raises(TipIdempotencyKeyReusedError):
+        await choose(tip_job, stripe, TEN_PERCENT, pids, "late", key=key)
+
+    async with tip_job.world.sessions() as session:
+        tip = await session.scalar(select(Tip).where(Tip.job_id == tip_job.world.job_id))
+    assert tip is None  # the choice's own row was rolled back with it
+    assert stripe.intents == {}
