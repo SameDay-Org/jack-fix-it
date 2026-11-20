@@ -236,6 +236,18 @@ class RequestQueueRepository:
         request.assigned_agent_id = agent_id
         await self._session.flush()
 
+    async def set_first_contact(self, request: ServiceRequest, at: datetime) -> None:
+        """Writes the first contact time on the row the caller locked; through the row, as
+        set_assigned_agent."""
+        request.first_contact_at = at
+        await self._session.flush()
+
+    async def set_category(self, request: ServiceRequest, category_id: uuid.UUID) -> None:
+        """Writes the category on the row the caller locked; through the row, as
+        set_assigned_agent."""
+        request.category_id = category_id
+        await self._session.flush()
+
     @staticmethod
     def _joined[S: Select[*tuple[Any, ...]]](
         statement: S, sources: QueueSources, *, with_zip: bool = True

@@ -8,12 +8,14 @@ address: the BDC calls them.
 import uuid
 from datetime import date, datetime
 from enum import StrEnum
+from typing import Annotated
 
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue, StringConstraints
 
-from app.modules.addresses.schemas import AddressOut
+from app.modules.addresses.schemas import NO_NUL, AddressOut
 from app.modules.categories.schemas import CategorySummary
 from app.modules.jobs.service import JobStatus
+from app.modules.ops.models import FOLLOWUP_NOTE_MAX_LENGTH, NOTE_MAX_LENGTH
 from app.modules.quotes.service import QuoteStatus
 from app.modules.requests.queue import (
     PreferredPeriod,
@@ -22,6 +24,7 @@ from app.modules.requests.queue import (
     RequestOrigin,
     RequestStatus,
 )
+from app.modules.users.types import UserRole
 
 
 class BucketFilter(StrEnum):
@@ -163,6 +166,16 @@ class RequestCard(QueueItem):
     next_action: str | None
     last_contact_at: datetime | None
     updated_at: datetime
+    notes: list["NoteOut"] = Field(
+        description="The staff's internal notes, oldest first (#82). Never shown to the "
+        "customer or the pro."
+    )
+    followups: list["FollowupOut"] = Field(description="By due time (#82).")
+    actions_allowed: bool = Field(
+        default=True,
+        description="Whether the caller may act on this request now (#82): it is unassigned, "
+        "held by them, or they are an admin. The API stays the guard (409 request_held).",
+    )
 
 
 class ClaimOut(BaseModel):
@@ -170,3 +183,117 @@ class ClaimOut(BaseModel):
 
     id: uuid.UUID
     assigned_agent: QueueAgent | None
+
+
+# --- The BDC's actions (#82) -------------------------------------------------------------------
+
+PlainNote = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=NOTE_MAX_LENGTH, pattern=NO_NUL
+    ),
+]
+FollowupNote = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=FOLLOWUP_NOTE_MAX_LENGTH, pattern=NO_NUL
+    ),
+]
+
+
+class NoteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    body: PlainNote = Field(
+        description="Plain text, 1 to 2000 characters, kept as written (staff only, never "
+        "shown to the customer or the pro, never logged)."
+    )
+
+
+class NoteOut(BaseModel):
+    id: uuid.UUID
+    author: QueueAgent
+    body: str
+    created_at: datetime
+
+
+class ContactedOut(BaseModel):
+    """When the BDC first contacted the customer: set once."""
+
+    id: uuid.UUID
+    first_contact_at: datetime
+
+
+class ClassifyIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category_id: uuid.UUID = Field(description="An active category.")
+
+
+class ClassifyOut(BaseModel):
+    id: uuid.UUID
+    category: CategorySummary
+
+
+class FollowupIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    due_at: AwareDatetime = Field(
+        description="When it is due: in the future, at most OPS_FOLLOWUP_MAX_DAYS ahead."
+    )
+    note: FollowupNote = Field(description="What to do, 1 to 500 characters (staff only).")
+    assigned_to: uuid.UUID | None = Field(
+        default=None,
+        description="An active agent or admin; the caller by default. Only an admin gives a "
+        "follow-up to someone else.",
+    )
+
+
+class FollowupOut(BaseModel):
+    id: uuid.UUID
+    request_id: uuid.UUID
+    assigned_to: QueueAgent
+    due_at: datetime
+    note: str
+    done_at: datetime | None
+
+
+class FollowupItem(FollowupOut):
+    """A follow-up in the list: its request's code and status, never a contact."""
+
+    public_code: str
+    request_status: RequestStatus
+
+
+class FollowupDue(StrEnum):
+    # Not done, due before the end of today in BUSINESS_TIME_ZONE: overdue ones included.
+    TODAY = "today"
+    # Not done, whenever due.
+    ALL = "all"
+
+
+class FollowupsPage(BaseModel):
+    items: list[FollowupItem] = Field(description="By due time, the most overdue first.")
+    next_cursor: str | None
+
+
+RequestCard.model_rebuild()
+
+
+class FollowupsSummary(BaseModel):
+    due_today: int = Field(
+        description="The caller's open follow-ups due by the end of today in the business time "
+        "zone, overdue ones included: the length of GET /v1/admin/followups (due today)."
+    )
+
+
+class StaffMemberOut(BaseModel):
+    """An active agent or admin, as the panel's assignee pickers list them (#82): no contact."""
+
+    id: uuid.UUID
+    first_name: str | None = Field(description="Null when missing or showing a contact.")
+    role: UserRole
+
+
+class StaffList(BaseModel):
+    staff: list[StaffMemberOut] = Field(description="By first name.")
