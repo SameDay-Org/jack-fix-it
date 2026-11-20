@@ -18625,6 +18625,31 @@
             "title": "Job Id",
             "description": "The job the ticket is about, if any."
           },
+          "job_request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Id",
+            "description": "The request of the ticket's job, for the panel's request page; null without a job (#503)."
+          },
+          "job_request_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Code",
+            "description": "That request's public code, as staff name and search it; null without a job (#503)."
+          },
           "status": {
             "$ref": "#/components/schemas/TicketStatus"
           },
@@ -18643,6 +18668,8 @@
           "role",
           "topic",
           "job_id",
+          "job_request_id",
+          "job_request_code",
           "status",
           "created_at"
         ],
@@ -18692,6 +18719,31 @@
             ],
             "title": "Job Id",
             "description": "The job the ticket is about, if any."
+          },
+          "job_request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Id",
+            "description": "The request of the ticket's job, for the panel's request page; null without a job (#503)."
+          },
+          "job_request_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Code",
+            "description": "That request's public code, as staff name and search it; null without a job (#503)."
           },
           "status": {
             "$ref": "#/components/schemas/TicketStatus"
@@ -18755,6 +18807,8 @@
           "role",
           "topic",
           "job_id",
+          "job_request_id",
+          "job_request_code",
           "status",
           "created_at",
           "message",

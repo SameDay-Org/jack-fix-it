@@ -402,6 +402,12 @@ class JobPartiesReader:
         self._pros = pros
 
     @staticmethod
+    def request_ids() -> Subquery:
+        """Each job's id (`job_id`) and its request (`request_id`), as a subquery: a staff
+        support ticket names its job's request in the tickets' own query (#503)."""
+        return JobRepository.request_ids()
+
+    @staticmethod
     def confirmations() -> Subquery:
         """Each job's id (`job_id`) and confirmation time (`confirmed_at`), as a subquery: a
         review's publication window is read in the reviews' own query (#77)."""

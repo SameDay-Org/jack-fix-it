@@ -6450,6 +6450,16 @@ export interface components {
              * @description The job the ticket is about, if any.
              */
             job_id: string | null;
+            /**
+             * Job Request Id
+             * @description The request of the ticket's job, for the panel's request page; null without a job (#503).
+             */
+            job_request_id: string | null;
+            /**
+             * Job Request Code
+             * @description That request's public code, as staff name and search it; null without a job (#503).
+             */
+            job_request_code: string | null;
             status: components["schemas"]["TicketStatus"];
             /**
              * Created At
@@ -6483,6 +6493,16 @@ export interface components {
              * @description The job the ticket is about, if any.
              */
             job_id: string | null;
+            /**
+             * Job Request Id
+             * @description The request of the ticket's job, for the panel's request page; null without a job (#503).
+             */
+            job_request_id: string | null;
+            /**
+             * Job Request Code
+             * @description That request's public code, as staff name and search it; null without a job (#503).
+             */
+            job_request_code: string | null;
             status: components["schemas"]["TicketStatus"];
             /**
              * Created At
