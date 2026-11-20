@@ -20,6 +20,7 @@ from app.modules.disputes.models import (
 )
 from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.payments.models import Transfer, TransferStatus
+from app.modules.tips.models import Tip, TipChoice, TipStatus, TipTransferStatus
 from app.rate_limit import get_rate_limiter
 from tests.conftest import InMemoryRateLimiter, make_settings
 from tests.job_world import (
@@ -480,3 +481,105 @@ async def test_the_answer_never_names_the_customer_or_stripe(
         "platform_fee",
     ):
         assert leak not in text, leak
+
+
+async def add_tip(
+    session: AsyncSession,
+    world: JobWorld,
+    job_id: uuid.UUID,
+    cents: int,
+    transfer: TipTransferStatus,
+    status: TipStatus = TipStatus.SUCCEEDED,
+) -> None:
+    """The job's tip (#273 PR A2) with its own transfer's state."""
+    job = await session.get(Job, job_id)
+    assert job is not None
+    made = transfer in (TipTransferStatus.CREATED, TipTransferStatus.REVERSED)
+    session.add(
+        Tip(
+            job_id=job.id,
+            request_id=job.request_id,
+            customer_id=job.customer_id,
+            pro_id=job.pro_id,
+            choice=TipChoice.CUSTOM,
+            amount_cents=cents,
+            currency="usd",
+            status=status,
+            succeeded_at=T0 if status is TipStatus.SUCCEEDED else None,
+            stripe_payment_intent_id=f"pi_probe70tip{job.id.hex[:8]}",
+            attempt=1,
+            transfer_status=transfer,
+            stripe_transfer_id=f"{STRIPE_TRANSFER}tip{job.id.hex[:8]}" if made else None,
+        )
+    )
+    await session.flush()
+
+
+async def test_a_tip_is_the_pros_and_counted_by_its_own_transfer(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    """#273 PR A2: the item shows the tip beside the job's own amount; the summary counts the
+    tip by the tip's transfer, never the job's."""
+    paid_job = await earning_job(
+        db_session,
+        world,
+        JobStatus.PAID_OUT,
+        T0,
+        6_006,
+        transfer=TransferStatus.CREATED,
+        paid_at=T0,
+    )
+    waiting_job = await earning_job(
+        db_session, world, JobStatus.CONFIRMED, T0 - timedelta(days=1), 2_002
+    )
+    reversed_job = await earning_job(
+        db_session, world, JobStatus.CONFIRMED, T0 - timedelta(days=2), 3_003
+    )
+    unpaid_job = await earning_job(
+        db_session, world, JobStatus.CONFIRMED, T0 - timedelta(days=3), 4_004
+    )
+    others = await earning_job(
+        db_session, world, JobStatus.CONFIRMED, T0, 8_008, pro=world.other_pro
+    )
+    await add_tip(db_session, world, paid_job, 500, TipTransferStatus.PENDING)
+    await add_tip(db_session, world, waiting_job, 700, TipTransferStatus.CREATED)
+    await add_tip(db_session, world, reversed_job, 900, TipTransferStatus.REVERSED)
+    await add_tip(
+        db_session,
+        world,
+        unpaid_job,
+        1_100,
+        TipTransferStatus.NONE,
+        status=TipStatus.REQUIRES_PAYMENT,
+    )
+    await add_tip(db_session, world, others, 1_300, TipTransferStatus.CREATED)
+    await db_session.commit()
+
+    response = await read(db_client, world.pro, limit=50)
+
+    assert response.status_code == 200, response.text[:300]
+    body = response.json()
+    items = {item["job_id"]: item for item in body["items"]}
+    assert {
+        job: (
+            items[str(job)]["status"],
+            items[str(job)]["amount_cents"],
+            items[str(job)]["tip_cents"],
+        )
+        for job in (paid_job, waiting_job, reversed_job, unpaid_job)
+    } == {
+        paid_job: ("paid", 6_006, 500),
+        waiting_job: ("on_the_way", 2_002, 700),
+        reversed_job: ("on_the_way", 3_003, 900),
+        # A tip not paid yet is no tip.
+        unpaid_job: ("on_the_way", 4_004, 0),
+    }
+    assert body["summary"] == {
+        "awaiting_confirmation_cents": 0,
+        # The jobs on their way, and the paid job's tip whose transfer is not made.
+        "pending_cents": 2_002 + 3_003 + 4_004 + 500,
+        # The tip Stripe reversed: staff look.
+        "on_hold_cents": 900,
+        "paid_cents": 6_006 + 700,
+        "currency": "usd",
+    }

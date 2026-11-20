@@ -426,6 +426,29 @@ async def push_payouts_enabled(
     )
 
 
+async def push_tip_received(
+    queue: JobQueue,
+    *,
+    pro_user_id: uuid.UUID,
+    tip_id: uuid.UUID,
+    job_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the pro, once the customer's tip on the job succeeded (#273): a tip succeeds once, so
+    one message id per tip. Neither the customer's name nor the amount (a lock screen shows the
+    push). Opens the job."""
+    await _push(
+        queue,
+        pro_user_id,
+        message_id=f"tip_received:{tip_id}",
+        kind="tip_received",
+        params={"public_code": public_code},
+        deep_link=f"/jobs/{job_id}",
+        timeout_seconds=timeout_seconds,
+    )
+
+
 async def _job_push(
     queue: JobQueue,
     customer_id: uuid.UUID,

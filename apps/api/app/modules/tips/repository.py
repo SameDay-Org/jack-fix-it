@@ -3,11 +3,22 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Final
 
-from sqlalchemy import func, select, update
+from sqlalchemy import ColumnElement, Subquery, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.tips.models import UNPAID_STATUSES, Tip, TipChoice, TipRequest, TipStatus
+from app.modules.tips.models import (
+    TIP_TRANSFER_MADE,
+    UNPAID_STATUSES,
+    Tip,
+    TipChoice,
+    TipRequest,
+    TipStatus,
+    TipTransferStatus,
+)
+
+# A tip transfer Stripe has not made: an attempt may start (#273 PR A2).
+_TRANSFER_NOT_MADE: Final = frozenset(set(TipTransferStatus) - TIP_TRANSFER_MADE)
 
 # The columns a choice writes: what the customer chose and the amount it comes to.
 _NO_TIP: Final = {"choice": TipChoice.NONE, "percent": None, "amount_cents": 0}
@@ -30,6 +41,11 @@ class TipRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def get(self, tip_id: uuid.UUID) -> Tip | None:
+        """The tip, unlocked: for reads."""
+        statement = select(Tip).where(Tip.id == tip_id).execution_options(populate_existing=True)
+        return (await self._session.scalars(statement)).one_or_none()
 
     async def get_by_job(self, job_id: uuid.UUID) -> Tip | None:
         """The job's tip, unlocked: for reads."""
@@ -267,3 +283,227 @@ class TipRepository:
         if after is not None:
             statement = statement.where(Tip.id > after)
         return list((await self._session.scalars(statement)).all())
+
+
+def _transfer_unchecked(retry_before: datetime) -> tuple[ColumnElement[bool], ...]:
+    """A created tip transfer whose read after its create has not succeeded, last tried at or
+    before `retry_before` (or never)."""
+    return (
+        Tip.transfer_status == TipTransferStatus.CREATED,
+        Tip.stripe_transfer_id.is_not(None),
+        Tip.transfer_reversal_checked_at.is_(None),
+        or_(
+            Tip.transfer_reversal_check_tried_at.is_(None),
+            Tip.transfer_reversal_check_tried_at <= retry_before,
+        ),
+    )
+
+
+class TipTransferRepository:
+    """The transfer columns of tips (#273 PR A2; tips/transfers.py). Every write is a
+    conditional UPDATE: a transfer Stripe made (created, reversed) is never taken back, and an
+    attempt's outcome is written only while it is the row's attempt."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def job_of(self, tip_id: uuid.UUID) -> uuid.UUID | None:
+        """The tip's job, unlocked (it never changes): the caller locks the job, then the tip."""
+        return await self._session.scalar(select(Tip.job_id).where(Tip.id == tip_id))
+
+    async def start_attempt(self, tip_id: uuid.UUID, now: datetime, key: str) -> int | None:
+        """Stamps an attempt starting `now` and returns its number: pending, no error code, one
+        more attempt, the key stored once (the same for every attempt). None once Stripe made
+        the transfer. The caller holds the row's lock and commits before any Stripe call."""
+        statement = (
+            update(Tip)
+            .where(
+                Tip.id == tip_id,
+                Tip.status == TipStatus.SUCCEEDED,
+                Tip.transfer_status.in_(_TRANSFER_NOT_MADE),
+            )
+            .values(
+                transfer_status=TipTransferStatus.PENDING,
+                transfer_last_error_code=None,
+                transfer_requested_at=now,
+                transfer_attempts=Tip.transfer_attempts + 1,
+                transfer_idempotency_key=func.coalesce(Tip.transfer_idempotency_key, key),
+            )
+            .returning(Tip.transfer_attempts)
+        )
+        return await self._session.scalar(statement)
+
+    async def hold(self, tip_id: uuid.UUID, code: str) -> None:
+        """Held with `code`, no attempt started (the pro cannot be paid yet, or staff must
+        look); nothing once Stripe made the transfer. The caller holds the row's lock."""
+        await self._session.execute(
+            update(Tip)
+            .where(
+                Tip.id == tip_id,
+                Tip.status == TipStatus.SUCCEEDED,
+                Tip.transfer_status.in_(_TRANSFER_NOT_MADE),
+            )
+            .values(transfer_status=TipTransferStatus.HELD, transfer_last_error_code=code)
+        )
+
+    async def is_attempt(self, tip_id: uuid.UUID, attempt: int) -> bool:
+        """Whether attempt number `attempt` is still the row's attempt under way, its row
+        locked: no later one started, no outcome recorded, no transfer stored."""
+        statement = (
+            select(Tip.id)
+            .where(
+                Tip.id == tip_id,
+                Tip.transfer_attempts == attempt,
+                Tip.transfer_status == TipTransferStatus.PENDING,
+                Tip.transfer_last_error_code.is_(None),
+                Tip.stripe_transfer_id.is_(None),
+            )
+            .with_for_update()
+        )
+        return (await self._session.scalar(statement)) is not None
+
+    async def end_attempt(
+        self, tip_id: uuid.UUID, attempt: int, status: TipTransferStatus, code: str
+    ) -> bool:
+        """Ends attempt number `attempt` as failed (tried again) or held (staff's) with `code`.
+        False (nothing written) when a later attempt started or the transfer was stored."""
+        statement = (
+            update(Tip)
+            .where(
+                Tip.id == tip_id,
+                Tip.transfer_attempts == attempt,
+                Tip.transfer_status == TipTransferStatus.PENDING,
+                Tip.stripe_transfer_id.is_(None),
+            )
+            .values(transfer_status=status, transfer_last_error_code=code)
+            .returning(Tip.id)
+        )
+        return (await self._session.scalar(statement)) is not None
+
+    async def mark_created(self, tip_id: uuid.UUID, stripe_transfer_id: str, now: datetime) -> bool:
+        """Stores the transfer Stripe made unless the row holds one already; False then. Its
+        read after the create is still to succeed, and the caller's own starts `now`."""
+        statement = (
+            update(Tip)
+            .where(
+                Tip.id == tip_id,
+                Tip.transfer_status.in_(_TRANSFER_NOT_MADE),
+                Tip.stripe_transfer_id.is_(None),
+            )
+            .values(
+                transfer_status=TipTransferStatus.CREATED,
+                stripe_transfer_id=stripe_transfer_id,
+                transfer_last_error_code=None,
+                transfer_reversal_check_tried_at=now,
+                transfer_reversal_checked_at=None,
+            )
+            .returning(Tip.id)
+        )
+        return (await self._session.scalar(statement)) is not None
+
+    async def mark_reversed(self, stripe_transfer_id: str) -> tuple[uuid.UUID, uuid.UUID] | None:
+        """created -> reversed for the tip holding this Stripe transfer; its (id, job id), or
+        None when no tip holds it as created. Only the exact Stripe id selects the row."""
+        statement = (
+            update(Tip)
+            .where(
+                Tip.stripe_transfer_id == stripe_transfer_id,
+                Tip.transfer_status == TipTransferStatus.CREATED,
+            )
+            .values(transfer_status=TipTransferStatus.REVERSED)
+            .returning(Tip.id, Tip.job_id)
+        )
+        row = (await self._session.execute(statement)).one_or_none()
+        return None if row is None else (row.id, row.job_id)
+
+    async def due(
+        self,
+        payable: Subquery,
+        blocked: Subquery,
+        waiting_codes: frozenset[str],
+        retry_before: datetime,
+        limit: int,
+    ) -> list[uuid.UUID]:
+        """Up to `limit` ids of the succeeded tips whose transfer may be tried now: never
+        flagged for staff (late_success_at), their pro can be paid out (`payable`: pro_id),
+        their job had no dispute or refund (`blocked`: job_id), and the transfer is not made:
+        never tried; failed, or an attempt started at or before `retry_before` (a dead
+        worker's); or held for a reason in `waiting_codes` (the pro's payout setup). A tip held
+        for staff is theirs. Least recently tried first (never tried before all), then by id.
+        Unlocked: the release checks each again under its locks."""
+        statement = (
+            select(Tip.id)
+            .join(payable, payable.c.pro_id == Tip.pro_id)
+            .where(
+                Tip.status == TipStatus.SUCCEEDED,
+                Tip.late_success_at.is_(None),
+                Tip.job_id.not_in(select(blocked.c.job_id)),
+                or_(
+                    Tip.transfer_status == TipTransferStatus.NONE,
+                    Tip.transfer_status.in_((TipTransferStatus.FAILED, TipTransferStatus.PENDING))
+                    & (
+                        Tip.transfer_requested_at.is_(None)
+                        | (Tip.transfer_requested_at <= retry_before)
+                    ),
+                    (Tip.transfer_status == TipTransferStatus.HELD)
+                    & Tip.transfer_last_error_code.in_(waiting_codes),
+                ),
+            )
+            .order_by(Tip.transfer_requested_at.asc().nulls_first(), Tip.id)
+            .limit(limit)
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def unchecked_for_reversal(self, retry_before: datetime, limit: int) -> list[uuid.UUID]:
+        """Up to `limit` ids of the created tip transfers whose read after the create has not
+        succeeded (see _transfer_unchecked), least recently tried first, then by id. Unlocked:
+        claim_reversal_check checks each again."""
+        statement = (
+            select(Tip.id)
+            .where(*_transfer_unchecked(retry_before))
+            .order_by(Tip.transfer_reversal_check_tried_at.asc().nulls_first(), Tip.id)
+            .limit(limit)
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def claim_reversal_check(
+        self, tip_id: uuid.UUID, now: datetime, retry_before: datetime
+    ) -> str | None:
+        """Stamps a reversal check starting `now` if the row still needs one and none started
+        after `retry_before`; its Stripe transfer id then, else None. The caller commits before
+        reading Stripe."""
+        statement = (
+            update(Tip)
+            .where(Tip.id == tip_id, *_transfer_unchecked(retry_before))
+            .values(transfer_reversal_check_tried_at=now)
+            .returning(Tip.stripe_transfer_id)
+        )
+        return await self._session.scalar(statement)
+
+    async def mark_reversal_checked(
+        self, tip_id: uuid.UUID, stripe_transfer_id: str, now: datetime
+    ) -> None:
+        """The read of the stored transfer succeeded `now`. The caller commits."""
+        await self._session.execute(
+            update(Tip)
+            .where(Tip.id == tip_id, Tip.stripe_transfer_id == stripe_transfer_id)
+            .values(transfer_reversal_checked_at=now)
+        )
+
+    @staticmethod
+    def payout_facts() -> Subquery:
+        """Each succeeded tip's job (`job_id`), amount (`tip_cents`), whether Stripe made its
+        transfer (`tip_made`: created or paid) and whether it was reversed since
+        (`tip_reversed`), for the pro's earnings. Never a Stripe id."""
+        return (
+            select(
+                Tip.job_id.label("job_id"),
+                Tip.amount_cents.label("tip_cents"),
+                Tip.transfer_status.in_((TipTransferStatus.CREATED, TipTransferStatus.PAID)).label(
+                    "tip_made"
+                ),
+                (Tip.transfer_status == TipTransferStatus.REVERSED).label("tip_reversed"),
+            )
+            .where(Tip.status == TipStatus.SUCCEEDED)
+            .subquery()
+        )

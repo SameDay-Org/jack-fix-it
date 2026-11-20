@@ -90,6 +90,8 @@ KIND_GROUP: Final[Mapping[str, PreferenceGroup]] = MappingProxyType(
         "booking_not_completed": PreferenceGroup.JOB_UPDATES,  # to a customer
         # Stripe enabled an approved pro's payouts (#280): about their account.
         "payouts_enabled": PreferenceGroup.ACCOUNT_AND_SECURITY,  # to a pro
+        # A tip the customer paid on a confirmed job (#273): about the job.
+        "tip_received": PreferenceGroup.JOB_UPDATES,  # to a pro
     }
 )
 

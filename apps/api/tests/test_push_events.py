@@ -96,6 +96,8 @@ CALLERS = (
     ),
     # Home: the pro's opportunities show there once payouts are on (#280).
     Caller("push_payouts_enabled", "pro_user_id", "payouts_enabled:{stripe_event_id}", "/"),
+    # A tip succeeds once (#273 PR A2): one message per tip, opening the pro's job.
+    Caller("push_tip_received", "pro_user_id", "tip_received:{tip_id}", "/jobs/{job_id}"),
 )
 
 

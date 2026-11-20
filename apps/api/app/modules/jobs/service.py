@@ -374,6 +374,13 @@ class JobTipReader:
             return None
         return tip_facts(job)
 
+    async def locked(self, job_id: uuid.UUID) -> JobTipFacts | None:
+        """The job, its row locked FOR UPDATE until the caller's transaction ends (the lock
+        every status change, a dispute and a refund take), read as last committed; None for an
+        unknown job. For a tip's transfer (#273 PR A2)."""
+        job = await self._jobs.get_for_update(job_id)
+        return None if job is None else tip_facts(job)
+
 
 @dataclass(frozen=True)
 class JobReceiptFacts:

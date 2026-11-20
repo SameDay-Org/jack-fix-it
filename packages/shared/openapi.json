@@ -12225,7 +12225,12 @@
           "amount_cents": {
             "type": "integer",
             "title": "Amount Cents",
-            "description": "What the pro receives, in integer cents."
+            "description": "What the pro receives for the job, in integer cents (never the tip)."
+          },
+          "tip_cents": {
+            "type": "integer",
+            "title": "Tip Cents",
+            "description": "The customer's tip on the job, all of it the pro's, in integer cents; 0 when none. Its own transfer: the summary counts it by that transfer's state."
           },
           "status": {
             "$ref": "#/components/schemas/EarningStatus"
@@ -12268,6 +12273,7 @@
           "job_id",
           "category",
           "amount_cents",
+          "tip_cents",
           "status",
           "completed_at",
           "paid_at",
@@ -12330,7 +12336,7 @@
           "pending_cents": {
             "type": "integer",
             "title": "Pending Cents",
-            "description": "Confirmed, the transfer still to be made."
+            "description": "Confirmed, the transfer still to be made; a tip whose own transfer is."
           },
           "on_hold_cents": {
             "type": "integer",

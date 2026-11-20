@@ -15,8 +15,12 @@
   back for the pro's payout setup, or failed and retried); on_hold (a dispute is open, or
   Stripe reversed the transfer: staff look); paid (the transfer was made; `paid_at` is the
   job's move to paid_out).
-- Summary: each status's total over all the pro's jobs (pending_cents is on_the_way); the
-  items of every page add up to it.
+- Tips (#273 PR A2): `tip_cents` is the job's succeeded tip, all of it the pro's (0 when
+  none), beside the job's own amount. The summary counts each tip by its own transfer, never
+  the job's: pending while the tip's transfer is not made, paid once Stripe made it, on hold
+  once Stripe reversed it.
+- Summary: each status's total over all the pro's jobs and their tips (pending_cents is
+  on_the_way); the items of every page add up to it (amount_cents and tip_cents).
 - Order: newest completion first, then by job id; the cursor carries both, so equal times page
   stably.
 - Never in the answer: the customer's name, contacts or address, the platform's fee, Stripe or
@@ -99,6 +103,7 @@ class EarningsService:
                     job_id=row.job_id,
                     category=_category(names, categories.get(row.request_id)),
                     amount_cents=row.amount_cents,
+                    tip_cents=row.tip_cents,
                     status=row.status,
                     completed_at=row.completed_at,
                     paid_at=row.paid_at,

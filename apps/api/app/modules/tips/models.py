@@ -43,14 +43,28 @@ class TipStatus(StrEnum):
 
 
 class TipTransferStatus(StrEnum):
-    """The tip's transfer to the pro (#273 PR A2): `none` until a tip succeeds."""
+    """The tip's transfer of the whole tip to the pro (#273 PR A2; tips/transfers.py)."""
 
+    # No attempt yet: the tip has not succeeded, or its release has not run.
     NONE = "none"
+    # An attempt is under way: transfer_requested_at stamped, no error code.
     PENDING = "pending"
+    # Stripe made the transfer: stripe_transfer_id is stored.
     CREATED = "created"
+    # The spec's payout reading (the connected account paid the money out): nothing writes it
+    # yet, as for the job's transfer (#68: payouts are out of scope).
     PAID = "paid"
+    # The last attempt ended with an error (transfer_last_error_code); it is tried again.
     FAILED = "failed"
+    # No attempt is made (transfer_last_error_code says why): the pro cannot be paid out yet
+    # (tried again once they can), or staff must look (never tried again by itself).
     HELD = "held"
+    # Stripe reversed the transfer (transfer.reversed, or the read after its create): staff's.
+    REVERSED = "reversed"
+
+
+# Statuses of a tip transfer Stripe made: the row holds its id, and nothing creates another.
+TIP_TRANSFER_MADE: Final = frozenset({TipTransferStatus.CREATED, TipTransferStatus.REVERSED})
 
 
 # A tip still waiting for the customer to pay: the unpaid sweep cancels its PaymentIntent past
@@ -87,6 +101,15 @@ class Tip(IdTimestampsMixin, Base):
         ),
         CheckConstraint("card_last4 ~ '^[0-9]{4}$'", name="card_last4_four_digits"),
         CheckConstraint("transfer_attempts >= 0", name="transfer_attempts_non_negative"),
+        # #273 PR A2: a made transfer holds its Stripe id, and only a succeeded tip has one.
+        CheckConstraint(
+            "transfer_status NOT IN ('created', 'reversed') OR stripe_transfer_id IS NOT NULL",
+            name="transfer_made_has_id",
+        ),
+        CheckConstraint(
+            "transfer_status = 'none' OR status = 'succeeded'",
+            name="transfer_only_when_succeeded",
+        ),
         # The unpaid sweep's read: the tips still unpaid, by their current attempt's age.
         Index(
             "ix_tips_unpaid_requested_at",
@@ -129,6 +152,13 @@ class Tip(IdTimestampsMixin, Base):
     transfer_attempts: Mapped[int] = mapped_column(server_default="0")
     transfer_last_error_code: Mapped[str | None] = mapped_column(String(64))
     transfer_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The read of the stored transfer after its create (#273 PR A2, as #416 r2 for a job's):
+    # when it was last tried, and when one succeeded. NULL checked_at with a created transfer:
+    # the recovery cron reads it again.
+    transfer_reversal_check_tried_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    transfer_reversal_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # When the tip's receipt email was sent (#62).
     receipt_emailed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # #510 round 1: Stripe refused the current attempt's create for good (a code of
