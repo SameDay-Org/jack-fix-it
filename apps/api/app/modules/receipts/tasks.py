@@ -9,7 +9,8 @@ One run, for a payment (a tip runs the same steps on its own row):
    (forward only). This is where a receipt learns the card: never inside the booking's webhook,
    which a Stripe outage must not delay. Stripe failing: the run is tried again later
    (RECEIPT_EMAIL_RETRY_SECONDS) while tries are left (RECEIPT_EMAIL_MAX_ATTEMPTS); the last
-   try sends without the card ("Card"), which the app's receipt shows too until a later read.
+   try sends without the card ("Card"). Nothing runs again after that, nor after the stamp:
+   the app's receipt keeps "Card" too (a sweep for unsent receipts is a follow-up).
 3. The email, in the account's locale, to the account's email, with the provider's
    idempotency key `payment-receipt:<payment id>` (`tip-receipt:<tip id>`): a retry after a
    lost answer sends nothing more. Accepted: receipt_emailed_at is stamped once. Resend

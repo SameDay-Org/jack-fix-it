@@ -14,6 +14,7 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.modules.addresses.models import Address
 from app.modules.disputes.models import Dispute, DisputeReason
 from app.modules.jobs.models import Job, JobStatus
 from app.modules.payments.models import Payment, Refund, RefundStatus
@@ -337,3 +338,20 @@ async def test_a_payment_that_did_not_succeed_has_no_receipt(
     response = await receipt(db_client, world, job)
 
     assert (response.status_code, response.json()) == (404, NOT_AVAILABLE)
+
+
+async def test_the_customer_s_own_address_is_shown_as_they_typed_it(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    """The receipt reads the customer's own request, never the pro's view of it, which masks
+    contacts typed into the address: a phone in their own line 1 stays as they typed it."""
+    typed = "gate phone 305-555-0163"
+    await db_session.execute(
+        update(Address).where(Address.id == world.address_id).values(line1=typed)
+    )
+    job, _ = await paid_job(db_session, world)
+
+    response = await receipt(db_client, world, job)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["address"]["line1"] == typed
