@@ -120,6 +120,16 @@ jobs:
       - run: pnpm -r typecheck
       - run: pnpm -r lint
       - run: pnpm -r test
+      # The demo tour's host guard, proven in a real browser (docs/demo-video.md): the runner's
+      # own Chrome, nothing downloaded. Its one dependency is outside the workspace.
+      - name: Demo tour guard
+        working-directory: scripts/demo
+        timeout-minutes: 5
+        env:
+          DEMO_BROWSER_CHANNEL: chrome
+        run: |
+          pnpm install --ignore-workspace --frozen-lockfile
+          node --test
       - run: pnpm --filter @jack/web build
       # First-load JavaScript of the showcase page against its budget (#403); needs the build.
       - run: pnpm --filter @jack/web check:bundle
