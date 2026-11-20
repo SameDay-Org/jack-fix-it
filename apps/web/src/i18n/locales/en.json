@@ -399,7 +399,7 @@
         "retry": "That didn't go through. Press Notify me again.",
         "stale": "This page was open for a while. Press Notify me again.",
         "rate_limited": "Too many tries from here. Wait a few minutes, then try again.",
-        "rate_limited_in": "Too many tries from here. Try again in {{minutes}} min.",
+        "rate_limited_in": "Too many tries from here. Try again in {{minutes}}\u00a0min.",
         "unavailable": "We couldn't save your email right now. Try again in a moment."
       }
     },

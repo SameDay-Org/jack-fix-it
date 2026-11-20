@@ -130,7 +130,8 @@ describe("the interest form (#409)", () => {
     await type("ana@example.com");
     await send();
     const alert = () => container.querySelector('[role="alert"]')?.textContent;
-    expect(alert()).toBe("Too many tries from here. Try again in 3 min.");
+    // A no-break space keeps the number with its unit when the line wraps.
+    expect(alert()).toBe("Too many tries from here. Try again in 3\u00a0min.");
     await send();
     expect(alert()).toBe(TEXT.errors.rate_limited);
   });
