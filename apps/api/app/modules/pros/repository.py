@@ -80,6 +80,40 @@ class ProProfileRepository:
         )
         return list((await self._session.scalars(statement)).all())
 
+    async def approved_in(
+        self, category_id: uuid.UUID, service_area_ids: Collection[uuid.UUID]
+    ) -> list[ProProfile]:
+        """The approved profiles in the category and in one of the areas, payouts enabled or
+        not: the pros staff may weigh for a request (#82)."""
+        if not service_area_ids:
+            return []
+        in_category = select(ProCategory.pro_id).where(ProCategory.category_id == category_id)
+        in_areas = select(ProServiceArea.pro_id).where(
+            ProServiceArea.service_area_id.in_(service_area_ids)
+        )
+        statement = select(ProProfile).where(
+            ProProfile.verification_status == ProVerificationStatus.APPROVED,
+            ProProfile.id.in_(in_category),
+            ProProfile.id.in_(in_areas),
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def with_coverage(
+        self, pro_id: uuid.UUID, category_id: uuid.UUID, service_area_ids: Collection[uuid.UUID]
+    ) -> tuple[ProProfile, bool, bool] | None:
+        """(the profile, whether it lists the category, whether it lists one of the areas), in
+        one query; None when no profile has this id (#82)."""
+        in_category = exists().where(
+            ProCategory.pro_id == pro_id, ProCategory.category_id == category_id
+        )
+        in_area = exists().where(
+            ProServiceArea.pro_id == pro_id,
+            ProServiceArea.service_area_id.in_(service_area_ids),
+        )
+        statement = select(ProProfile, in_category, in_area).where(ProProfile.id == pro_id)
+        row = (await self._session.execute(statement)).one_or_none()
+        return None if row is None else (row[0], bool(row[1]), bool(row[2]))
+
     @staticmethod
     def photo_keys_among(keys: Collection[str]) -> Select[str | None]:
         """The photo keys among `keys` that profiles hold, for another module's query."""
