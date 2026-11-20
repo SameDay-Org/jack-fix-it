@@ -19,6 +19,15 @@ LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 # What the orphan upload sweep does (#191): nothing, count only, or delete.
 OrphanUploadMode = Literal["off", "dry_run", "delete"]
 
+# The safe-copy sweep's optional settings (#473): an invalid value falls back to its documented
+# default instead of stopping the worker (#491 round 1), with each one's highest accepted value.
+_RESWEEP_SETTINGS: dict[str, int | None] = {
+    "media_sanitize_resweep_minutes": 60,
+    "media_sanitize_resweep_after_minutes": None,
+    "media_sanitize_resweep_batch_size": None,
+    "media_sanitize_resweep_timeout_seconds": None,
+}
+
 # Optional whole-number settings that a bad value must never stop the API or the worker for: a
 # value that is not a whole number from 1 to its highest (None: no highest) is the field's
 # default, with a warning naming the setting, never its value (_int_or_default, #478).
@@ -272,6 +281,17 @@ class Settings(BaseSettings):
     # The end of each try, kept for after its work: asking ARQ for the next try or, on the last
     # one, failing what is left in one write. It also covers ARQ's own start of the job.
     media_sanitize_settle_seconds: float = Field(default=60.0, gt=0)
+    # Safe copies left pending (#473): an outage of the storage or of ffmpeg that outlasted a
+    # copy's tries leaves its row pending, as does a copy that was never queued. Every
+    # MEDIA_SANITIZE_RESWEEP_MINUTES (a cron, minutes of the hour) the worker queues the copy
+    # again for up to MEDIA_SANITIZE_RESWEEP_BATCH_SIZE rows of each kind (request media, job
+    # photos, dispute photos) pending for longer than MEDIA_SANITIZE_RESWEEP_AFTER_MINUTES, in
+    # at most MEDIA_SANITIZE_RESWEEP_TIMEOUT_SECONDS. A copy is idempotent per row, so one
+    # queued while an earlier chain of tries still runs only repeats its work.
+    media_sanitize_resweep_minutes: int = Field(default=30, ge=1, le=60)
+    media_sanitize_resweep_after_minutes: int = Field(default=60, gt=0)
+    media_sanitize_resweep_batch_size: int = Field(default=100, gt=0)
+    media_sanitize_resweep_timeout_seconds: int = Field(default=120, gt=0)
     # Characters of a request's description shown in a pro's opportunities list (#49).
     opportunity_excerpt_chars: int = Field(default=160, gt=0)
     # Pro profile (D6.1, #36): the most categories and service areas one pro may list.
@@ -421,6 +441,12 @@ class Settings(BaseSettings):
     cancel_refund_sweep_minutes: int = Field(default=5, ge=1, le=60)
     cancel_refund_sweep_timeout_seconds: int = Field(default=270, gt=0)
     cancel_refund_batch_size: int = Field(default=50, gt=0)
+    # How many cancel previews, and how many cancels (a retry with the same Idempotency-Key
+    # counts too), one customer may ask for per window (#489 round 1).
+    cancel_preview_limit: int = Field(default=60, gt=0)
+    cancel_preview_window_seconds: int = Field(default=60, gt=0)
+    cancel_write_limit: int = Field(default=20, gt=0)
+    cancel_write_window_seconds: int = Field(default=600, gt=0)
     # Job execution (D12.2, #63): wrong arrival codes a pro may enter at check-in before the
     # code locks and the BDC is alerted (Cesar, 2026-10-29: 5).
     arrival_code_max_attempts: int = Field(default=5, gt=0)
@@ -595,6 +621,24 @@ class Settings(BaseSettings):
         if "*" in value:
             raise ValueError("CORS_ORIGINS must list explicit origins, not '*'")
         return value
+
+    @field_validator(*_RESWEEP_SETTINGS, mode="before")
+    @classmethod
+    def _resweep_or_default(cls, value: object, info: ValidationInfo) -> object:
+        """An optional sweep setting that is not a whole number in range (empty, a word, 0, a
+        negative, a fraction) is its default, with a warning naming the setting (never its
+        value): the worker still starts (#491 round 1)."""
+        name = info.field_name or ""
+        highest = _RESWEEP_SETTINGS[name]
+        number: int | None = None
+        if type(value) is int:
+            number = value
+        elif isinstance(value, str) and value.strip().isdigit():
+            number = int(value.strip())
+        if number is None or number < 1 or (highest is not None and number > highest):
+            logger.warning("setting_invalid_default_used", extra={"setting": name.upper()})
+            return cls.model_fields[name].default
+        return number
 
     @field_validator("media_video_codecs", "media_audio_codecs", mode="before")
     @classmethod

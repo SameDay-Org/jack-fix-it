@@ -1,5 +1,6 @@
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardTitle } from "@/components/ui/card";
@@ -39,6 +40,8 @@ export default async function TicketPage({ params }: { params: Promise<{ ticketI
   const t = await getT(locale);
   const { ticketId } = await params;
   const ticket = isUuid(ticketId) ? await loadTicket(await staffAuth(), ticketId) : "not_found";
+  // A ticket that does not exist answers 404, with its own heading (not-found.tsx, #494).
+  if (ticket === "not_found") notFound();
 
   return (
     <div className="flex max-w-3xl flex-col gap-6">
@@ -49,11 +52,7 @@ export default async function TicketPage({ params }: { params: Promise<{ ticketI
         <ArrowLeft aria-hidden className="size-4" />
         {t("admin.support.detail.back")}
       </Link>
-      {ticket === "not_found" ? (
-        <Card>
-          <p className="font-semibold">{t("admin.support.detail.notFound")}</p>
-        </Card>
-      ) : ticket === "error" ? (
+      {ticket === "error" ? (
         <Card role="alert">
           <p className="font-semibold text-danger">{t("admin.support.detail.loadError")}</p>
         </Card>

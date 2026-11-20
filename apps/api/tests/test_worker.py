@@ -20,6 +20,7 @@ from app.integrations.stripe_transfers import StripeTransfersClient
 from app.modules.chat.tasks import purge_chat_originals
 from app.modules.dispatch.tasks import dispatch_request, redispatch_stalled_requests
 from app.modules.jobs.tasks import auto_confirm_jobs
+from app.modules.media.resweep import requeue_stale_media_copies
 from app.modules.notifications.push_tasks import check_push_receipts
 from app.modules.payments.cancel_refund_tasks import retry_cancel_refunds
 from app.modules.payments.tasks import cancel_unpaid_payments
@@ -115,6 +116,12 @@ def test_cron_jobs_keep_names_cadences_and_timeouts() -> None:
             check_push_receipts,
             every(get_settings().push_receipt_check_minutes),
             None,
+            1,
+        ),
+        "cron:requeue_stale_media_copies": (
+            requeue_stale_media_copies,
+            every(get_settings().media_sanitize_resweep_minutes),
+            get_settings().media_sanitize_resweep_timeout_seconds,
             1,
         ),
         "cron:sweep_orphan_uploads": (

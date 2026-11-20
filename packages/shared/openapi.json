@@ -8538,6 +8538,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "rate_limited: too many previews or cancels by this customer in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -8649,6 +8659,16 @@
           },
           "409": {
             "description": "cancel_not_allowed: the work started, or the job is done, confirmed, paid out, disputed or refunded (the message names its status): report a problem instead; cancel_needs_review: the job's payment needs a look by staff first; cancel_fee_changed: expected_fee_cents differs from the fee cancelling now costs (the pro set off since the preview); idempotency_key_reused: the caller already used this Idempotency-Key with a different body or on another job. Nothing was changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many previews or cancels by this customer in the window; Retry-After says when to try again.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10783,6 +10803,18 @@
             "type": "integer",
             "title": "Photos Pending",
             "description": "Photos whose copy is still being prepared."
+          },
+          "customer_refund_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Refund Cents",
+            "description": "What the resolution gives back to the customer (#472): 0 for a release, part of the payment for a partial, the whole payment for a refund; null while open. Always sent; optional in the schema so clients built before #472 keep compiling."
           }
         },
         "additionalProperties": false,
@@ -10935,6 +10967,28 @@
             "type": "integer",
             "title": "Customer Total Cents",
             "description": "What the customer paid: amount plus tax."
+          },
+          "dispute_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DisputeStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The job's reported problem, if any (#472): open, or resolved. null when none was reported. Optional in the schema so older clients keep compiling."
+          },
+          "dispute_resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DisputeResolution"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How an admin resolved it (released, partial_release, refunded); null while open or without a report."
           },
           "cancellation": {
             "anyOf": [
@@ -14126,6 +14180,18 @@
             "type": "integer",
             "title": "Pro Payout Cents",
             "description": "What the pro receives for the job."
+          },
+          "pro_receives_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Receives Cents",
+            "description": "What the pro will actually receive for this job (#488): the full payout normally and while a reported problem is open (under review); once an admin resolved it, the full payout for a release, the released part for a partial, 0 for a refund; 0 for a cancelled or refunded job. pro_payout_cents stays the quote's frozen payout. Always sent; optional in the schema so older clients keep compiling."
           },
           "cancellation": {
             "anyOf": [
@@ -18737,7 +18803,7 @@
               }
             ],
             "title": "Last Error Code",
-            "description": "Why the last attempt did not make the transfer: a Stripe error code, an error class, `payouts_not_enabled` or `transfer_needs_review`. Never a message."
+            "description": "Why the last attempt did not make the transfer: a Stripe error code, an error class, `payouts_not_enabled`, `pro_not_approved`, `held_before_create` (a hold seen at the last check before the create) or `transfer_needs_review`. Never a message."
           },
           "requested_at": {
             "anyOf": [
@@ -18751,6 +18817,32 @@
             ],
             "title": "Requested At",
             "description": "When the latest attempt started."
+          },
+          "create_may_have_been_issued_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Create May Have Been Issued At",
+            "description": "When an attempt first went past the last check before the create (#450 round 5): from then on Stripe may hold a transfer of the job, even while a later attempt retries. Kept for good; null when no attempt ever got that far."
+          },
+          "needs_reversal_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Needs Reversal At",
+            "description": "When a refund made late for the job's dispute found this transfer made, or possibly made (#450 round 4): the hold came too late to stop it. Staff reverse it in Stripe by hand and clear the flag (docs/stripe-money.md); nothing reverses or clears it automatically. null otherwise."
           },
           "created_at": {
             "type": "string",
@@ -18777,6 +18869,8 @@
           "attempts",
           "last_error_code",
           "requested_at",
+          "create_may_have_been_issued_at",
+          "needs_reversal_at",
           "created_at",
           "updated_at"
         ],

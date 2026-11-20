@@ -13,7 +13,10 @@ const { context } = vi.hoisted(() => ({
   context: { store: null as null | { getStore: () => unknown } },
 }));
 
-vi.mock("next/headers", () => ({ cookies: async () => context.store?.getStore() }));
+vi.mock("next/headers", () => ({
+  cookies: async () => context.store?.getStore(),
+  headers: async () => new Headers(),
+}));
 vi.mock("next/navigation", async () => {
   const { RedirectSignal: Signal } = await import("./test-helpers");
   return {

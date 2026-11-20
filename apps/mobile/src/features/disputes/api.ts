@@ -1,5 +1,7 @@
 import type { ApiSchema } from "@jack/shared";
 import { queryOptions, useQuery, type QueryClient } from "@tanstack/react-query";
+import { useIsFocused } from "expo-router";
+import { useCallback } from "react";
 
 import {
   ApiError,
@@ -12,7 +14,9 @@ import {
   useSessionGeneration,
 } from "@/api";
 import { invalidateMyRequests } from "@/features/history/useMyRequests";
-import { refreshCustomerJob } from "@/features/jobs/api";
+import { refreshCustomerJob, useInForeground } from "@/features/jobs/api";
+import { jobsConfig } from "@/features/jobs/config";
+import { useRefetchOnReturn } from "@/features/quotes/useRequestQuotes";
 
 export type CustomerDisputeView = ApiSchema<"CustomerDisputeView">;
 export type CustomerDispute = ApiSchema<"CustomerDisputeOut">;
@@ -130,10 +134,33 @@ export const proDisputeQueryOptions = (jobId: string, generation: number) =>
     retry: false,
   });
 
+/**
+ * The report on the pro's job, kept fresh while it is open (#469): asked again on focus and
+ * foreground, and every `jobsConfig.pollMs` while the screen is focused and the app in the
+ * foreground, until staff resolve it.
+ */
 export function useProDispute(jobId: string, { enabled = true } = {}) {
   const generation = useSessionGeneration();
   const signedIn = useSession().status === "signedIn";
-  return useQuery({ ...proDisputeQueryOptions(jobId, generation), enabled: enabled && signedIn });
+  const focused = useIsFocused();
+  const foreground = useInForeground();
+  const live = enabled && signedIn;
+  const query = useQuery({
+    ...proDisputeQueryOptions(jobId, generation),
+    enabled: live,
+    refetchInterval: (current) =>
+      live && focused && foreground && current.state.data?.dispute?.status === "open"
+        ? jobsConfig.pollMs
+        : false,
+  });
+  const { refetch: refetchQuery } = query;
+  // `refetch` runs even on a disabled query: nothing is asked for a signed-out session.
+  const refetch = useCallback(
+    () => (live ? refetchQuery() : Promise.resolve()),
+    [live, refetchQuery],
+  );
+  useRefetchOnReturn(refetch, live);
+  return { ...query, refetch };
 }
 
 /**

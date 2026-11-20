@@ -12,11 +12,13 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import Settings
 from app.integrations.storage import Storage
+from app.modules.media.copy_store import MediaCopyStore, RedisMediaCopyStore
 from app.modules.requests.media_copies import (
     REQUEST_MEDIA_ROWS,
     MediaCopier,
     MediaCopyConfig,
     MediaRows,
+    claim_seconds,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,9 +45,12 @@ async def run_media_copy(ctx: dict[str, Any], parent_id: str, rows: MediaRows) -
         # S3_* settings are missing (development without storage): the rows stay pending.
         logger.error("media_sanitize_storage_unconfigured", extra={field: parent_id})
         return "storage_unconfigured"
-    copier = MediaCopier(
-        ctx["session_factory"], storage, MediaCopyConfig.from_settings(settings), rows
-    )
+    config = MediaCopyConfig.from_settings(settings)
+    # The queue's own Redis holds the rows' claims (#491 round 1); tests may pass their own.
+    store: MediaCopyStore | None = ctx.get("media_copy_store")
+    if store is None and "redis" in ctx:
+        store = RedisMediaCopyStore(ctx["redis"], claim_seconds=claim_seconds(config))
+    copier = MediaCopier(ctx["session_factory"], storage, config, rows, store)
     attempt: int = ctx["job_try"]
     last = settings.media_sanitize_max_tries + SANITIZE_SPARE_TRIES
     try:

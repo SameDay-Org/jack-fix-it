@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 import { ArrowLeft, ExternalLink, Mail, MessageSquare, Phone } from "lucide-react";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
@@ -88,21 +89,17 @@ export default async function RequestPage({ params }: { params: Promise<{ reques
   const t = await getT(locale);
   const { requestId } = await params;
   const card = isUuid(requestId) ? await loadCard(await staffAuth(), requestId) : "not_found";
+  // A request that does not exist answers 404, with its own heading (not-found.tsx, #494).
+  if (card === "not_found") notFound();
   const now = new Date();
 
-  if (card === "not_found" || card === "error") {
+  if (card === "error") {
     return (
       <div className="flex max-w-3xl flex-col gap-6">
         <BackLink label={t("admin.requests.back")} />
-        {card === "not_found" ? (
-          <Card>
-            <p className="font-semibold">{t("admin.requests.notFound")}</p>
-          </Card>
-        ) : (
-          <Card role="alert">
-            <p className="font-semibold text-danger">{t("admin.requests.loadError")}</p>
-          </Card>
-        )}
+        <Card role="alert">
+          <p className="font-semibold text-danger">{t("admin.requests.loadError")}</p>
+        </Card>
       </div>
     );
   }

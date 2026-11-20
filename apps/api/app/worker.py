@@ -27,6 +27,7 @@ from app.modules.dispatch.tasks import (
 )
 from app.modules.disputes.tasks import dispute_photo_sanitize_task
 from app.modules.jobs.tasks import auto_confirm_jobs, photo_sanitize_task
+from app.modules.media.resweep import requeue_stale_media_copies
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
 from app.modules.payments.cancel_refund_tasks import refund_cancellation, retry_cancel_refunds
 from app.modules.payments.tasks import cancel_unpaid_payments
@@ -141,6 +142,14 @@ class WorkerSettings:
         cron(
             check_push_receipts,
             minute=every(get_settings().push_receipt_check_minutes),
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        # Safe copies an outage (or a missed queue) left pending (#473).
+        cron(
+            requeue_stale_media_copies,
+            minute=every(get_settings().media_sanitize_resweep_minutes),
+            timeout=get_settings().media_sanitize_resweep_timeout_seconds,
             keep_result=0,
             keep_result_forever=False,
         ),

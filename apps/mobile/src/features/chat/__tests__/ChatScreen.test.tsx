@@ -4,7 +4,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Slot } from "expo-router";
 import { act, fireEvent, renderRouter, screen, waitFor, within } from "expo-router/testing-library";
 import { createElement, useSyncExternalStore } from "react";
-import { AccessibilityInfo, AppState, Text } from "react-native";
+import { AccessibilityInfo, AppState, FlatList, Text } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import * as Reanimated from "react-native-reanimated";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -859,6 +859,75 @@ describe("the job chat screen (#74)", () => {
       expect(await screen.findByTestId(`chat-message-${stored.id}`)).toBeTruthy();
       expect(screen.queryByTestId("chat-pending-status")).toBeNull();
       expect(announcements()).toEqual(["Message not sent", "Message sent"]);
+    });
+
+    // #492: scrolled up, a send left its bubble out of sight: the scroll ran before the bubble's
+    // row existed, and the list then held the older messages in place for that row.
+    it("goes down to the newest once the new bubble's row is laid out, not before", async () => {
+      const scroll = jest.spyOn(FlatList.prototype, "scrollToOffset");
+      const held = deferred<ChatMessage>();
+      mockApi.send = () => held.promise;
+      await renderChat();
+      await screen.findByTestId("chat-input");
+      scroll.mockClear();
+      const resize = (height: number) =>
+        act(async () => {
+          await fireEvent(screen.getByTestId("chat-list"), "contentSizeChange", 288, height);
+        });
+
+      // A size change before any send moves nothing.
+      await resize(700);
+      expect(scroll).not.toHaveBeenCalled();
+
+      await typeAndSend("Coming down now");
+      expect(screen.getByTestId(/^chat-pending-/)).toBeTruthy();
+      expect(scroll).not.toHaveBeenCalled();
+
+      await resize(900);
+      // Without the glide: this suite runs under Reduce Motion.
+      expect(scroll.mock.calls).toEqual([[{ offset: 0, animated: false }]]);
+
+      // Later changes (a poll, an older page) leave the reader where they are.
+      await resize(1200);
+      expect(scroll).toHaveBeenCalledTimes(1);
+      scroll.mockRestore();
+    });
+
+    it("from more than a screen up, starts the list again at the newest, the bubble in it", async () => {
+      const scroll = jest.spyOn(FlatList.prototype, "scrollToOffset");
+      mockApi.send = () => deferred<ChatMessage>().promise;
+      await renderChat();
+      await screen.findByTestId("chat-input");
+      const list = () => screen.getByTestId("chat-list");
+      // The reader `y` dp up from the newest message, in a 400 dp list.
+      const scrollTo = (y: number) =>
+        fireEvent.scroll(list(), {
+          nativeEvent: {
+            contentOffset: { x: 0, y },
+            contentSize: { width: 320, height: 9000 },
+            layoutMeasurement: { width: 320, height: 400 },
+          },
+        });
+      await act(async () => {
+        await fireEvent(list(), "layout", {
+          nativeEvent: { layout: { x: 0, y: 0, width: 320, height: 400 } },
+        });
+        await scrollTo(5000);
+      });
+      const before = list();
+      scroll.mockClear();
+
+      await typeAndSend("Way down");
+
+      // A new list, which starts at the newest message: no scroll to undo, and the bubble in it.
+      expect(list()).not.toBe(before);
+      expect(within(list()).getByTestId(/^chat-pending-/)).toBeTruthy();
+      expect(list().props.maintainVisibleContentPosition).toBeDefined();
+      await act(async () => {
+        await fireEvent(list(), "contentSizeChange", 288, 9000);
+      });
+      expect(scroll).not.toHaveBeenCalled();
+      scroll.mockRestore();
     });
 
     it("too fast (429): the bubble can be tried again and the composer says why", async () => {

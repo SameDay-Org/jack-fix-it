@@ -17,7 +17,10 @@ export type QuoteCaps = Pick<
 export const SCOPE_MAX_LENGTH = 2000;
 export const APPROACH_MAX_LENGTH = 2000;
 
-/** The proposed start defaults to this hour of the customer's preferred day (#249). */
+/**
+ * The proposed start defaults to this hour of the customer's preferred day (#249), and never
+ * opens earlier in a day than it (#475).
+ */
 const DEFAULT_START_HOUR = 9;
 
 /** What the pro has typed and picked; kept as is while the form, the review and a retry come and go. */
@@ -57,7 +60,8 @@ export const emptyDraft = (startAt: number): QuoteDraft => ({
 
 /**
  * The start the form opens with: the customer's preferred day at 9:00 AM while that is still
- * ahead, otherwise the next whole hour.
+ * ahead, otherwise the next whole hour, moved to 9:00 AM when it falls in the small hours (a quote
+ * written at 1 AM opens on that morning, not on 2:00 AM).
  */
 export function defaultStartAt(preferredDate: string | null, now: number): number {
   if (preferredDate !== null) {
@@ -70,6 +74,7 @@ export function defaultStartAt(preferredDate: string | null, now: number): numbe
   const next = new Date(now);
   next.setMinutes(0, 0, 0);
   next.setHours(next.getHours() + 1);
+  if (next.getHours() < DEFAULT_START_HOUR) next.setHours(DEFAULT_START_HOUR);
   return next.getTime();
 }
 

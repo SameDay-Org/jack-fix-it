@@ -34,7 +34,7 @@ export type IdCardShareHandle = {
 
 export type IdCardShareRenderProps = Pick<
   IdCardProps,
-  "variant" | "name" | "city" | "state" | "photoUri" | "publicCode"
+  "variant" | "name" | "city" | "state" | "photoUri" | "publicCode" | "verified" | "memberSince"
 > & {
   ref?: Ref<IdCardShareHandle>;
   /**
@@ -119,6 +119,8 @@ export function IdCardShareRender({
   state,
   photoUri,
   publicCode,
+  verified,
+  memberSince,
   photoTimeoutMs,
   testID,
 }: IdCardShareRenderProps) {
@@ -224,6 +226,8 @@ export function IdCardShareRender({
           state={state}
           photoUri={photoUri}
           publicCode={publicCode}
+          verified={verified}
+          memberSince={memberSince}
           onPhotoLoadEnd={onPhotoLoadEnd}
           testID={testID ? `${testID}-card` : undefined}
         />
