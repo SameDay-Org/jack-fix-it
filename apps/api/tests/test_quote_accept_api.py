@@ -31,6 +31,7 @@ from app.modules.users.types import UserAccount, UserRole
 from app.observability import JsonFormatter
 from app.queue import get_job_queue
 from tests.conftest import make_settings
+from tests.helpers import REVIEW_PUBLISH_AFTER
 from tests.test_dispatch import record_commits
 from tests.test_opportunities_api import NOT_FOUND, T0, World, build_world, make_request
 from tests.test_quote_list_api import (
@@ -296,7 +297,7 @@ async def test_expiry_boundary_is_already_expired(
     request_id, [quote_id], _ = await open_request(db_session, world, count=1)
     stored = await db_session.get(Quote, quote_id)
     assert stored is not None
-    service = QuoteService(db_session, RecordingQueue(), ENQUEUE_TIMEOUT)
+    service = QuoteService(db_session, RecordingQueue(), ENQUEUE_TIMEOUT, REVIEW_PUBLISH_AFTER)
     actor = await customer_account(db_session, world)
 
     def frozen_at(moment: datetime) -> type[datetime]:
@@ -537,9 +538,9 @@ async def test_acceptance_is_atomic(
     actor = await customer_account(db_session, world)
     savepoint = await db_session.begin_nested()  # the request's transaction
     with pytest.raises(RuntimeError):
-        await QuoteService(db_session, RecordingQueue(), ENQUEUE_TIMEOUT).accept(
-            actor, request_id, quote_id
-        )
+        await QuoteService(
+            db_session, RecordingQueue(), ENQUEUE_TIMEOUT, REVIEW_PUBLISH_AFTER
+        ).accept(actor, request_id, quote_id)
     await savepoint.rollback()
 
     assert seen == [(RequestStatus.ACCEPTED, {quote_id: QuoteStatus.ACCEPTED})]
@@ -711,7 +712,7 @@ async def test_no_push_when_the_commit_fails(
     savepoint = await db_session.begin_nested()  # the request's transaction
     monkeypatch.setattr(AsyncSession, "commit", fail)
     with pytest.raises(RuntimeError):
-        await QuoteService(db_session, recorder, ENQUEUE_TIMEOUT).accept(
+        await QuoteService(db_session, recorder, ENQUEUE_TIMEOUT, REVIEW_PUBLISH_AFTER).accept(
             actor, request_id, quote_id
         )
     monkeypatch.undo()

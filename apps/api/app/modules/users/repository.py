@@ -37,6 +37,11 @@ class UserRepository:
         (the uploads sweep of unreferenced uploads, #191)."""
         return select(User.photo_key).where(User.photo_key.in_(keys))
 
+    @staticmethod
+    def active_ids_of_role(role: UserRole) -> Select[uuid.UUID]:
+        """The ids of the active accounts with `role`, as a statement."""
+        return select(User.id).where(User.role == role, User.status == UserStatus.ACTIVE)
+
     async def get_by_id(self, user_id: uuid.UUID) -> User | None:
         return await self._session.get(User, user_id)
 

@@ -2,7 +2,6 @@ import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
 
 from sqlalchemy import Select, Subquery, delete, exists, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
@@ -92,26 +91,57 @@ class ProProfileRepository:
 
     async def public_fields(
         self, pro_ids: Collection[uuid.UUID], *, hireable_only: bool
-    ) -> list[tuple[uuid.UUID, uuid.UUID, Decimal | None, int, int | None, ProVerificationStatus]]:
-        """(id, user_id, rating_avg, jobs_count, years_of_experience, verification_status) only:
-        never the bio, the photo key or the Stripe account. With `hireable_only`, only the pros
-        who still receive requests (approved, payouts enabled): the others cannot be hired or
-        paid out (#189)."""
+    ) -> list[tuple[uuid.UUID, uuid.UUID, int | None, ProVerificationStatus]]:
+        """(id, user_id, years_of_experience, verification_status) only: never the bio, the
+        photo key or the Stripe account. With `hireable_only`, only the pros who still receive
+        requests (approved, payouts enabled): the others cannot be hired or paid out (#189).
+        The rating and the jobs completed are computed by the reviews module (#78): the stored
+        rating_avg and jobs_count columns are never read."""
         if not pro_ids:
             return []
         hireable = _RECEIVES_REQUESTS if hireable_only else ()
         statement = select(
             ProProfile.id,
             ProProfile.user_id,
-            ProProfile.rating_avg,
-            ProProfile.jobs_count,
             ProProfile.years_of_experience,
             ProProfile.verification_status,
         ).where(ProProfile.id.in_(pro_ids), *hireable)
         return [
-            (row[0], row[1], row[2], row[3], row[4], row[5])
+            (row[0], row[1], row[2], row[3])
             for row in (await self._session.execute(statement)).all()
         ]
+
+    async def visible_profile(
+        self, pro_id: uuid.UUID, active_users: Select[uuid.UUID]
+    ) -> tuple[uuid.UUID, str | None, int | None, datetime, list[uuid.UUID]] | None:
+        """(user_id, bio, years_of_experience, created_at, category ids) of the profile when
+        it is approved and its account is among `active_users`; None otherwise (no such
+        profile, pending, rejected, an account suspended or no longer a pro's): one statement
+        whatever the reason (#78)."""
+        statement = (
+            select(
+                ProProfile.user_id,
+                ProProfile.bio,
+                ProProfile.years_of_experience,
+                ProProfile.created_at,
+                func.array_agg(ProCategory.category_id).filter(
+                    ProCategory.category_id.is_not(None)
+                ),
+            )
+            .outerjoin(ProCategory, ProCategory.pro_id == ProProfile.id)
+            .where(
+                ProProfile.id == pro_id,
+                ProProfile.verification_status == ProVerificationStatus.APPROVED,
+                ProProfile.user_id.in_(active_users),
+            )
+            .group_by(ProProfile.id)
+        )
+        row = (await self._session.execute(statement)).one_or_none()
+        if row is None:
+            return None
+        user_id, bio, years, created_at, category_ids = row
+        # array_agg over no row is NULL.
+        return user_id, bio, years, created_at, list(category_ids or [])
 
     async def public_details(
         self, pro_id: uuid.UUID
