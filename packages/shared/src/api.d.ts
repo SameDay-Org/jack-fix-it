@@ -1714,6 +1714,119 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/requests/{request_id}/more-info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask the customer for more information (staff)
+         * @description Keeps the question as an internal note, moves the request to reviewing (the state
+         *     machine's staff edge) and holds it there: no re-dispatch takes it until staff resume it,
+         *     change its status or assign a pro. The customer is not messaged (`customer_notified` is
+         *     false): no channel takes a staff message yet. Recorded in the audit log.
+         */
+        post: operations["staff_request_more_info_v1_admin_requests__request_id__more_info_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release a request held for the customer's answer (staff)
+         * @description Clears the hold; the next re-dispatch sweep takes the request when it can (received or
+         *     reviewing, a category, no offer yet). A request not on hold: nothing changes. Recorded in
+         *     the audit log.
+         */
+        post: operations["staff_resume_request_v1_admin_requests__request_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change a request's status (staff)
+         * @description Only to one of the card's allowed_status_changes, through the request state machine,
+         *     with the reason kept as an internal note. Releases a hold. Recorded in the audit log.
+         */
+        post: operations["staff_change_request_status_v1_admin_requests__request_id__status_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/eligible-pros": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The pros a request may be assigned to (staff)
+         * @description The approved pros in the request's category and area, best ranked first (as dispatch
+         *     ranks them), each with whether payouts are enabled and whether they have the request
+         *     already: first name and last initial, no contact. At most OPS_ELIGIBLE_PROS_LIMIT (`more`
+         *     says when others match). Empty for a request with no category or past quoting.
+         */
+        get: operations["staff_eligible_pros_v1_admin_requests__request_id__eligible_pros_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/assign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Offer a request to a pro (staff)
+         * @description One offer for the pro the agent chose, made by dispatch: the pro must be approved, with
+         *     payouts enabled, in the request's category and area, and not have the request already. A
+         *     received or reviewing request moves to finding a pro; one finding a pro or with quotes
+         *     ready stays where it is. Releases a hold. The pro gets the new request push. Recorded in
+         *     the audit log.
+         */
+        post: operations["staff_assign_pro_v1_admin_requests__request_id__assign_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/requests/{request_id}/followups": {
         parameters: {
             query?: never;
@@ -2132,6 +2245,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/requests/{request_id}/job/tip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Tip the pro of my confirmed job, or choose no tip
+         * @description The customer's tip for the pro of their confirmed job, inside the window the job's tip
+         *     shows (closes_at): "No tip", one of the offered percents, or an amount within the bounds.
+         *     The server computes every amount. A tip to pay comes with what the Payment Sheet needs
+         *     (the same PaymentIntent while the amount stays the same; a new amount cancels the earlier
+         *     one first); "No tip" comes with no sheet. Sending the same choice again is safe.
+         */
+        post: operations["choose_tip_v1_requests__request_id__job_tip_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/requests/{request_id}/receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The receipt of my job
+         * @description The proof of payment of the request's job, from the moment its payment went through:
+         *     the service, the tax when there is some, the tip once it went through and each amount
+         *     returned to the payment method, the total paid, the card's brand and last 4 digits, and
+         *     where the money stands. Never the platform's fee or the pro's payout.
+         */
+        get: operations["get_receipt_v1_requests__request_id__receipt_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2191,6 +2351,35 @@ export interface components {
          * @enum {string}
          */
         ApprovalBlockerKind: "document_missing" | "document_expired" | "no_category" | "no_service_area";
+        /** AssignIn */
+        AssignIn: {
+            /**
+             * Pro Id
+             * Format: uuid
+             * @description The pro's profile id, from the request's eligible-pros list.
+             */
+            pro_id: string;
+        };
+        /**
+         * AssignOut
+         * @description The request offered to the pro: finding a pro now if it was received or reviewing, else
+         *     where it was. Off hold.
+         */
+        AssignOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["RequestStatus"];
+            /**
+             * Pro Id
+             * Format: uuid
+             */
+            pro_id: string;
+            /** Info Requested At */
+            info_requested_at?: null;
+        };
         /**
          * AssignedFilter
          * @enum {string}
@@ -2750,6 +2939,20 @@ export interface components {
              */
             first_contact_at: string;
         };
+        /** CustomTipIn */
+        CustomTipIn: {
+            /**
+             * Choice
+             * @constant
+             */
+            choice: "custom";
+            /**
+             * Amount Cents
+             * @description The tip in integer cents, within the options' bounds.
+             * @example 1250
+             */
+            amount_cents: number;
+        };
         /** CustomerCancelIn */
         CustomerCancelIn: {
             reason_code: components["schemas"]["CustomerCancelReason"];
@@ -2892,6 +3095,8 @@ export interface components {
              * @description The pro's chat messages the customer has not marked read (#71).
              */
             unread_messages: number;
+            /** @description The customer's tip for the pro (#273): set once the job was confirmed (by the customer or automatically), inside the tip window and after it; null for a job that takes no tip (not confirmed yet, disputed, refunded or cancelled). Always sent; optional in the schema so clients built before #273 keep compiling. */
+            tip?: components["schemas"]["TipOut"] | null;
         };
         /**
          * CustomerJobCancellation
@@ -3237,9 +3442,14 @@ export interface components {
             category: components["schemas"]["EarningCategory"] | null;
             /**
              * Amount Cents
-             * @description What the pro receives, in integer cents.
+             * @description What the pro receives for the job, in integer cents (never the tip).
              */
             amount_cents: number;
+            /**
+             * Tip Cents
+             * @description The customer's tip on the job, all of it the pro's, in integer cents; 0 when none. Its own transfer: the summary counts it by that transfer's state. Always sent; optional in the schema so clients built before #273 keep compiling.
+             */
+            tip_cents?: number | null;
             status: components["schemas"]["EarningStatus"];
             /**
              * Completed At
@@ -3286,7 +3496,7 @@ export interface components {
             awaiting_confirmation_cents: number;
             /**
              * Pending Cents
-             * @description Confirmed, the transfer still to be made.
+             * @description Confirmed, the transfer still to be made; a tip whose own transfer is.
              */
             pending_cents: number;
             /** On Hold Cents */
@@ -3298,6 +3508,50 @@ export interface components {
              * @example usd
              */
             currency: string;
+        };
+        /**
+         * EligibleProOut
+         * @description A pro staff may weigh for the request: approved, in its category and its area. No
+         *     contact, no last name.
+         */
+        EligibleProOut: {
+            /**
+             * Id
+             * Format: uuid
+             * @description The pro's profile id: what an assignment takes.
+             */
+            id: string;
+            /**
+             * Name
+             * @description First name and last initial, as customers see the pro; null when the account has no usable name.
+             */
+            name: string | null;
+            /** Categories */
+            categories: components["schemas"]["CategorySummary"][];
+            /**
+             * Payouts Enabled
+             * @description False: the pro cannot be paid out yet, and an assignment is refused (pro_payouts_disabled).
+             */
+            payouts_enabled: boolean;
+            /**
+             * Already Offered
+             * @description True: the pro has (or had) this request, and an assignment is refused (pro_already_offered).
+             */
+            already_offered: boolean;
+        };
+        /**
+         * EligiblePros
+         * @description Best ranked first, as dispatch ranks pros. Empty for a request with no category, or
+         *     one past quoting (accepted, expired, cancelled).
+         */
+        EligiblePros: {
+            /** Items */
+            items: components["schemas"]["EligibleProOut"][];
+            /**
+             * More
+             * @description True when more pros match than OPS_ELIGIBLE_PROS_LIMIT lists.
+             */
+            more: boolean;
         };
         /** ErrorDetail */
         ErrorDetail: {
@@ -3747,6 +4001,37 @@ export interface components {
              */
             series: components["schemas"]["SeriesPoint"][];
         };
+        /** MoreInfoIn */
+        MoreInfoIn: {
+            /**
+             * Question
+             * @description What the BDC asks the customer, kept as an internal note: plain text, 1 to 2000 characters (staff only, never logged).
+             */
+            question: string;
+        };
+        /**
+         * MoreInfoOut
+         * @description The request on hold in reviewing, and the question as a note.
+         */
+        MoreInfoOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["RequestStatus"];
+            /**
+             * Info Requested At
+             * Format: date-time
+             */
+            info_requested_at: string;
+            note: components["schemas"]["NoteOut"];
+            /**
+             * Customer Notified
+             * @description Whether the customer was messaged. Always false today: no channel takes a staff message to the customer yet, so the agent reaches the customer themselves.
+             */
+            customer_notified: boolean;
+        };
         /** MultiChoiceQuestion */
         MultiChoiceQuestion: {
             /**
@@ -3835,6 +4120,14 @@ export interface components {
              * @description Pass as `cursor` for older tickets.
              */
             next_cursor: string | null;
+        };
+        /** NoTipIn */
+        NoTipIn: {
+            /**
+             * Choice
+             * @constant
+             */
+            choice: "none";
         };
         /** NoteIn */
         NoteIn: {
@@ -4249,6 +4542,20 @@ export interface components {
          * @enum {string}
          */
         PayoutsStatus: "not_started" | "incomplete" | "in_review" | "enabled";
+        /** PercentTipIn */
+        PercentTipIn: {
+            /**
+             * Choice
+             * @constant
+             */
+            choice: "percent";
+            /**
+             * Percent
+             * @description One of the percents the job's tip options offer.
+             * @example 10
+             */
+            percent: number;
+        };
         /** PhoneSendRequest */
         PhoneSendRequest: {
             /**
@@ -4984,6 +5291,154 @@ export interface components {
          * @enum {string}
          */
         Receipt: "sent" | "delivered" | "seen";
+        /**
+         * ReceiptAddress
+         * @description The customer's own address, on the in-app receipt only: line 1, city and state.
+         */
+        ReceiptAddress: {
+            /** Line1 */
+            line1: string;
+            /** City */
+            city: string;
+            /** State */
+            state: string;
+        };
+        /** ReceiptCategory */
+        ReceiptCategory: {
+            /** Slug */
+            slug: string;
+            /** Names */
+            names: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * ReceiptIssuer
+         * @description Who issues the receipt (Q-R1): the API's settings, never the app's.
+         */
+        ReceiptIssuer: {
+            /** Legal Name */
+            legal_name: string;
+            /** Support Email */
+            support_email: string;
+        };
+        /** ReceiptLine */
+        ReceiptLine: {
+            /** @description The app names the line by its kind. */
+            kind: components["schemas"]["ReceiptLineKind"];
+            /**
+             * Amount Cents
+             * @description Integer cents; negative for an amount returned.
+             */
+            amount_cents: number;
+            /**
+             * At
+             * @description When it went back, for a returned amount; else null.
+             */
+            at: string | null;
+        };
+        /**
+         * ReceiptLineKind
+         * @enum {string}
+         */
+        ReceiptLineKind: "service" | "tax" | "tip" | "returned";
+        /**
+         * ReceiptOut
+         * @description A job's receipt, from the frozen amounts: the price and tax as charged, the tip once it
+         *     went through and each amount that went back. Never the platform's fee or the pro's payout,
+         *     and no Stripe id.
+         */
+        ReceiptOut: {
+            /**
+             * Receipt Number
+             * @description The request's public code: one receipt per job.
+             * @example JF-000124
+             */
+            receipt_number: string;
+            /**
+             * Paid At
+             * Format: date-time
+             * @description When the job's payment went through.
+             */
+            paid_at: string;
+            status: components["schemas"]["ReceiptStatus"];
+            category: components["schemas"]["ReceiptCategory"] | null;
+            /**
+             * Pro Name
+             * @description The pro's public name; null when none can be shown.
+             * @example Dan R.
+             */
+            pro_name: string | null;
+            /**
+             * Scheduled Start At
+             * Format: date-time
+             */
+            scheduled_start_at: string;
+            /**
+             * Completed At
+             * @description When the pro marked the job done.
+             */
+            completed_at: string | null;
+            address: components["schemas"]["ReceiptAddress"] | null;
+            /** Lines */
+            lines: components["schemas"]["ReceiptLine"][];
+            /**
+             * Total Paid Cents
+             * @description Service plus tax plus tip, minus what went back.
+             */
+            total_paid_cents: number;
+            /**
+             * Currency
+             * @description Stripe's lower-case currency code.
+             * @example usd
+             */
+            currency: string;
+            /** @description null until Stripe's charge was read, and for a payment it gave no card for: the app then says Card. */
+            payment_method: components["schemas"]["ReceiptPaymentMethod"] | null;
+            /** @description Whether a tip can still be added and until when; null for a job that takes no tip. */
+            tip: components["schemas"]["ReceiptTip"] | null;
+            /** @description Who issues the receipt; null until both values are set on the server. */
+            issuer: components["schemas"]["ReceiptIssuer"] | null;
+        };
+        /**
+         * ReceiptPaymentMethod
+         * @description The card that paid, as Stripe's charge describes it: never more than this.
+         */
+        ReceiptPaymentMethod: {
+            /**
+             * Brand
+             * @description Stripe's brand code.
+             * @example visa
+             */
+            brand: string | null;
+            /**
+             * Last4
+             * @example 4242
+             */
+            last4: string | null;
+            /**
+             * Wallet
+             * @description Stripe's wallet type.
+             * @example apple_pay
+             */
+            wallet: string | null;
+        };
+        /**
+         * ReceiptStatus
+         * @description Where the receipt's money stands.
+         * @enum {string}
+         */
+        ReceiptStatus: "paid" | "under_review" | "partly_returned" | "returned";
+        /** ReceiptTip */
+        ReceiptTip: {
+            /**
+             * Can Tip
+             * @description Whether a tip can still be added (the job's tip window).
+             */
+            can_tip: boolean;
+            /** Closes At */
+            closes_at: string | null;
+        };
         /** RefreshTokenRequest */
         RefreshTokenRequest: {
             /**
@@ -5196,6 +5651,16 @@ export interface components {
              * @default true
              */
             actions_allowed: boolean;
+            /**
+             * Info Requested At
+             * @description When the BDC asked the customer for more information (#82): the request waits in reviewing and no re-dispatch takes it until staff resume it, change its status or assign a pro. Null when it is not on hold.
+             */
+            info_requested_at?: string | null;
+            /**
+             * Allowed Status Changes
+             * @description The statuses staff may move the request to now (#82), from the request state machine's staff edges: never finding_pro, which dispatch owns. The API stays the guard (409 invalid_transition).
+             */
+            allowed_status_changes?: components["schemas"]["RequestStatus"][];
         };
         /** RequestCreate */
         RequestCreate: {
@@ -5342,6 +5807,21 @@ export interface components {
              * @description Requests of the range with a first contact.
              */
             denominator: number;
+        };
+        /**
+         * ResumeOut
+         * @description The request off hold: the next re-dispatch sweep (REDISPATCH_SWEEP_MINUTES) takes it
+         *     when it is received or reviewing with a category and no offer yet.
+         */
+        ResumeOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["RequestStatus"];
+            /** Info Requested At */
+            info_requested_at?: null;
         };
         /**
          * ReverseAddressOut
@@ -6279,6 +6759,26 @@ export interface components {
              */
             next_cursor: string | null;
         };
+        /** StatusChangeIn */
+        StatusChangeIn: {
+            /** @description One of the card's allowed_status_changes. */
+            to: components["schemas"]["RequestStatus"];
+            /**
+             * Reason
+             * @description Why, kept as an internal note: plain text, 1 to 2000 characters.
+             */
+            reason: string;
+        };
+        /** StatusChangeOut */
+        StatusChangeOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["RequestStatus"];
+            note: components["schemas"]["NoteOut"];
+        };
         /** SupportTicketCreatedOut */
         SupportTicketCreatedOut: {
             /**
@@ -6376,6 +6876,95 @@ export interface components {
          * @enum {string}
          */
         TicketTopic: "account" | "payment" | "job" | "safety" | "app_problem" | "other";
+        /**
+         * TipChoice
+         * @description What the customer chose (#273): no tip, one of the offered percents, or an amount.
+         * @enum {string}
+         */
+        TipChoice: "none" | "percent" | "custom";
+        /** TipCreateOut */
+        TipCreateOut: {
+            tip: components["schemas"]["TipOut"];
+            /** @description What the Payment Sheet needs to pay the tip (its amount, no tax); null for No tip. */
+            sheet: components["schemas"]["PaymentSheetOut"] | null;
+        };
+        /** TipOptions */
+        TipOptions: {
+            /**
+             * Presets
+             * @description The percents offered for this job, ascending; a percent whose amount falls outside the bounds below is left out.
+             */
+            presets: components["schemas"]["TipPreset"][];
+            /**
+             * Min Cents
+             * @description The smallest tip, inclusive.
+             */
+            min_cents: number;
+            /**
+             * Max Cents
+             * @description The largest tip, inclusive: a share of the job's price, capped.
+             */
+            max_cents: number;
+        };
+        /**
+         * TipOut
+         * @description The job's tip: what the customer chose, where its payment stands and what they may do.
+         */
+        TipOut: {
+            /** @description null until the customer chooses. declined: No tip. requires_payment: the Payment Sheet is open or was closed. processing, succeeded, failed, canceled: the payment's. A failed or canceled tip can be tried again while can_tip is true. */
+            status: components["schemas"]["TipStatus"] | null;
+            /** @description null until the customer chooses. */
+            choice: components["schemas"]["TipChoice"] | null;
+            /**
+             * Percent
+             * @description The offered percent chosen; null otherwise.
+             */
+            percent: number | null;
+            /**
+             * Amount Cents
+             * @description The tip, in integer cents; 0 until chosen and for No tip.
+             */
+            amount_cents: number;
+            /**
+             * Currency
+             * @description Stripe's lower-case currency code.
+             * @example usd
+             */
+            currency: string;
+            options: components["schemas"]["TipOptions"];
+            /**
+             * Can Tip
+             * @description Whether a tip may be chosen or paid now: inside the window, nothing paid or being paid yet.
+             */
+            can_tip: boolean;
+            /**
+             * Closes At
+             * Format: date-time
+             * @description When the window closes: the job's confirmation plus TIP_WINDOW_HOURS.
+             */
+            closes_at: string;
+        };
+        /** TipPreset */
+        TipPreset: {
+            /**
+             * Percent
+             * @description A whole percent of the job's price.
+             * @example 10
+             */
+            percent: number;
+            /**
+             * Amount Cents
+             * @description What that percent comes to, computed by the server (rounded half up): the app shows it as is.
+             */
+            amount_cents: number;
+        };
+        /**
+         * TipStatus
+         * @description Where a tip stands. `declined` is the choice "No tip" (no PaymentIntent); the others
+         *     follow the current attempt's PaymentIntent, moved by its payment_intent.* events.
+         * @enum {string}
+         */
+        TipStatus: "declined" | "requires_payment" | "processing" | "succeeded" | "failed" | "canceled";
         /**
          * TransferOut
          * @description A job's transfer to its pro as staff see it (#68): the row, without the idempotency
@@ -11790,6 +12379,380 @@ export interface operations {
             };
         };
     };
+    staff_request_more_info_v1_admin_requests__request_id__more_info_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MoreInfoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MoreInfoOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins (checked again as the action is written). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request. invalid_transition: the request cannot move there from its current status. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_resume_request_v1_admin_requests__request_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResumeOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins (checked again as the action is written). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request (they, or an admin, act on it). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_change_request_status_v1_admin_requests__request_id__status_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StatusChangeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusChangeOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins (checked again as the action is written). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request. invalid_transition: the request cannot move there from its current status. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_eligible_pros_v1_admin_requests__request_id__eligible_pros_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EligiblePros"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a request_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_assign_pro_v1_admin_requests__request_id__assign_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins (checked again as the action is written). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. pro_not_found: no pro profile with this id, or its account is no longer an active pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request. invalid_transition: the request is accepted, expired or cancelled. request_not_classified: it has no category yet. One code per reason the pro cannot take it: pro_already_offered (they have, or had, this request), pro_not_approved, pro_payouts_disabled, pro_category_mismatch, pro_out_of_area. Nothing was written. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     staff_schedule_followup_v1_admin_requests__request_id__followups_post: {
         parameters: {
             query?: never;
@@ -13007,6 +13970,165 @@ export interface operations {
             };
             /** @description forbidden: only customers and pros. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    choose_tip_v1_requests__request_id__job_tip_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description A UUID the app makes once per choice and sends again with every retry of it. A retry never changes the choice: while the attempt it settled is still the one to pay it finishes that attempt (the same PaymentIntent, its Payment Sheet), else it answers 200 with the tip as it is now. The same key with another body, or on another job, answers 409 idempotency_key_reused. */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoTipIn"] | components["schemas"]["PercentTipIn"] | components["schemas"]["CustomTipIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TipCreateOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers tip. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id, or no job on it. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description tip_not_available: the job was never confirmed (under way, disputed, refunded, cancelled) or its tip window closed; tip_already_paid: the tip succeeded; tip_in_progress: its payment is processing, or another change of the tip is under way; tip_needs_review: support has to look at the tip first; idempotency_key_reused: the key went with another body or job. Nothing changed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description tip_percent_not_offered: the percent is not one of the job's presets; tip_amount_out_of_range: the amount, or what the percent comes to, is outside the job's bounds; validation_error: a malformed id or body. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than TIP_CHOICE_LIMIT choices in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payments_error: Stripe refused the call; nothing changed, try again. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_configured: payments are not configured; payments_unavailable: Stripe is not reachable or asked to retry later; nothing changed, retry later. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_receipt_v1_requests__request_id__receipt_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers have receipts. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id; receipt_not_available: its job's payment has not gone through yet. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
