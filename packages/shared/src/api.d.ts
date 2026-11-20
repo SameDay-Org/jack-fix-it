@@ -122,8 +122,8 @@ export interface paths {
          * Log out
          * @description Revokes the session the refresh token belongs to. No bearer token is needed.
          *
-         *     Always 204, so the endpoint cannot be used to test tokens. The access token is not revoked
-         *     on the server: it stops working when it expires (`expires_in`).
+         *     Always 204, so the endpoint cannot be used to test tokens. The session's access tokens stop
+         *     working at once too: every bearer route refuses them with 401 invalid_token (#161).
          */
         post: operations["logout_v1_auth_logout_post"];
         delete?: never;
@@ -1737,6 +1737,119 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/requests/{request_id}/more-info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask the customer for more information (staff)
+         * @description Keeps the question as an internal note, moves the request to reviewing (the state
+         *     machine's staff edge) and holds it there: no re-dispatch takes it until staff resume it,
+         *     change its status or assign a pro. The customer is not messaged (`customer_notified` is
+         *     false): no channel takes a staff message yet. Recorded in the audit log.
+         */
+        post: operations["staff_request_more_info_v1_admin_requests__request_id__more_info_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release a request held for the customer's answer (staff)
+         * @description Clears the hold; the next re-dispatch sweep takes the request when it can (received or
+         *     reviewing, a category, no offer yet). A request not on hold: nothing changes. Recorded in
+         *     the audit log.
+         */
+        post: operations["staff_resume_request_v1_admin_requests__request_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change a request's status (staff)
+         * @description Only to one of the card's allowed_status_changes, through the request state machine,
+         *     with the reason kept as an internal note. Releases a hold. Recorded in the audit log.
+         */
+        post: operations["staff_change_request_status_v1_admin_requests__request_id__status_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/eligible-pros": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The pros a request may be assigned to (staff)
+         * @description The approved pros in the request's category and area, best ranked first (as dispatch
+         *     ranks them), each with whether payouts are enabled and whether they have the request
+         *     already: first name and last initial, no contact. At most OPS_ELIGIBLE_PROS_LIMIT (`more`
+         *     says when others match). Empty for a request with no category or past quoting.
+         */
+        get: operations["staff_eligible_pros_v1_admin_requests__request_id__eligible_pros_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/assign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Offer a request to a pro (staff)
+         * @description One offer for the pro the agent chose, made by dispatch: the pro must be approved, with
+         *     payouts enabled, in the request's category and area, and not have the request already. A
+         *     received or reviewing request moves to finding a pro; one finding a pro or with quotes
+         *     ready stays where it is. Releases a hold. The pro gets the new request push. Recorded in
+         *     the audit log.
+         */
+        post: operations["staff_assign_pro_v1_admin_requests__request_id__assign_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/requests/{request_id}/followups": {
         parameters: {
             query?: never;
@@ -2214,6 +2327,35 @@ export interface components {
          * @enum {string}
          */
         ApprovalBlockerKind: "document_missing" | "document_expired" | "no_category" | "no_service_area";
+        /** AssignIn */
+        AssignIn: {
+            /**
+             * Pro Id
+             * Format: uuid
+             * @description The pro's profile id, from the request's eligible-pros list.
+             */
+            pro_id: string;
+        };
+        /**
+         * AssignOut
+         * @description The request offered to the pro: finding a pro now if it was received or reviewing, else
+         *     where it was. Off hold.
+         */
+        AssignOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["RequestStatus"];
+            /**
+             * Pro Id
+             * Format: uuid
+             */
+            pro_id: string;
+            /** Info Requested At */
+            info_requested_at?: null;
+        };
         /**
          * AssignedFilter
          * @enum {string}
@@ -3322,6 +3464,50 @@ export interface components {
              */
             currency: string;
         };
+        /**
+         * EligibleProOut
+         * @description A pro staff may weigh for the request: approved, in its category and its area. No
+         *     contact, no last name.
+         */
+        EligibleProOut: {
+            /**
+             * Id
+             * Format: uuid
+             * @description The pro's profile id: what an assignment takes.
+             */
+            id: string;
+            /**
+             * Name
+             * @description First name and last initial, as customers see the pro; null when the account has no usable name.
+             */
+            name: string | null;
+            /** Categories */
+            categories: components["schemas"]["CategorySummary"][];
+            /**
+             * Payouts Enabled
+             * @description False: the pro cannot be paid out yet, and an assignment is refused (pro_payouts_disabled).
+             */
+            payouts_enabled: boolean;
+            /**
+             * Already Offered
+             * @description True: the pro has (or had) this request, and an assignment is refused (pro_already_offered).
+             */
+            already_offered: boolean;
+        };
+        /**
+         * EligiblePros
+         * @description Best ranked first, as dispatch ranks pros. Empty for a request with no category, or
+         *     one past quoting (accepted, expired, cancelled).
+         */
+        EligiblePros: {
+            /** Items */
+            items: components["schemas"]["EligibleProOut"][];
+            /**
+             * More
+             * @description True when more pros match than OPS_ELIGIBLE_PROS_LIMIT lists.
+             */
+            more: boolean;
+        };
         /** ErrorDetail */
         ErrorDetail: {
             /** Code */
@@ -3800,6 +3986,37 @@ export interface components {
              * @description One point per day of the range, in order.
              */
             series: components["schemas"]["SeriesPoint"][];
+        };
+        /** MoreInfoIn */
+        MoreInfoIn: {
+            /**
+             * Question
+             * @description What the BDC asks the customer, kept as an internal note: plain text, 1 to 2000 characters (staff only, never logged).
+             */
+            question: string;
+        };
+        /**
+         * MoreInfoOut
+         * @description The request on hold in reviewing, and the question as a note.
+         */
+        MoreInfoOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["RequestStatus"];
+            /**
+             * Info Requested At
+             * Format: date-time
+             */
+            info_requested_at: string;
+            note: components["schemas"]["NoteOut"];
+            /**
+             * Customer Notified
+             * @description Whether the customer was messaged. Always false today: no channel takes a staff message to the customer yet, so the agent reaches the customer themselves.
+             */
+            customer_notified: boolean;
         };
         /** MultiChoiceQuestion */
         MultiChoiceQuestion: {
@@ -5250,6 +5467,16 @@ export interface components {
              * @default true
              */
             actions_allowed: boolean;
+            /**
+             * Info Requested At
+             * @description When the BDC asked the customer for more information (#82): the request waits in reviewing and no re-dispatch takes it until staff resume it, change its status or assign a pro. Null when it is not on hold.
+             */
+            info_requested_at?: string | null;
+            /**
+             * Allowed Status Changes
+             * @description The statuses staff may move the request to now (#82), from the request state machine's staff edges: never finding_pro, which dispatch owns. The API stays the guard (409 invalid_transition).
+             */
+            allowed_status_changes?: components["schemas"]["RequestStatus"][];
         };
         /** RequestCreate */
         RequestCreate: {
@@ -5396,6 +5623,21 @@ export interface components {
              * @description Requests of the range with a first contact.
              */
             denominator: number;
+        };
+        /**
+         * ResumeOut
+         * @description The request off hold: the next re-dispatch sweep (REDISPATCH_SWEEP_MINUTES) takes it
+         *     when it is received or reviewing with a category and no offer yet.
+         */
+        ResumeOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["RequestStatus"];
+            /** Info Requested At */
+            info_requested_at?: null;
         };
         /**
          * ReverseAddressOut
@@ -6333,6 +6575,26 @@ export interface components {
              */
             next_cursor: string | null;
         };
+        /** StatusChangeIn */
+        StatusChangeIn: {
+            /** @description One of the card's allowed_status_changes. */
+            to: components["schemas"]["RequestStatus"];
+            /**
+             * Reason
+             * @description Why, kept as an internal note: plain text, 1 to 2000 characters.
+             */
+            reason: string;
+        };
+        /** StatusChangeOut */
+        StatusChangeOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["RequestStatus"];
+            note: components["schemas"]["NoteOut"];
+        };
         /** SupportTicketCreatedOut */
         SupportTicketCreatedOut: {
             /**
@@ -6983,7 +7245,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserOut"];
                 };
             };
-            /** @description invalid_token: missing, invalid or expired access token. */
+            /** @description invalid_token: missing, invalid or expired access token, or its session ended (logout, password reset). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -7025,7 +7287,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserOut"];
                 };
             };
-            /** @description invalid_token: missing, invalid or expired access token. */
+            /** @description invalid_token: missing, invalid or expired access token, or its session ended (logout, password reset). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -11874,6 +12136,380 @@ export interface operations {
                 };
             };
             /** @description category_inactive: the category is not active; validation_error: a bad id. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_request_more_info_v1_admin_requests__request_id__more_info_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MoreInfoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MoreInfoOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins (checked again as the action is written). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request. invalid_transition: the request cannot move there from its current status. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_resume_request_v1_admin_requests__request_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResumeOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins (checked again as the action is written). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request (they, or an admin, act on it). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_change_request_status_v1_admin_requests__request_id__status_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StatusChangeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusChangeOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins (checked again as the action is written). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request. invalid_transition: the request cannot move there from its current status. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_eligible_pros_v1_admin_requests__request_id__eligible_pros_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EligiblePros"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a request_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_assign_pro_v1_admin_requests__request_id__assign_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins (checked again as the action is written). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. pro_not_found: no pro profile with this id, or its account is no longer an active pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request. invalid_transition: the request is accepted, expired or cancelled. request_not_classified: it has no category yet. One code per reason the pro cannot take it: pro_already_offered (they have, or had, this request), pro_not_approved, pro_payouts_disabled, pro_category_mismatch, pro_out_of_area. Nothing was written. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -42,6 +42,9 @@ class AccessTokenClaims:
     jti: str
     issued_at: int
     expires_at: int
+    # The refresh family (session) it was issued with, the `sid` claim (#161). None for a token
+    # without one: issued before #161, so it stops working when it expires.
+    session_id: uuid.UUID | None
 
 
 def hash_password(password: str) -> str:
@@ -62,8 +65,17 @@ def password_needs_rehash(password_hash: str) -> bool:
 
 
 def create_access_token(
-    *, user_id: uuid.UUID, role: UserRole, secret: str, ttl_seconds: int, now: datetime
+    *,
+    user_id: uuid.UUID,
+    role: UserRole,
+    session_id: uuid.UUID | None,
+    secret: str,
+    ttl_seconds: int,
+    now: datetime,
 ) -> str:
+    """`session_id` is the refresh family the token belongs to (`sid`): revoking the family
+    revokes the token (#161). The API always passes one; None mints the shape of a token issued
+    before #161, without `sid`, which only tests and the local demo seed (scripts/demo) mint."""
     issued_at = int(now.timestamp())
     claims = {
         "sub": str(user_id),
@@ -73,6 +85,8 @@ def create_access_token(
         "jti": uuid.uuid4().hex,
         "typ": ACCESS_TOKEN_TYPE,
     }
+    if session_id is not None:
+        claims["sid"] = str(session_id)
     return jwt.encode(claims, secret, algorithm=JWT_ALGORITHM)
 
 
@@ -96,9 +110,21 @@ def decode_access_token(token: str, *, secret: str) -> AccessTokenClaims:
             jti=str(claims["jti"]),
             issued_at=int(claims["iat"]),
             expires_at=int(claims["exp"]),
+            session_id=_session_id(claims),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise InvalidAccessTokenError from exc
+
+
+def _session_id(claims: dict[str, object]) -> uuid.UUID | None:
+    """The `sid` claim: absent on a token issued before #161; present, it must be a UUID string
+    (anything else is a malformed token, never one without a session)."""
+    if "sid" not in claims:
+        return None
+    sid = claims["sid"]
+    if not isinstance(sid, str):
+        raise TypeError("sid is not a string")
+    return uuid.UUID(sid)
 
 
 def new_refresh_token() -> str:

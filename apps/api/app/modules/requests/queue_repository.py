@@ -242,6 +242,12 @@ class RequestQueueRepository:
         request.first_contact_at = at
         await self._session.flush()
 
+    async def set_info_requested(self, request: ServiceRequest, at: datetime | None) -> None:
+        """Writes the BDC's hold on the row the caller locked; through the row, as
+        set_assigned_agent."""
+        request.info_requested_at = at
+        await self._session.flush()
+
     async def set_category(self, request: ServiceRequest, category_id: uuid.UUID) -> None:
         """Writes the category on the row the caller locked; through the row, as
         set_assigned_agent."""

@@ -1,4 +1,13 @@
-import { BadgeCheck, ChartLine, House, LifeBuoy, ListTodo, LogOut, Scale } from "lucide-react";
+import {
+  BadgeCheck,
+  CalendarClock,
+  ChartLine,
+  House,
+  LifeBuoy,
+  ListTodo,
+  LogOut,
+  Scale,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -7,15 +16,26 @@ import { ErrorCopyProvider } from "@/features/site/error-copy";
 import { panelErrorCopy } from "@/features/site/error-copy-server";
 import { toLocale } from "@/i18n/locale";
 import { getT } from "@/i18n/server";
-import { requireStaff } from "@/lib/session";
+import { apiGet } from "@/lib/api";
+import { requireStaff, staffAuth } from "@/lib/session";
 
 import { logout } from "../logout/actions";
 import { DISPUTES_PATH } from "./disputes/disputes";
+import { FOLLOWUPS_PATH } from "./followups/followups";
 import { KPIS_PATH } from "./kpis/range";
 import { NavLink } from "./nav-link";
 import { PROS_PATH } from "./pros/pros";
 import { QUEUE_PATH } from "./queue/queue";
 import { SUPPORT_PATH } from "./support/tickets";
+
+/** The reader's open follow-ups due by tonight, for the nav badge; none when the API cannot say. */
+async function dueToday(): Promise<number> {
+  try {
+    return (await apiGet("/v1/admin/followups/summary", await staffAuth())).due_today;
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * The panel shell: every page under it requires a staff session (requireStaff, checked against
@@ -26,6 +46,7 @@ export default async function PanelLayout({ children }: { children: ReactNode })
   const locale = toLocale(user.locale);
   const t = await getT(locale);
   const role = user.role === "admin" ? t("admin.roles.admin") : t("admin.roles.agent");
+  const due = await dueToday();
 
   return (
     <div lang={locale} className="min-h-dvh bg-gray-50 md:flex">
@@ -45,6 +66,22 @@ export default async function PanelLayout({ children }: { children: ReactNode })
           <NavLink href={QUEUE_PATH}>
             <ListTodo aria-hidden className="size-4" />
             {t("admin.nav.queue")}
+          </NavLink>
+          <NavLink href={FOLLOWUPS_PATH}>
+            <CalendarClock aria-hidden className="size-4" />
+            {t("admin.nav.followups")}
+            {due > 0 ? (
+              <>
+                <span
+                  aria-hidden
+                  data-due={due}
+                  className="ml-auto inline-flex min-w-6 items-center justify-center rounded-pill bg-warning px-2 text-xs font-bold text-navy-900"
+                >
+                  {due}
+                </span>
+                <span className="sr-only">{t("admin.nav.followupsDue", { count: due })}</span>
+              </>
+            ) : null}
           </NavLink>
           <NavLink href={PROS_PATH}>
             <BadgeCheck aria-hidden className="size-4" />

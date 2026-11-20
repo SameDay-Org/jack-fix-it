@@ -87,7 +87,12 @@ def path(request_id: uuid.UUID) -> str:
 
 def headers_for(user_id: uuid.UUID, role: UserRole) -> dict[str, str]:
     token = security.create_access_token(
-        user_id=user_id, role=role, secret=TEST_JWT_SECRET, ttl_seconds=900, now=datetime.now(UTC)
+        user_id=user_id,
+        role=role,
+        session_id=None,
+        secret=TEST_JWT_SECRET,
+        ttl_seconds=900,
+        now=datetime.now(UTC),
     )
     return {"Authorization": f"Bearer {token}"}
 
