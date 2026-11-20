@@ -3,7 +3,7 @@ and the tip's, sent once a tip goes through (Q-R4: no other receipt email in the
 
 Transactional mail: no marketing, no unsubscribe link, no promise (AGENTS.md "Legal copy": the
 copy never says money is held, protected, released or guaranteed, and never names a refund;
-tests/test_receipt_email_copy.py applies the app's own legal guard to every string here). What
+tests/test_receipt_emails.py applies the app's own legal guard to every string here). What
 is in it: the customer's first name, the receipt's code, the category, the pro's public name,
 the scheduled date in the business time zone, the amounts, the card's brand and last 4 digits,
 the city (never the street, Q-R2), and who issues it (settings, Q-R1). Never a Stripe id, the

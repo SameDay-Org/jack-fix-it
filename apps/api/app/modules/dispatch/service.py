@@ -6,7 +6,10 @@ answered apart (AssignRefusal), and must not have the request already; a receive
 request moves to finding_pro with the offer, as the staff member's move. `assignable` lists who
 staff may choose from.
 
-`dispatch` locks the request (the state machine's row lock), then by its status:
+`dispatch` locks the request (the state machine's row lock), then:
+- held (`info_requested_at`, #82: the BDC asked the customer for more information): nothing.
+  A run queued before the hold (the request's first dispatch, the sweep, a kick) ends here;
+  staff release it (resume, a status change, an assignment) and the sweep takes it then;
 - received without a category: to reviewing (SYSTEM), for the BDC to classify; no dispatch;
 - received or reviewing with a category: the eligible pros, best ranked first, up to
   `dispatch_max_pros` (settings); one request_dispatches row each and the move to finding_pro,
@@ -20,6 +23,25 @@ with the pro role, the request's category, and an active service area with the a
 Ranked by rating (best first, unrated last), then average response time (fastest first, no
 answers yet last), then the pro least recently sent a request (never sent first), then the
 profile id, so equal pros share the work and the order is deterministic.
+
+Locks (#511): the request's row lock serializes the request's runs, not what makes a pro
+eligible. So whoever gets an offer, by hand or by the automatic dispatch, is read again in
+the writing transaction under FOR SHARE locks held to its commit, in this order: the request
+(FOR UPDATE), the ZIP's active service areas, then for each pro its account, its profile, its
+category and area rows. A revocation committed first (an account suspended or no longer a
+pro's, a profile not approved or without payouts, a category or area dropped, an area switched
+off) is read and the pro gets nothing; one made after waits until the offer is committed.
+
+The account goes before the profile because the one writer of both takes them in that order:
+a pro's new ID photo (PATCH /v1/auth/me, #250) locks the account, then writes the profile's
+photo while it has none (#511 round 2: the other order deadlocked with it). Every other profile
+writer locks the profile FOR UPDATE first and writes no account (the pro's own edit, staff's
+review, documents, payouts onboarding, Stripe's account.updated), and the account writers
+write the account alone (login, password reset, phone, role). The profile goes before its rows
+because every profile writer locks it first. tests/test_dispatch_locks.py runs the real photo
+write against both offers. The automatic dispatch ranks without locks, then takes the best
+ranked that pass the locked read, up to `dispatch_max_pros`. The eligible list (`assignable`)
+is a read and takes no lock.
 
 Logs carry ids, statuses and counts only.
 """
@@ -62,6 +84,7 @@ class DispatchOutcome(StrEnum):
     ALREADY_DISPATCHED = "already_dispatched"
     NOT_DISPATCHABLE = "not_dispatchable"
     UNKNOWN_REQUEST = "unknown_request"
+    HELD = "held"  # the BDC holds it (#82): nothing until staff release it
 
 
 class AssignRefusal(StrEnum):
@@ -198,6 +221,9 @@ class DispatchService:
         request = await self._requests.lock(request_id)
         if request is None:
             return self._done(DispatchOutcome.UNKNOWN_REQUEST, extra)
+        if request.info_requested_at is not None:
+            # Read under the lock: a hold committed after this run was queued still stops it.
+            return self._done(DispatchOutcome.HELD, extra)
         if await self._dispatches.exists_for(request.id):
             return self._done(DispatchOutcome.ALREADY_DISPATCHED, extra)
         if request.status is RequestStatus.RECEIVED and request.category_id is None:
@@ -208,8 +234,15 @@ class DispatchService:
                 DispatchOutcome.NOT_DISPATCHABLE, {**extra, "status": str(request.status)}
             )
 
-        chosen = await self._eligible_ranked(request.category_id, request.address_id)
-        chosen = chosen[: await SettingsService(self._session).dispatch_max_pros()]
+        areas = await self._areas_of(request.address_id, lock=True)
+        ranked = await self._eligible_ranked(request.category_id, areas)
+        limit = await SettingsService(self._session).dispatch_max_pros()
+        chosen: list[DispatchCandidate] = []
+        for candidate in ranked:
+            if len(chosen) == limit:
+                break
+            if await self._still_fit(candidate.pro_id, request.category_id, areas):
+                chosen.append(candidate)
         if not chosen:
             return self._done(
                 DispatchOutcome.NO_ELIGIBLE_PROS,
@@ -247,13 +280,9 @@ class DispatchService:
             return AssignRefusal.NOT_ASSIGNABLE
         if request.category_id is None:
             return AssignRefusal.NOT_CLASSIFIED
-        areas = await self._areas_of(request.address_id)
-        candidate = await ProService(self._session).assign_candidate(
-            pro_id, request.category_id, areas
-        )
-        if candidate is None or not await UserService(self._session).active_ids_with_role(
-            [candidate.user_id], UserRole.PRO
-        ):
+        areas = await self._areas_of(request.address_id, lock=True)
+        candidate, active = await self._locked_candidate(pro_id, request.category_id, areas)
+        if candidate is None or not active:
             return AssignRefusal.UNKNOWN_PRO
         if pro_id in await self._dispatches.pro_ids_of(request.id):
             return AssignRefusal.ALREADY_OFFERED
@@ -300,17 +329,48 @@ class DispatchService:
             for pro_id in ranked
         ]
 
-    async def _areas_of(self, address_id: uuid.UUID) -> set[uuid.UUID]:
-        """The active service areas of the address's ZIP (none when it is not served)."""
+    async def _areas_of(self, address_id: uuid.UUID, *, lock: bool = False) -> set[uuid.UUID]:
+        """The active service areas of the address's ZIP (none when it is not served); `lock`:
+        FOR SHARE until the transaction ends (see the module doc)."""
         address = await AddressService(self._session).get(address_id)
         if address is None:  # pragma: no cover - the foreign key guarantees it
             return set()
-        return await ServiceAreaService(self._session).active_ids_for_zip(address.zip_code)
+        return await ServiceAreaService(self._session).active_ids_for_zip(
+            address.zip_code, lock=lock
+        )
+
+    async def _locked_candidate(
+        self, pro_id: uuid.UUID, category_id: uuid.UUID, areas: set[uuid.UUID]
+    ) -> tuple[AssignCandidate | None, bool]:
+        """The profile against the request and whether its account is an active pro's, read
+        FOR SHARE and held to the commit: the account first, then the profile and its rows
+        (see the module doc). (None, False): no such profile."""
+        pros = ProService(self._session)
+        # A profile's account never changes: read without a lock, to lock the account first.
+        user_id = await pros.user_id_of(pro_id)
+        if user_id is None:
+            return None, False
+        active = await UserService(self._session).active_ids_with_role(
+            [user_id], UserRole.PRO, lock=True
+        )
+        candidate = await pros.assign_candidate(pro_id, category_id, areas, lock=True)
+        if candidate is None:  # pragma: no cover - a profile is never deleted
+            return None, False
+        return candidate, candidate.user_id in active
+
+    async def _still_fit(
+        self, pro_id: uuid.UUID, category_id: uuid.UUID, areas: set[uuid.UUID]
+    ) -> bool:
+        """Whether a pro the unlocked ranking chose still passes every condition, under the
+        locks of `_locked_candidate`."""
+        candidate, active = await self._locked_candidate(pro_id, category_id, areas)
+        return candidate is not None and active and _unfit(candidate) is None
 
     async def _eligible_ranked(
-        self, category_id: uuid.UUID, address_id: uuid.UUID
+        self, category_id: uuid.UUID, areas: set[uuid.UUID]
     ) -> list[DispatchCandidate]:
-        areas = await self._areas_of(address_id)
+        """Every pro that may receive the request, best ranked first, read without locks:
+        `dispatch` reads each one it takes again under locks (`_still_fit`)."""
         candidates = await ProService(self._session).dispatch_candidates(category_id, areas)
         active = await UserService(self._session).active_ids_with_role(
             [c.user_id for c in candidates], UserRole.PRO

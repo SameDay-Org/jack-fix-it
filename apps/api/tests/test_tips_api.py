@@ -1464,3 +1464,122 @@ async def test_staff_recovery_is_refused_and_changes_nothing(
     assert after is not None
     assert after.payment_intent_requested_at == before
     assert [r for r in await audit_rows(db_session) if r.action == "tip.allow_new_intent"] == []
+
+
+# An intent of a closed attempt (#510 round 2, B2): an amount then "No tip" keeps the attempt's
+# number with 0 cents, while the canceled intent keeps the amount it was made with. Its events
+# are an earlier attempt's: the amount is compared only for an intent the tip holds or adopts.
+
+
+@pytest.mark.parametrize("stripe_status", ["canceled", "succeeded"])
+async def test_the_event_of_an_amount_replaced_by_no_tip_is_not_a_mismatch(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+    caplog: pytest.LogCaptureFixture,
+    stripe_status: str,
+) -> None:
+    """12 %, then "No tip": the choice cancels the first intent and Stripe sends its
+    payment_intent.canceled, an everyday history: nothing changes. Had Stripe taken the payment
+    before the cancel (succeeded), the money is contained and flagged for staff, as an earlier
+    attempt's is. Never a mismatch."""
+    from app.modules.tips.webhooks import tip_event_handler
+    from app.modules.webhooks.events import AfterCommit
+    from tests.test_tip_webhooks import CANCELED, SUCCEEDED, event
+
+    job = await confirmed(db_session, world)
+    assert (await choose(db_client, world, job, PERCENT_12)).status_code == 200
+    first = await tip_row(db_session, job)
+    assert first is not None
+    intent = first.stripe_payment_intent_id
+    assert intent is not None
+    assert (await choose(db_client, world, job, {"choice": "none"})).status_code == 200
+    if stripe_status == "succeeded":
+        stripe_fake.tip_statuses[intent] = "succeeded"
+    event_type = CANCELED if stripe_status == "canceled" else SUCCEEDED
+
+    with caplog.at_level(logging.INFO):
+        await tip_event_handler(lambda: stripe_fake)(
+            db_session,
+            event(event_type, intent=intent, payload_status=stripe_status),
+            AfterCommit(),
+        )
+
+    row = await tip_row(db_session, job)
+    assert row is not None
+    assert (row.status, row.attempt, row.amount_cents) == (TipStatus.DECLINED, 1, 0)
+    assert "tip_event_mismatch" not in [record.getMessage() for record in caplog.records]
+    assert (row.late_success_at is not None) is (stripe_status == "succeeded")
+
+
+async def test_a_late_success_flagged_before_the_create_holds_the_create(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#510 round 2 (the Vault, N1): an earlier attempt's success flagged between the choice
+    and its create (the webhook contains it) holds the create: 409 tip_needs_review, no
+    PaymentIntent, the flag kept for staff."""
+    from app.modules.tips.service import TipService
+
+    job = await confirmed(db_session, world)
+    customer = TipService._customer
+
+    async def flagged_meanwhile(self: TipService, *args: Any, **kwargs: Any) -> str:
+        await set_tip(db_session, job, late_success_at=func.now())
+        return await customer(self, *args, **kwargs)
+
+    monkeypatch.setattr(TipService, "_customer", flagged_meanwhile)
+    response = await choose(db_client, world, job, PERCENT_12)
+
+    assert (response.status_code, code(response)) == (409, NEEDS_REVIEW)
+    assert stripe_fake.intent_calls == []
+    row = await tip_row(db_session, job)
+    assert row is not None
+    assert row.late_success_at is not None
+
+
+PERCENT_18 = {"choice": "percent", "percent": 18}
+
+
+async def test_a_lost_create_is_never_recovered_as_an_earlier_attempts_canceled_intent(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    stripe_fake: FakeStripePayments,
+) -> None:
+    """#510 round 2 (the Vault, N2): attempt 2's create is lost and Stripe never made it; the
+    search shows only attempt 1's intent, canceled. The search's recovery adopts only an
+    intent of the current attempt: 409 tip_needs_review, nothing changed, no create."""
+    job = await confirmed(db_session, world)
+    assert (await choose(db_client, world, job, PERCENT_12)).status_code == 200
+    first_row = await tip_row(db_session, job)
+    assert first_row is not None
+    first = first_row.stripe_payment_intent_id
+    stripe_fake.lost_answers = 1
+    assert (await choose(db_client, world, job, PERCENT_18)).status_code == 503
+    # Stripe never made attempt 2's intent: only attempt 1's canceled one names the tip.
+    for intent in [i for i in stripe_fake.tip_facts if i != first]:
+        del stripe_fake.tip_facts[intent]
+    stripe_fake.intents_by_key.clear()
+    await set_tip(
+        db_session,
+        job,
+        payment_intent_requested_at=datetime.now(UTC) - RECONCILE - timedelta(minutes=1),
+    )
+    creates = len(stripe_fake.intent_calls)
+
+    response = await choose(db_client, world, job, PERCENT_18)
+
+    tip = await tip_row(db_session, job)
+    assert tip is not None
+    assert (response.status_code, code(response)) == (409, NEEDS_REVIEW)
+    assert (tip.attempt, tip.status, tip.stripe_payment_intent_id) == (
+        2,
+        TipStatus.REQUIRES_PAYMENT,
+        None,
+    )
+    assert len(stripe_fake.intent_calls) == creates

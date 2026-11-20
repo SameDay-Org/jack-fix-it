@@ -1,0 +1,13 @@
+# The demo scripts follow the API's rules: they import its code and run in its environment
+# (cd apps/api && uv run ruff check ../../scripts/demo).
+extend = "../../apps/api/pyproject.toml"
+
+[lint.per-file-ignores]
+# Command-line tools: what they print is what they are for. pre-flight.py is the name the
+# demo kit gives the checklist (it is run, never imported).
+"seed_demo.py" = ["T20"]
+"pre-flight.py" = ["T20", "N999"]
+
+[lint.isort]
+known-first-party = ["app", "scripts", "demo_seed"]
+known-third-party = ["alembic"]

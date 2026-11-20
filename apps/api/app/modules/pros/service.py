@@ -325,12 +325,19 @@ class ProService:
         ]
 
     async def assign_candidate(
-        self, pro_id: uuid.UUID, category_id: uuid.UUID, service_area_ids: Collection[uuid.UUID]
+        self,
+        pro_id: uuid.UUID,
+        category_id: uuid.UUID,
+        service_area_ids: Collection[uuid.UUID],
+        *,
+        lock: bool = False,
     ) -> AssignCandidate | None:
         """One profile against a request's category and areas (#82): each condition of
         receiving it, answered apart. None when no profile has this id. The caller still
-        checks the account."""
-        found = await self._profiles.with_coverage(pro_id, category_id, service_area_ids)
+        checks the account. `lock` (#511): read FOR SHARE, held until the caller's
+        transaction ends (the profile, then its category and area rows): a revocation
+        committed first is read, one made after waits for the caller's commit."""
+        found = await self._profiles.with_coverage(pro_id, category_id, service_area_ids, lock=lock)
         if found is None:
             return None
         profile, in_category, in_area = found
