@@ -161,6 +161,35 @@ describe("joinInterest", () => {
     await expect(joinInterest(input())).resolves.toEqual({ kind: "error", error });
   });
 
+  it("passes on the API's wait after too many tries, in whole minutes rounded up", async () => {
+    for (const [retryAfter, waitMinutes] of [
+      ["1", 1],
+      ["60", 1],
+      ["61", 2],
+      ["3600", 60],
+    ] as const) {
+      fetchMock.mockResolvedValueOnce(
+        Response.json(
+          { error: { code: "rate_limited", message: "m" } },
+          { status: 429, headers: { "Retry-After": retryAfter } },
+        ),
+      );
+      await expect(joinInterest(input()), retryAfter).resolves.toEqual({
+        kind: "error",
+        error: "rate_limited",
+        waitMinutes,
+      });
+    }
+    // A wait on any other refusal is not the visitor's to see.
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        { error: { code: "unavailable", message: "m" } },
+        { status: 503, headers: { "Retry-After": "30" } },
+      ),
+    );
+    await expect(joinInterest(input())).resolves.toEqual({ kind: "error", error: "unavailable" });
+  });
+
   it("answers a refused key as unavailable and logs only that it happened", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     fetchMock.mockResolvedValueOnce(apiError(401, "invalid_service_key"));

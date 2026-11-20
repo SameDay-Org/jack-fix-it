@@ -35,6 +35,14 @@ function joinError(error: unknown): InterestError {
   return "unavailable";
 }
 
+/** The refusal in the page's terms; too many tries carries the API's wait, in minutes. */
+function joinFailure(error: unknown): InterestResult {
+  const code = joinError(error);
+  const seconds = error instanceof ApiError ? error.retryAfterSeconds : null;
+  if (code !== "rate_limited" || seconds === null) return { kind: "error", error: code };
+  return { kind: "error", error: code, waitMinutes: Math.ceil(seconds / 60) };
+}
+
 /**
  * Puts the email on the app-launch list (#409): the flag, the hidden trap field, the form's
  * token, the email, then `POST /v1/interest` with the visitor's address and the web key.
@@ -71,6 +79,6 @@ export async function joinInterest(input: InterestInput): Promise<InterestResult
     );
     return { kind: "joined" };
   } catch (error) {
-    return { kind: "error", error: joinError(error) };
+    return joinFailure(error);
   }
 }

@@ -21,5 +21,8 @@ export function interestText(t: TFunction): InterestText {
       rate_limited: t("showcase.interest.errors.rate_limited"),
       unavailable: t("showcase.interest.errors.unavailable"),
     },
+    rateLimitedIn: t("showcase.interest.errors.rate_limited_in", {
+      replace: { minutes: "{{minutes}}" },
+    }),
   };
 }

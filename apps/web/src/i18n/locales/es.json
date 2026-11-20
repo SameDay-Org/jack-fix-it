@@ -399,6 +399,7 @@
         "retry": "No se envió. Pulsa Avísame otra vez.",
         "stale": "Esta página estuvo abierta un buen rato. Pulsa Avísame otra vez.",
         "rate_limited": "Demasiados intentos desde aquí. Espera unos minutos y vuelve a intentarlo.",
+        "rate_limited_in": "Demasiados intentos desde aquí. Vuelve a intentarlo en {{minutes}} min.",
         "unavailable": "No pudimos guardar tu correo ahora. Inténtalo de nuevo en un momento."
       }
     },

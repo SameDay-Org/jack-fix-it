@@ -32,6 +32,7 @@ export function InterestForm({ locale, text, privacyHref, getToken, join }: Inte
   const [email, setEmail] = useState("");
   const [website, setWebsite] = useState("");
   const [error, setError] = useState<InterestError | null>(null);
+  const [waitMinutes, setWaitMinutes] = useState<number | null>(null);
   const [joined, setJoined] = useState(false);
   const [pending, startTransition] = useTransition();
   const token = useRef<Promise<string | null> | null>(null);
@@ -73,6 +74,7 @@ export function InterestForm({ locale, text, privacyHref, getToken, join }: Inte
       if (result.kind === "joined") return setJoined(true);
       if (result.token) token.current = Promise.resolve(result.token);
       setError(result.error);
+      setWaitMinutes(result.waitMinutes ?? null);
       if (result.error === "invalid_email") input.current?.focus();
     });
   }
@@ -136,7 +138,9 @@ export function InterestForm({ locale, text, privacyHref, getToken, join }: Inte
           role={fieldError ? undefined : "alert"}
           className="text-sm font-semibold text-danger"
         >
-          {text.errors[error]}
+          {error === "rate_limited" && waitMinutes !== null
+            ? text.rateLimitedIn.replace("{{minutes}}", String(waitMinutes))
+            : text.errors[error]}
         </p>
       ) : null}
       <p role="status" className="text-sm text-gray-500">

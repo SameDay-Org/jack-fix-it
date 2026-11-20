@@ -2,8 +2,8 @@ import { isIP } from "node:net";
 
 // The visitor's address for the API's per-address limits (#86 spec §3, #409). The web server
 // calls the API, so without this every visitor would count as the web server. The API trusts
-// the address only next to the web service's key (#86 PR A); until then it ignores both
-// headers.
+// the address only next to the web service's key (#517: app/web_service.py); without the key it
+// ignores both headers.
 
 /** The header the API reads the visitor's address from, and the one carrying the key. */
 export const VISITOR_IP_HEADER = "x-jfi-client-ip";

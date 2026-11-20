@@ -123,6 +123,18 @@ describe("the interest form (#409)", () => {
     expect(join.mock.calls[1]![0].token).toBe("token-2");
   });
 
+  it("says how long to wait after too many tries, when the API said", async () => {
+    join
+      .mockResolvedValueOnce({ kind: "error", error: "rate_limited", waitMinutes: 3 })
+      .mockResolvedValueOnce({ kind: "error", error: "rate_limited" });
+    await type("ana@example.com");
+    await send();
+    const alert = () => container.querySelector('[role="alert"]')?.textContent;
+    expect(alert()).toBe("Too many tries from here. Try again in 3 min.");
+    await send();
+    expect(alert()).toBe(TEXT.errors.rate_limited);
+  });
+
   it("asks for the token again when the first ask failed", async () => {
     // Both the ask on focus and the one at Send fail.
     getToken
