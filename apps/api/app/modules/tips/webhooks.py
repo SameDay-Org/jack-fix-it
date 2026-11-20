@@ -23,14 +23,17 @@ The tip's status then moves along TIP_EVENT_TRANSITIONS: processing, failed (the
 can be confirmed again), succeeded (with succeeded_at, and a `tip_added` line in the job's
 history, the customer its actor) or canceled. Anything else (a repeat, an out-of-order event,
 anything after succeeded or canceled) changes nothing, at debug level. Nothing here changes
-the job's status, its payment or its transfer. Logs carry ids, the event type, statuses and
-Stripe codes only: no amount, no PaymentIntent id, no customer data.
+the job's status, its payment or its transfer. A tip that succeeded queues its receipt email
+once the event commits (#62): once, since a repeat of the event moves nothing. Logs carry ids,
+the event type, statuses and Stripe codes only: no amount, no PaymentIntent id, no customer
+data.
 """
 
 import logging
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import partial
 from types import MappingProxyType
 from typing import Final
 
@@ -39,11 +42,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.jobs.service import JobTimeline
 from app.modules.payments.webhook_handlers import intent_event
+from app.modules.receipts.queue import enqueue_tip_receipt
 from app.modules.tips.errors import TipEventMismatchError, TipRowMissingError
 from app.modules.tips.models import UNPAID_STATUSES, Tip, TipStatus
 from app.modules.tips.repository import TipRepository
 from app.modules.users.service import UserService
 from app.modules.webhooks.events import AfterCommit, StripeEvent, StripeEventHandler
+from app.queue import JobQueue
 
 logger = logging.getLogger(__name__)
 
@@ -131,28 +136,32 @@ class TipReconciler:
         self._users = UserService(session)
         self._timeline = JobTimeline(session)
 
-    async def apply(self, event: TipIntentEvent, status: TipStatus) -> None:
+    async def apply(self, event: TipIntentEvent, status: TipStatus) -> uuid.UUID | None:
+        """Applies the event; returns the tip's id when it succeeded through this event (its
+        receipt is then queued after the commit), else None."""
         tip = await self._tips.get_by_intent_for_update(event.intent_id)
         if tip is None:
             tip = await self._adopt(event, status)
             if tip is None:
-                return
+                return None
         else:
             await self._check(event, tip)
         current = tip.status
         if (current, status) not in TIP_EVENT_TRANSITIONS:
             logger.debug("tip_event_ignored", extra={**_ids(event, tip), "tip_status": current})
-            return
+            return None
         if not await self._tips.move_status(tip.id, event.intent_id, current, status):
             raise TipRowMissingError  # pragma: no cover - the row is locked
         ids = _ids(event, tip)
         if status is TipStatus.SUCCEEDED:
             await self._timeline.tip_added(tip.job_id, tip.customer_id)
             logger.info("tip_succeeded", extra=ids)
-        elif status is TipStatus.FAILED:
+            return tip.id
+        if status is TipStatus.FAILED:
             logger.info("tip_payment_failed", extra={**ids, "stripe_code": event.failure_code})
         else:
             logger.info("tip_status_moved", extra={**ids, "tip_status": status.value})
+        return None
 
     async def _adopt(self, event: TipIntentEvent, status: TipStatus) -> Tip | None:
         """The tip the metadata names, when the event's intent is its current attempt's lost
@@ -208,9 +217,15 @@ class TipReconciler:
             raise TipEventMismatchError
 
 
+async def _queue_receipt(tip_id: uuid.UUID, queue: JobQueue, timeout_seconds: float) -> None:
+    await enqueue_tip_receipt(queue, tip_id, timeout_seconds)
+
+
 def _moving_to(status: TipStatus) -> StripeEventHandler:
     async def handle(session: AsyncSession, event: StripeEvent, after_commit: AfterCommit) -> None:
-        await TipReconciler(session).apply(tip_intent_event(event), status)
+        succeeded = await TipReconciler(session).apply(tip_intent_event(event), status)
+        if succeeded is not None:
+            after_commit.add(partial(_queue_receipt, succeeded))
 
     handle.__name__ = f"tip_intent_{status}"
     return handle

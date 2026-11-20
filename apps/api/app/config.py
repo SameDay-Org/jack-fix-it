@@ -419,6 +419,16 @@ class Settings(BaseSettings):
     tip_max_percent: int = Field(default=100, gt=0, le=1000)
     tip_max_cents: int = Field(default=50_000, gt=0)
     tip_window_hours: int = Field(default=168, gt=0)
+    # Receipts (#62; Foreman decision Q-R1, the values are Cesar's): who issues the receipt.
+    # The legal name and the support email go on the in-app receipt and the email's footer,
+    # the mailing address in the email's footer only. Unset, none is shown: never a value
+    # made up here. How many times the worker tries one receipt email (Resend unavailable,
+    # the card not read yet) and how many seconds it waits between two tries.
+    receipt_legal_name: str | None = Field(default=None, min_length=1, max_length=200)
+    receipt_support_email: str | None = Field(default=None, min_length=3, max_length=254)
+    receipt_mailing_address: str | None = Field(default=None, min_length=1, max_length=300)
+    receipt_email_max_attempts: int = Field(default=5, gt=0, le=20)
+    receipt_email_retry_seconds: int = Field(default=60, gt=0)
     # Transfers to the pros (D13.3, #68): once a job is confirmed its pro's payout is
     # transferred to their Stripe account, by a worker task queued at the confirmation and by a
     # sweep for whatever is left. How often the worker sweeps (a cron, in minutes of the hour),

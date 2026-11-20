@@ -35,6 +35,7 @@ from app.modules.pros.router import router as pros_router
 from app.modules.pros.router import staff_router as staff_pros_router
 from app.modules.quotes.router import customer_router as customer_quotes_router
 from app.modules.quotes.router import router as quotes_router
+from app.modules.receipts.router import router as receipts_router
 from app.modules.requests.router import router as requests_router
 from app.modules.reviews.router import rating_router as my_rating_router
 from app.modules.reviews.router import router as reviews_router
@@ -93,3 +94,4 @@ v1_router.include_router(staff_disputes_router)
 v1_router.include_router(staff_metrics_router)
 v1_router.include_router(my_rating_router)
 v1_router.include_router(tips_router)
+v1_router.include_router(receipts_router)
