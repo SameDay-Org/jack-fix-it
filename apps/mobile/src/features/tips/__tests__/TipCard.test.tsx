@@ -360,6 +360,7 @@ describe("TipCard (#273)", () => {
     expect(screen.getByTestId("tip-failed")).toHaveTextContent(
       "Our support team is checking this tip. Your job is still confirmed; you don't need to do anything.",
     );
+    expect(screen.getByTestId("tip-failed").props.className).toContain("bg-navy-900/5");
     expect(screen.queryByTestId("tip-options")).toBeNull();
     expect(screen.queryByTestId("tip-pay")).toBeNull();
     expect(screen.queryByRole("button", { name: "No tip" })).toBeNull();
@@ -379,6 +380,8 @@ describe("TipCard (#273)", () => {
     expect(screen.getByTestId("tip-failed")).toHaveTextContent(
       "This tip is already being processed. It shows here soon.",
     );
+    // Under way is news, not an error: the info tint, not the danger one.
+    expect(screen.getByTestId("tip-failed").props.className).toContain("bg-navy-900/5");
   });
 
   it("a key the server says was used for another choice is dropped: the next try has a new one", async () => {

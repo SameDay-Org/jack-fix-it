@@ -127,7 +127,7 @@ export function TipCard({ requestId, job }: { requestId: string; job: CustomerJo
         ) : null}
         {failure ? (
           <Notice
-            tone={locked ? "info" : "danger"}
+            tone={failure === "inProgress" || locked ? "info" : "danger"}
             title={t(FAILURE_KEYS[failure])}
             testID="tip-failed"
           />
