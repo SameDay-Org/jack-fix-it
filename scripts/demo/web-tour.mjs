@@ -72,7 +72,9 @@ const VIEW = { width: 1280, height: 720 };
 
 // Each scene: its storyboard number(s) (docs/demo-video.md) and its title, in tour order.
 const STORY = {
-  queue: ["5, 14", "Queue: buckets, a card, take it"],
+  queue: ["5, 14", "Queue: buckets, a card, take it, a note, contacted, a follow-up"],
+  classify: ["14", "Queue: an unclassified urgent request, classified"],
+  followups: ["14", "Follow-ups: the badge, due today, all open, one marked done"],
   pros: ["5", "Pros: documents one by one, approve the pro"],
   support: ["14", "Support: a ticket, in progress"],
   kpis: ["14", "KPIs: range, hover, keyboard"],
@@ -160,6 +162,25 @@ const CURSOR = () => {
 
 // ---- Pacing helpers. ----
 const beat = (page, ms = 900) => page.waitForTimeout(ms);
+
+/** Waits until `check` resolves true, polling; throws after `ms`. */
+async function until(check, what, ms = 15000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (await check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+/** Tomorrow in `zone`, as a date input takes it (YYYY-MM-DD). */
+const tomorrowIn = (zone) =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(Date.now() + 24 * 3600 * 1000));
 
 /** Glides the drawn cursor to the middle of `locator` (scrolling it into view first). */
 async function glide(page, locator, { steps = 28, pause = 350 } = {}) {
@@ -367,6 +388,58 @@ async function signIn() {
   });
 }
 
+// ---- Beats. ----
+// The card actions on the request just taken (Loom's beats A1-A4, handoffs/web-tour-notes.md):
+// an internal note, "Mark contacted", a follow-up for tomorrow, then the thread and the list.
+// Each waits for what its save changes on the card; a button the card does not offer (its
+// actions follow the API's actions_allowed) skips its beat.
+const NOTE = "Called Harper: the bed frame and two shelves, third floor, no elevator.";
+const FOLLOWUP = "Call Harper back with Maria's quote.";
+const FOLLOWUP_TIME = "10:00";
+// What the classify scene sets: the request goes to that category's pros.
+const CLASSIFY_AS = "Handyman";
+
+async function cardActions(page, still) {
+  const addNote = page.getByRole("button", { name: "Add note" });
+  if (await addNote.count()) {
+    await press(page, addNote);
+    await type(page, page.getByLabel("Internal note (staff only)"), NOTE);
+    await beat(page, 500);
+    await press(page, page.getByRole("button", { name: "Save note" }));
+    await page.getByText(NOTE).first().waitFor();
+    await beat(page, 1200);
+    await still("note");
+  }
+  const contacted = page.getByRole("button", { name: "Mark contacted" });
+  if (await contacted.count()) {
+    await press(page, contacted);
+    await contacted.waitFor({ state: "detached" }); // the card then offers it no more
+    await beat(page, 1000);
+  }
+  const schedule = page.getByRole("button", { name: "Schedule follow-up" });
+  if (await schedule.count()) {
+    await press(page, schedule);
+    const day = page.getByLabel("Day");
+    await press(page, day);
+    await day.fill(tomorrowIn(TIME_ZONE)); // a date input: filled, not typed
+    const time = page.getByLabel("Time");
+    await press(page, time);
+    await time.fill(FOLLOWUP_TIME);
+    await type(page, page.getByLabel("What to do"), FOLLOWUP);
+    await beat(page, 500);
+    await press(page, page.getByRole("button", { name: "Schedule", exact: true }));
+    await page.getByText(FOLLOWUP).first().waitFor();
+    await beat(page, 1000);
+    await still("followup");
+  }
+  for (const name of ["Internal notes", "Follow-ups"]) {
+    const heading = page.getByRole("heading", { name, exact: true });
+    if (!(await heading.count())) continue;
+    await bring(page, heading, 1000);
+    await beat(page, 1500);
+  }
+}
+
 // ---- The scenes. ----
 const SCENES = {
   // Storyboard 5 (first half) and 14 (queue actions).
@@ -409,7 +482,83 @@ const SCENES = {
       await page.getByRole("heading", { name: "Who holds it" }).waitFor();
       await beat(page, 1600);
       await still("taken");
+      await cardActions(page, still);
     }
+  },
+
+  // Storyboard 14: classify an urgent request nobody holds (Loom's beat B). Never the New
+  // request: it waits for Maria (storyboard 3/6). Saving may send it to the category's pros,
+  // so it then leaves Urgent: that is the story.
+  async classify(page, still) {
+    await visit(page, `${base}/admin/queue`);
+    await ready(page);
+    await press(page, page.getByRole("link", { name: /^Urgent/ }));
+    await ready(page);
+    await beat(page, 1000);
+    const card = page
+      .locator('main a[href^="/admin/requests/"]:visible', { hasText: "Nobody" })
+      .filter({ hasText: "Unclassified" })
+      .first();
+    if (await nothingLeft(card, still)) return;
+    await glide(page, card);
+    await beat(page, 600);
+    await press(page, card);
+    await ready(page);
+    await beat(page, 1000);
+    const take = page.getByRole("button", { name: "Take this request" });
+    if (await take.count()) {
+      await press(page, take);
+      await page.getByRole("heading", { name: "Who holds it" }).waitFor();
+      await beat(page, 1000);
+    }
+    const classify = page.getByRole("button", { name: "Classify" });
+    if (await nothingLeft(classify, still)) return;
+    await press(page, classify);
+    const category = page.getByLabel("Category");
+    await glide(page, category);
+    await category.selectOption({ label: CLASSIFY_AS });
+    await beat(page, 800);
+    await press(page, page.getByRole("button", { name: "Save category" }));
+    await page.getByText("Saved.", { exact: true }).first().waitFor();
+    await beat(page, 1200);
+    await still("classified");
+  },
+
+  // Storyboard 14: the follow-ups page (Loom's beat C), on the seed's follow-ups for the
+  // admin: one due later today, one overdue.
+  async followups(page, still) {
+    await visit(page, `${base}/admin/queue`);
+    await ready(page);
+    await beat(page, 800);
+    // Its name is "Follow-ups N due today": the visible count and a screen-reader line.
+    const link = page.getByRole("link", { name: /^Follow-ups/ }).first();
+    await glide(page, link);
+    await beat(page, 1200);
+    await still("badge");
+    await press(page, link);
+    await ready(page);
+    await beat(page, 1500);
+    await still("today");
+    await press(page, page.getByRole("link", { name: "All open" }));
+    await ready(page);
+    await beat(page, 1500);
+    await still("all");
+    // Rows are links to the card; the most overdue is on top.
+    const first = page.locator('main a[href^="/admin/requests/"]:visible').first();
+    if (await nothingLeft(first, still)) return;
+    await glide(page, first, { steps: 20 });
+    await beat(page, 800);
+    const marks = page.getByRole("button", { name: "Mark done" });
+    if (await nothingLeft(marks.first(), still)) return;
+    const before = await marks.count();
+    await press(page, marks.first());
+    // No "Saved." here: the row leaves the list, or shows "Done <time>".
+    await until(
+      async () => (await marks.count()) < before || (await page.getByText(/^Done /).count()) > 0,
+      "the follow-up marked done",
+    );
+    await beat(page, 1200);
+    await still("done");
   },
 
   // Storyboard 5 (second half): the waiting pro, documents one by one, then the pro.
