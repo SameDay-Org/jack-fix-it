@@ -179,9 +179,12 @@ async def test_the_push_names_the_job_never_the_text(
     assert_no_leak(caplog, SECRET_TEXT, "305-555-0199", "blue pot")
 
 
-def test_the_push_is_muted_with_the_job_updates() -> None:
-    """A chat message is about the job: the job updates preference mutes it (no new group)."""
-    assert KIND_GROUP["chat_message"] is PreferenceGroup.JOB_UPDATES
+def test_the_push_has_its_own_preference_group() -> None:
+    """The messages group mutes the chat and nothing else (tests/test_push_tasks.py sends)."""
+    assert KIND_GROUP["chat_message"] is PreferenceGroup.MESSAGES
+    assert [kind for kind, group in KIND_GROUP.items() if group is PreferenceGroup.MESSAGES] == [
+        "chat_message"
+    ]
     assert catalog.CATALOG["en"]["push.chat_message.title"] == "New message"
     assert catalog.CATALOG["es"]["push.chat_message.title"] == "Nuevo mensaje"
 

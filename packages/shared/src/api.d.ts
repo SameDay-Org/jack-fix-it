@@ -4307,7 +4307,7 @@ export interface components {
          * PreferenceGroup
          * @enum {string}
          */
-        PreferenceGroup: "job_updates" | "quotes_and_opportunities" | "reminders" | "marketing" | "account_and_security";
+        PreferenceGroup: "job_updates" | "messages" | "quotes_and_opportunities" | "reminders" | "marketing" | "account_and_security";
         /**
          * PreferredPeriod
          * @description When in the preferred day the customer would like the visit (#237). Pros propose the

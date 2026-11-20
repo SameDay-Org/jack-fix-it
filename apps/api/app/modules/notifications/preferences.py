@@ -19,6 +19,7 @@ from typing import Final
 
 class PreferenceGroup(StrEnum):
     JOB_UPDATES = "job_updates"
+    MESSAGES = "messages"  # a job's chat (#73): mutable apart from the job's steps
     QUOTES_AND_OPPORTUNITIES = "quotes_and_opportunities"
     REMINDERS = "reminders"
     MARKETING = "marketing"
@@ -42,6 +43,7 @@ class GroupSpec:
 # In the order GET returns them.
 PREFERENCE_GROUPS: Final[tuple[GroupSpec, ...]] = (
     GroupSpec(PreferenceGroup.JOB_UPDATES, (Channel.PUSH,), default=True, locked=False),
+    GroupSpec(PreferenceGroup.MESSAGES, (Channel.PUSH,), default=True, locked=False),
     GroupSpec(
         PreferenceGroup.QUOTES_AND_OPPORTUNITIES, (Channel.PUSH,), default=True, locked=False
     ),
@@ -90,8 +92,9 @@ KIND_GROUP: Final[Mapping[str, PreferenceGroup]] = MappingProxyType(
         "booking_not_completed": PreferenceGroup.JOB_UPDATES,  # to a customer
         # Stripe enabled an approved pro's payouts (#280): about their account.
         "payouts_enabled": PreferenceGroup.ACCOUNT_AND_SECURITY,  # to a pro
-        # A new chat message (#73): about the job, so job updates; to either side.
-        "chat_message": PreferenceGroup.JOB_UPDATES,
+        # A new chat message (#73), to either side: its own group, so a user can mute the chat
+        # and keep the job's steps (Foreman 2026-11-20).
+        "chat_message": PreferenceGroup.MESSAGES,
     }
 )
 
