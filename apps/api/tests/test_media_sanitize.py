@@ -834,15 +834,39 @@ VPS_UNIT = bytes([HEVC_VPS << 1, 1, 0x0C, 0x01, 0xFF, 0xFF])
 UNREGISTERED = (USER_DATA_UNREGISTERED, uuid.UUID(SEI_UUID).bytes + SEI_GPS.encode())
 
 
+SCALABLE_NESTING = 133
+# Every SEI a copy's configuration may keep: mastering display, content light level, alternative
+# transfer, ambient viewing, content colour volume.
+HDR_AND_COLOUR = [
+    (137, bytes(24)),
+    (144, bytes(4)),
+    (147, b"\x12"),
+    (148, bytes(8)),
+    (149, b"\x10"),
+]
+
+
 @pytest.mark.parametrize(
-    ("record", "holds"),
+    ("record", "unsafe"),
     [
-        pytest.param(b"", False, id="no_record"),
         pytest.param(hvcc(VPS_UNIT), False, id="parameter_sets_only"),
-        pytest.param(hvcc(VPS_UNIT, hevc_sei((MASTERING_DISPLAY, bytes(24)))), False, id="hdr"),
-        pytest.param(hvcc(hevc_sei((260, b"\x01\x02"))), False, id="type_past_255_not_user_data"),
+        pytest.param(hvcc(VPS_UNIT, hevc_sei(*HDR_AND_COLOUR)), False, id="hdr_and_colour"),
+        pytest.param(
+            # 00 00 01 is carried as 00 00 03 01: read escaped, the message runs a byte long and
+            # what follows reads as another message.
+            hvcc(hevc_sei((MASTERING_DISPLAY, b"\x00\x00\x01" + bytes(21)))),
+            False,
+            id="hdr_with_escaped_zero_bytes",
+        ),
         pytest.param(hvcc(hevc_sei(UNREGISTERED)), True, id="unregistered"),
         pytest.param(hvcc(hevc_sei((USER_DATA_T35, b"\xb5\x00\x31GPS"))), True, id="t35"),
+        pytest.param(
+            # A user data message nested in a scalable nesting one: the nesting is refused whole.
+            hvcc(hevc_sei((SCALABLE_NESTING, b"\x80" + bytes([5, 4]) + b"GPS!"))),
+            True,
+            id="scalable_nesting",
+        ),
+        pytest.param(hvcc(hevc_sei((260, b"\x01\x02"))), True, id="reserved_type_past_255"),
         pytest.param(hvcc(hevc_sei(UNREGISTERED, nal_type=HEVC_SUFFIX_SEI)), True, id="suffix_sei"),
         pytest.param(
             hvcc(hevc_sei((MASTERING_DISPLAY, bytes(300)), UNREGISTERED)),
@@ -850,15 +874,12 @@ UNREGISTERED = (USER_DATA_UNREGISTERED, uuid.UUID(SEI_UUID).bytes + SEI_GPS.enco
             id="after_a_long_message",
         ),
         pytest.param(
-            # 00 00 01 is carried as 00 00 03 01: read escaped, the first message ends a byte
-            # early and the user data message reads as the end of the unit.
-            hvcc(hevc_sei((MASTERING_DISPLAY, b"\x00\x00\x01"), (USER_DATA_UNREGISTERED, b"GPS!"))),
-            True,
-            id="after_escaped_zero_bytes",
+            hvcc(VPS_UNIT, hevc_sei(UNREGISTERED)), True, id="user_data_in_the_second_array"
         ),
         pytest.param(
             hvcc(hevc_sei(UNREGISTERED), array_type=HEVC_VPS), True, id="sei_in_another_array"
         ),
+        pytest.param(b"", True, id="empty"),
         pytest.param(hvcc(hevc_sei(UNREGISTERED))[:-4], True, id="truncated"),
         pytest.param(hvcc(VPS_UNIT) + b"\x00", True, id="trailing_bytes"),
         pytest.param(bytes([2]) + hvcc(VPS_UNIT)[1:], True, id="another_version"),
@@ -869,5 +890,59 @@ UNREGISTERED = (USER_DATA_UNREGISTERED, uuid.UUID(SEI_UUID).bytes + SEI_GPS.enco
         ),
     ],
 )
-def test_user_data_in_an_hevc_configuration_is_found(record: bytes, holds: bool) -> None:
-    assert sanitize_module.hevc_configuration_holds_user_data(record) is holds
+def test_an_hevc_configuration_keeps_hdr_and_colour_sei_only(record: bytes, unsafe: bool) -> None:
+    assert sanitize_module.hevc_configuration_is_unsafe(record) is unsafe
+
+
+async def test_an_oversized_hevc_configuration_fails_the_copy_unread(
+    tmp_path: Path, workdir: Path, tools: Tools, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "original"
+    make_hevc_with_sei_gps(tools, source, tmp_path)  # a clean configuration of about 110 bytes
+    monkeypatch.setattr(sanitize_module, "_HEVC_CONFIGURATION_MAX_BYTES", 16)
+    dumps = record_runs(monkeypatch, "-show_data")
+
+    with pytest.raises(SanitizeError) as error:
+        await sanitize(source, "video/mp4", workdir, CONFIG)
+
+    assert error.value.reason == SanitizeFailure.METADATA_REMAINS
+    assert dumps == []
+
+
+def record_runs(monkeypatch: pytest.MonkeyPatch, flag: str) -> list[list[str]]:
+    """The arguments of every ffmpeg or ffprobe run that passes `flag`, as they happen."""
+    runs: list[list[str]] = []
+    original = sanitize_module._run
+
+    async def recording(
+        program: str, arguments: list[str], timeout_seconds: float, *, capture: bool = False
+    ) -> tuple[int, bytes]:
+        if flag in arguments:
+            runs.append(list(arguments))
+        return await original(program, arguments, timeout_seconds, capture=capture)
+
+    monkeypatch.setattr(sanitize_module, "_run", recording)
+    return runs
+
+
+@pytest.mark.parametrize("codec", ["h264", "hevc"])
+async def test_only_the_copy_s_video_configuration_is_ever_dumped(
+    tmp_path: Path, workdir: Path, tools: Tools, monkeypatch: pytest.MonkeyPatch, codec: str
+) -> None:
+    # The original's streams are never dumped: a crafted file's decoder configuration can be
+    # as large as the upload, and its dump four times that (review of #182).
+    source = tmp_path / "original"
+    if codec == "h264":
+        make_h264_with_sei_gps(tools, source, "mp4")
+    else:
+        make_hevc_with_sei_gps(tools, source, tmp_path)
+    dumps = record_runs(monkeypatch, "-show_data")
+
+    safe = await sanitize(source, "video/mp4", workdir, CONFIG)
+
+    if codec == "h264":
+        assert dumps == []  # avcC holds parameter sets only: nothing to read
+    else:
+        [arguments] = dumps
+        assert arguments[-1] == str(safe.path)
+        assert arguments[arguments.index("-select_streams") + 1] == "v:0"

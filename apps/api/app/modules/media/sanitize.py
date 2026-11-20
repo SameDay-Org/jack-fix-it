@@ -15,10 +15,10 @@ location and creation tags). The copy keeps the picture and drops the rest:
   re-encode, of those two tracks only (no cover art, data or subtitle streams), with every tag
   and chapter dropped, and every SEI unit dropped from the video bitstream: a drone or a dashcam
   can write its GPS there, in each frame (#182). Then ffprobe again: the copy must hold those
-  tracks only, no location, date, GPS or device tag, and no user data in the HEVC decoder
-  configuration, which the remux copies as it is. Both run without a shell, with a timeout, and
-  are killed when the job stops; their output names paths and is never logged. Only the exit
-  code is reported.
+  tracks only, no location, date, GPS or device tag, and an HEVC decoder configuration (which
+  the remux copies as it is) with no SEI but the HDR and colour ones. Both run without a shell,
+  with a timeout, and are killed when the job stops; their output names paths and is never
+  logged. Only the exit code is reported.
 
 Nothing here touches the storage or the database (app/modules/requests/media_copies.py does),
 and nothing logs: the caller logs the media id and the reason code.
@@ -160,9 +160,16 @@ _SEI_FILTERS: Final[dict[str, str]] = {
     "h264": "filter_units=remove_types=6",
     "hevc": "filter_units=remove_types=39|40",
 }
-# SEI payload types that carry free user data: registered (ITU-T T.35) and unregistered (#182).
-_USER_DATA_SEI: Final = frozenset({4, 5})
+# The only SEI messages an HEVC decoder configuration of a copy may keep (#182), by payload
+# type: the HDR and colour ones (mastering display 137, content light level 144, alternative
+# transfer 147, ambient viewing 148, content colour volume 149). Any other fails the copy: user
+# data (registered 4, unregistered 5), a scalable nesting (133) that can carry it, a reserved one.
+_CONFIGURATION_SEI: Final = frozenset({137, 144, 147, 148, 149})
 _HEVC_SEI_NAL_TYPES: Final = frozenset({39, 40})  # prefix and suffix SEI
+# The largest HEVC decoder configuration of a copy that is read. A phone's is parameter sets, a
+# few hundred bytes (x265's, with its settings, 2.4 KB); a larger one fails the copy unread, so a
+# crafted file cannot make the worker hold a dump of it (four times its size, from ffprobe).
+_HEVC_CONFIGURATION_MAX_BYTES: Final = 65_536
 # One line of ffprobe's hex dump: an offset, then up to 16 bytes in groups of two.
 _HEX_DUMP_LINE: Final = re.compile(r"[0-9a-f]{8}: ((?:[0-9a-f]{2,4} ?){1,8})(?: |$)")
 
@@ -246,7 +253,7 @@ class _Stream:
     codec: str
     attached_picture: bool
     tags: tuple[str, ...]  # tag names only
-    extradata: bytes = b""  # the decoder configuration (hvcC, avcC), as stored
+    configuration_bytes: int = 0  # the size of the decoder configuration (hvcC, avcC)
 
 
 async def sanitize_video(
@@ -281,6 +288,8 @@ async def sanitize_video(
         raise SanitizeError(SanitizeFailure.FFMPEG_FAILED, exit_code=exit_code)
     copied, format_tags = await _probe(target, config)
     _check_copy(copied, format_tags, config)
+    if await _configuration_is_unsafe(target, copied, config):
+        raise SanitizeError(SanitizeFailure.METADATA_REMAINS)
     if await _has_hidden_frames(target, copied, config):
         raise SanitizeError(SanitizeFailure.HIDDEN_FRAMES)
     return SafeFile(target, content_type, extension)
@@ -314,20 +323,13 @@ def _check_copy(
     streams: list[_Stream], format_tags: tuple[str, ...], config: SanitizeConfig
 ) -> None:
     """The copy holds one allowed video track, at most one allowed audio track, nothing else,
-    no location, date, GPS or device tag, and no user data in its HEVC decoder configuration.
-
-    The SEI filter reaches each packet but not the decoder configuration (hvcC), which the remux
-    copies as it is: an encoder can put SEI there too (x265 writes its settings in one). The copy
-    is refused then, never served with it (#182). H.264's configuration (avcC) holds parameter
-    sets only."""
+    and no location, date, GPS or device tag."""
     kinds = sorted(stream.kind for stream in streams)
     if kinds not in (["video"], ["audio", "video"]):
         raise SanitizeError(SanitizeFailure.METADATA_REMAINS)
     for stream in streams:
         allowed = config.video_codecs if stream.kind == "video" else config.audio_codecs
         if stream.attached_picture or stream.codec not in allowed:
-            raise SanitizeError(SanitizeFailure.METADATA_REMAINS)
-        if stream.codec == "hevc" and hevc_configuration_holds_user_data(stream.extradata):
             raise SanitizeError(SanitizeFailure.METADATA_REMAINS)
     tags = (*format_tags, *(tag for stream in streams for tag in stream.tags))
     if any(denied in tag.lower() for tag in tags for denied in _DENIED_TAGS):
@@ -339,8 +341,7 @@ async def _probe(path: Path, config: SanitizeConfig) -> tuple[list[_Stream], tup
     SanitizeError when it does not read as one."""
     arguments = [
         "-v", "quiet", *_INPUT_OPTIONS,
-        "-show_data",  # with stream=extradata: the decoder configuration, as a hex dump
-        "-show_entries", "stream=codec_type,codec_name,extradata"
+        "-show_entries", "stream=codec_type,codec_name,extradata_size"
         ":stream_disposition=attached_pic:stream_tags:format_tags",
         "-of", "json", str(path),
     ]  # fmt: skip
@@ -357,7 +358,7 @@ async def _probe(path: Path, config: SanitizeConfig) -> tuple[list[_Stream], tup
                 codec=str(stream.get("codec_name", "")),
                 attached_picture=bool(stream.get("disposition", {}).get("attached_pic")),
                 tags=tuple(str(tag) for tag in stream.get("tags", {})),
-                extradata=_hex_dump_bytes(str(stream.get("extradata", ""))),
+                configuration_bytes=int(stream.get("extradata_size", 0)),
             )
             for stream in probed.get("streams", [])
         ]
@@ -365,6 +366,39 @@ async def _probe(path: Path, config: SanitizeConfig) -> tuple[list[_Stream], tup
     except (ValueError, AttributeError, TypeError):
         raise SanitizeError(SanitizeFailure.UNREADABLE) from None
     return streams, format_tags
+
+
+async def _configuration_is_unsafe(
+    path: Path, streams: list[_Stream], config: SanitizeConfig
+) -> bool:
+    """True when the copy's HEVC decoder configuration (hvcC) holds an SEI message that is not
+    an HDR or colour one, is larger than _HEVC_CONFIGURATION_MAX_BYTES, or cannot be read (#182).
+
+    The SEI filter reaches each packet but not the decoder configuration, which the remux copies
+    as it is, and an encoder can put SEI there too (x265 writes its settings in one): the copy is
+    refused then, never served with it. Only the copy's one video stream is read, never the
+    original's streams. H.264's configuration (avcC) holds parameter sets only."""
+    video = next(stream for stream in streams if stream.kind == "video")
+    if video.codec != "hevc" or video.configuration_bytes == 0:
+        return False
+    if video.configuration_bytes > _HEVC_CONFIGURATION_MAX_BYTES:
+        return True
+    arguments = [
+        "-v", "quiet", *_INPUT_OPTIONS, "-select_streams", "v:0",
+        "-show_data", "-show_entries", "stream=extradata",  # the record, as a hex dump
+        "-of", "json", str(path),
+    ]  # fmt: skip
+    exit_code, output = await _run(
+        config.ffprobe_path, arguments, config.timeout_seconds, capture=True
+    )
+    if exit_code != 0:
+        raise SanitizeError(SanitizeFailure.UNREADABLE, exit_code=exit_code)
+    try:
+        [stream] = json.loads(output)["streams"]
+        record = _hex_dump_bytes(str(stream["extradata"]))
+    except (ValueError, KeyError, TypeError):
+        raise SanitizeError(SanitizeFailure.UNREADABLE) from None
+    return hevc_configuration_is_unsafe(record)
 
 
 def _hex_dump_bytes(dump: str) -> bytes:
@@ -381,12 +415,12 @@ def _hex_dump_bytes(dump: str) -> bytes:
     return bytes(data)
 
 
-def hevc_configuration_holds_user_data(record: bytes) -> bool:
+def hevc_configuration_is_unsafe(record: bytes) -> bool:
     """True when an HEVC decoder configuration record (ISO/IEC 14496-15 hvcC) holds an SEI
-    unit with a user data message (#182), or cannot be read as one (closed: refused, never
-    passed). No record (no extradata) holds nothing."""
+    message outside _CONFIGURATION_SEI (#182), or cannot be read as one, empty included (closed:
+    refused, never passed)."""
     if not record:
-        return False
+        return True
     try:
         if record[0] != 1:  # configurationVersion
             return True
@@ -401,22 +435,22 @@ def hevc_configuration_holds_user_data(record: bytes) -> bool:
                     return True
                 position += 2 + length
                 # Each unit's own header says what it is, whatever array it sits in.
-                if (unit[0] >> 1) & 0x3F in _HEVC_SEI_NAL_TYPES and _sei_holds_user_data(unit):
+                if (unit[0] >> 1) & 0x3F in _HEVC_SEI_NAL_TYPES and _sei_is_unsafe(unit):
                     return True
         return position != len(record)
     except IndexError:
         return True
 
 
-def _sei_holds_user_data(unit: bytes) -> bool:
-    """True when the HEVC SEI unit (2-byte header, then the escaped payload) has a user data
-    message. IndexError when its messages run past the end."""
+def _sei_is_unsafe(unit: bytes) -> bool:
+    """True when the HEVC SEI unit (2-byte header, then the escaped payload) has a message
+    outside _CONFIGURATION_SEI. IndexError when its messages run past the end."""
     rbsp = unit[2:].replace(b"\x00\x00\x03", b"\x00\x00")  # emulation prevention bytes
     position = 0
     while position < len(rbsp) and rbsp[position:] != b"\x80":  # the trailing bits end it
         payload_type, position = _sei_number(rbsp, position)
         size, position = _sei_number(rbsp, position)
-        if payload_type in _USER_DATA_SEI:
+        if payload_type not in _CONFIGURATION_SEI:
             return True
         position += size
         if position > len(rbsp):
