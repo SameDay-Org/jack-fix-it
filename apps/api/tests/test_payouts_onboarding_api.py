@@ -43,6 +43,7 @@ from tests.test_pros_profile_api import FORBIDDEN, Caller, make_caller
 PUBLIC_API_URL = "https://api.example.invalid"
 APP_URL = "jackfixit-test://payouts-test"
 LIMIT = 3
+STATUS_LIMIT = 5
 WINDOW = 600
 NOW = 1_000.0
 LINK_TTL = timedelta(minutes=5)
@@ -193,6 +194,8 @@ def settings() -> Settings:
         payouts_onboarding_app_url=APP_URL,
         payouts_onboarding_link_limit=LIMIT,
         payouts_onboarding_link_window_seconds=WINDOW,
+        payouts_status_limit=STATUS_LIMIT,
+        payouts_status_window_seconds=WINDOW,
         stripe_account_reconcile_after_seconds=int(RECONCILE_AFTER.total_seconds()),
     )
 
@@ -364,8 +367,14 @@ async def test_payouts_status_persists_payouts_enabled(
     writes: list[bool] = []
     set_payouts_enabled = ProProfileRepository.set_payouts_enabled
 
-    async def recording(self: ProProfileRepository, pro_id: uuid.UUID, enabled: bool) -> bool:
-        changed = await set_payouts_enabled(self, pro_id, enabled)
+    async def recording(
+        self: ProProfileRepository,
+        pro_id: uuid.UUID,
+        enabled: bool,
+        *,
+        unchanged_since: datetime | None = None,
+    ) -> bool:
+        changed = await set_payouts_enabled(self, pro_id, enabled, unchanged_since=unchanged_since)
         if changed:  # the row was written
             writes.append(enabled)
         return changed
@@ -658,9 +667,31 @@ async def test_onboarding_rate_limited(
     assert (limited.status_code, limited.json()) == (429, RATE_LIMITED)
     assert int(limited.headers["Retry-After"]) > 0
     assert len(stripe.links) == LIMIT
-    # Per pro: another pro still gets a link, and the status is not limited.
+    # Per pro: another pro still gets a link, and the status has its own budget.
     assert (await db_client.post(LINK, headers=bea.headers)).status_code == 200
     assert (await db_client.get(STATUS, headers=ana.headers)).status_code == 200
+
+
+async def test_payouts_status_rate_limited(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, stripe: FakeStripe
+) -> None:
+    """#524: every status is a Stripe read, so one pro gets PAYOUTS_STATUS_LIMIT of them per
+    PAYOUTS_STATUS_WINDOW_SECONDS; a limited call reaches no Stripe call."""
+    account_id = f"acct_limit{uuid.uuid4().hex[:8]}"
+    ana = await pro(db_session, account_id=account_id)
+    bea = await pro(db_session)
+    stripe.states[account_id] = ENABLED
+
+    for _ in range(STATUS_LIMIT):
+        assert (await db_client.get(STATUS, headers=ana.headers)).status_code == 200
+    limited = await db_client.get(STATUS, headers=ana.headers)
+
+    assert (limited.status_code, limited.json()) == (429, RATE_LIMITED)
+    assert int(limited.headers["Retry-After"]) > 0
+    assert stripe.retrieved == [account_id] * STATUS_LIMIT
+    # Per pro, and apart from the onboarding links.
+    assert (await db_client.get(STATUS, headers=bea.headers)).status_code == 200
+    assert (await db_client.post(LINK, headers=ana.headers)).status_code == 200
 
 
 @pytest.mark.parametrize("result", ["return", "refresh"])
@@ -1012,16 +1043,54 @@ class HeldRead(FakeStripe):
         return await super().retrieve_account(account_id)
 
 
-async def test_payouts_status_overlapping_reads_store_the_last_answer(
+async def test_payouts_status_holds_no_lock_or_transaction_over_the_stripe_read(
+    committed_pro: CommittedPro,
+) -> None:
+    """#524: while Stripe answers, the call holds no transaction (so no pooled connection) and
+    no lock on the profile row: overlapping calls of one pro never queue on each other's
+    connections."""
+    sessions = committed_pro.sessions
+    account_id = f"acct_nolock{uuid.uuid4().hex[:8]}"
+    async with sessions() as session:
+        await session.execute(
+            update(ProProfile)
+            .where(ProProfile.id == committed_pro.profile_id)
+            .values(stripe_account_id=account_id)
+        )
+        await session.commit()
+    held = HeldRead(states={account_id: ENABLED})
+
+    async with sessions() as one:
+        service = PayoutsService(one, ProService(one), held, CONFIG)
+        call = asyncio.create_task(service.status(committed_pro.user))
+        async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+            await held.reading.wait()
+        in_transaction = one.in_transaction()
+        async with sessions() as monitor:
+            await monitor.execute(text("SET LOCAL lock_timeout = '1s'"))
+            locked = await monitor.scalar(
+                select(ProProfile.id)
+                .where(ProProfile.id == committed_pro.profile_id)
+                .with_for_update(nowait=True)
+            )
+            await monitor.rollback()
+        held.release.set()
+        response = await call
+
+    assert in_transaction is False
+    assert locked == committed_pro.profile_id  # NOWAIT got the lock: nobody held it
+    assert response.payouts_enabled is True
+
+
+async def test_payouts_status_overlapping_reads_never_store_an_overtaken_answer(
     committed_pro: CommittedPro,
 ) -> None:
     """Two status calls for one pro overlap: the first is inside its Stripe read (payouts not
-    enabled) when the second starts (enabled). The first read answers once the second call has
-    finished or waits on the first. Whichever call finishes last, its answer is the stored one,
-    and each call answers what Stripe told it. Gated on the value read before the call, the
-    second stored true and the first answered false over it, leaving true stored. The second
-    call must also have waited on the first's row lock: without it, an older Stripe answer
-    could be stored over a newer one."""
+    enabled) when the second runs from start to end (enabled), without waiting on the first.
+    The first read's answer lands after the second stored its own: it is not stored over it,
+    and the first call answers what is stored. A write lands only while the row is unchanged
+    since the call read it (#524), so an older Stripe answer is never stored over a newer one,
+    the account.updated webhook's included."""
     sessions = committed_pro.sessions
     account_id = f"acct_overlap{uuid.uuid4().hex[:8]}"
     async with sessions() as session:
@@ -1048,19 +1117,19 @@ async def test_payouts_status_overlapping_reads_store_the_last_answer(
         second = asyncio.create_task(
             status("second", two, FakeStripe(states={account_id: ENABLED}))
         )
-        await _wait_until_one_blocks(sessions, pids, unless=second)
-        second_waited = not second.done()
+        async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+            second_answer = await second
         held.release.set()
-        answers = dict(zip(("first", "second"), await asyncio.gather(first, second), strict=True))
+        first_answer = await first
     async with sessions() as session:
         stored = await session.scalar(
             select(ProProfile.payouts_enabled).where(ProProfile.id == committed_pro.profile_id)
         )
 
-    assert answers == {"first": False, "second": True}
-    assert len(finished) == 2
-    assert stored is answers[finished[-1]]
-    assert second_waited
+    assert pids[0] != pids[1]
+    assert finished == ["second", "first"]  # the second never waited on the first
+    assert (first_answer, second_answer) == (True, True)
+    assert stored is True
 
 
 async def _backend_pid(session: AsyncSession) -> int:

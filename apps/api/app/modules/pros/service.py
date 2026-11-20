@@ -98,6 +98,15 @@ class PayoutAccount:
 
 
 @dataclass(frozen=True)
+class VersionedPayoutAccount:
+    """A payout account as read without a lock, with its row's version (updated_at): a value
+    computed from it is stored only while the version is unchanged (#524)."""
+
+    account: PayoutAccount
+    version: datetime
+
+
+@dataclass(frozen=True)
 class ConnectedPro:
     """The pro whose profile holds a Stripe Express account (#280): its payout side, who
     hears about it (the user) and whether they may receive requests once payouts are
@@ -189,6 +198,14 @@ class ProService:
         profile = await self._profiles.get_by_user_id(user_id, lock=lock)
         return None if profile is None else _payout_account(profile)
 
+    async def versioned_payout_account(self, user_id: uuid.UUID) -> VersionedPayoutAccount | None:
+        """The user's payout account and its row's version, read unlocked as committed now
+        (#524); None when they have no profile yet."""
+        profile = await self._profiles.get_by_user_id(user_id, fresh=True)
+        if profile is None:
+            return None
+        return VersionedPayoutAccount(_payout_account(profile), profile.updated_at)
+
     async def payout_account_of_profile(self, pro_id: uuid.UUID) -> PayoutAccount | None:
         """The profile's payout account as last committed, unlocked: where a job's transfer
         goes (#68). None when no profile has this id."""
@@ -228,10 +245,19 @@ class ProService:
         """Stores the profile's Express account id; the caller holds the row lock and commits."""
         await self._profiles.set_stripe_account_id(pro_id, account_id)
 
-    async def set_payouts_enabled(self, pro_id: uuid.UUID, enabled: bool) -> bool:
+    async def set_payouts_enabled(
+        self, pro_id: uuid.UUID, enabled: bool, *, unchanged_since: datetime | None = None
+    ) -> bool:
         """Stores what Stripe says of the account's payouts; True when the value changed (only
-        then is the row written). The caller commits."""
-        return await self._profiles.set_payouts_enabled(pro_id, enabled)
+        then is the row written). `unchanged_since`: only while the row's version is still
+        that one (#524). The caller commits."""
+        return await self._profiles.set_payouts_enabled(
+            pro_id, enabled, unchanged_since=unchanged_since
+        )
+
+    async def payouts_enabled_of(self, pro_id: uuid.UUID) -> bool | None:
+        """payouts_enabled as committed now; None when no profile has this id."""
+        return await self._profiles.payouts_enabled_of(pro_id)
 
     async def hireable_cards(self, pro_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, ProCard]:
         """The public card of each pro among `pro_ids` who can still be hired, by profile id:

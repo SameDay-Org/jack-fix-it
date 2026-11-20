@@ -24,7 +24,7 @@ from app.integrations.stripe_connect import StripeExpressConnect
 from app.main import create_app
 from app.modules.payouts.errors import PaymentsProviderError
 from app.modules.payouts.service import PayoutsConfig, PayoutsService
-from app.modules.pros.service import PayoutAccount, ProService
+from app.modules.pros.service import PayoutAccount, ProService, VersionedPayoutAccount
 from app.modules.users.types import UserAccount, UserRole, UserStatus
 from app.observability import JsonFormatter, before_breadcrumb, before_send, init_sentry
 from tests.conftest import make_settings
@@ -516,12 +516,15 @@ async def test_captured_event_has_no_stripe_account_id(sentry_transport: MemoryT
         http_client=http,
     )
     pros = AsyncMock(spec=ProService)
-    pros.payout_account.return_value = PayoutAccount(
-        profile_id=uuid.uuid4(),
-        stripe_account_id=account_id,
-        stripe_account_requested_at=None,
-        payouts_enabled=False,
-        approved=True,
+    pros.versioned_payout_account.return_value = VersionedPayoutAccount(
+        PayoutAccount(
+            profile_id=uuid.uuid4(),
+            stripe_account_id=account_id,
+            stripe_account_requested_at=None,
+            payouts_enabled=False,
+            approved=True,
+        ),
+        version=datetime(2026, 1, 1, tzinfo=UTC),
     )
     service = PayoutsService(
         AsyncMock(spec=AsyncSession),

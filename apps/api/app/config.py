@@ -602,6 +602,9 @@ class Settings(BaseSettings):
     # Onboarding links one pro may ask for per window.
     payouts_onboarding_link_limit: int = Field(default=10, gt=0)
     payouts_onboarding_link_window_seconds: int = Field(default=600, gt=0)
+    # Status reads one pro may make per window (#524): each one is a Stripe read.
+    payouts_status_limit: int = Field(default=30, gt=0)
+    payouts_status_window_seconds: int = Field(default=600, gt=0)
 
     @field_validator("database_url")
     @classmethod

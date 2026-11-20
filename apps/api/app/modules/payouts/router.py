@@ -97,7 +97,41 @@ async def create_onboarding_link(
     return await payouts.onboarding_link(user)
 
 
-@router.get("", response_model=PayoutsOut, summary="My payout status", responses=_RESPONSES)
+async def limit_payouts_status(
+    user: ProUser,
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> None:
+    """PAYOUTS_STATUS_LIMIT status reads per pro per PAYOUTS_STATUS_WINDOW_SECONDS (#524): each
+    one is a Stripe read."""
+    await enforce_limit(
+        limiter,
+        "payouts_status",
+        str(user.id),
+        limit=settings.payouts_status_limit,
+        window_seconds=settings.payouts_status_window_seconds,
+        timeout_seconds=settings.rate_limit_timeout_seconds,
+    )
+
+
+@router.get(
+    "",
+    response_model=PayoutsOut,
+    summary="My payout status",
+    dependencies=[Depends(limit_payouts_status)],
+    responses={
+        **_RESPONSES,
+        status.HTTP_429_TOO_MANY_REQUESTS: {
+            **_error("rate_limited: too many status reads; retry later."),
+            "headers": {
+                "Retry-After": {
+                    "description": "Seconds until the current limit window ends.",
+                    "schema": {"type": "integer"},
+                }
+            },
+        },
+    },
+)
 async def get_payouts_status(
     user: ProUser, payouts: Annotated[PayoutsService, Depends(get_payouts_service)]
 ) -> PayoutsOut:

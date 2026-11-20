@@ -2240,6 +2240,24 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "rate_limited: too many status reads; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
