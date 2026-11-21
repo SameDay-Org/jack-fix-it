@@ -1353,6 +1353,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/web/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make a request without an account (the web service only)
+         * @description A request for the BDC from a web visitor who has no account (#86). Called by the web
+         *     app's server with its key (`X-JFI-Web-Key`) and the visitor's address (`X-JFI-Client-IP`):
+         *     the browser never calls it. The request is received, in the BDC's queue, and never sent to
+         *     a pro: the BDC calls the customer, who continues in the app. The contact is for the BDC
+         *     only.
+         */
+        post: operations["create_web_request_v1_web_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/webhooks/stripe": {
         parameters: {
             query?: never;
@@ -2537,6 +2561,11 @@ export interface components {
              * @description The language the request was written in, e.g. en or es.
              */
             language: string;
+            /**
+             * Has Account
+             * @description False for a request made on the web without an account (#86): the name, email and phone are the ones the visitor gave, and the customer cannot sign in; such a request is never sent to a pro.
+             */
+            has_account: boolean;
         };
         /** CardJob */
         CardJob: {
@@ -5412,6 +5441,13 @@ export interface components {
              */
             media_count: number;
             customer: components["schemas"]["CardCustomer"];
+            /**
+             * Utm
+             * @description The campaign the request came from (source, medium, campaign, term, content), as stored (#86).
+             */
+            utm: {
+                [key: string]: string;
+            } | null;
             /** @description As the customer typed it. */
             address: components["schemas"]["AddressOut"];
             /**
@@ -6891,7 +6927,7 @@ export interface components {
          * UserStatus
          * @enum {string}
          */
-        UserStatus: "active" | "suspended";
+        UserStatus: "active" | "suspended" | "guest";
         /**
          * UtmIn
          * @description Campaign attribution. Only these five keys; anything else is a 422.
@@ -6937,6 +6973,85 @@ export interface components {
          * @enum {string}
          */
         WaitlistSource: "app" | "web";
+        /**
+         * WebContactIn
+         * @description Who the BDC calls back: staff only, never shown to a pro or in a log.
+         */
+        WebContactIn: {
+            /** First Name */
+            first_name: string;
+            /**
+             * Email
+             * Format: email
+             * @description Trimmed and lowercased.
+             */
+            email: string;
+            /**
+             * Phone
+             * @description E.164, with an allowed country code.
+             */
+            phone: string;
+        };
+        /** WebRequestCreated */
+        WebRequestCreated: {
+            /**
+             * Public Code
+             * @description The code the BDC and the customer name it by.
+             */
+            public_code: string;
+            /**
+             * Status
+             * @description Always received: the BDC reviews it and calls.
+             * @constant
+             */
+            status: "received";
+        };
+        /**
+         * WebRequestIn
+         * @description A request made on the web without an account (#86): what the app's create takes, without
+         *     media, plus who to call and the consent the visitor gave.
+         */
+        WebRequestIn: {
+            /** Description */
+            description: string;
+            /** Category Id */
+            category_id?: string | null;
+            address: components["schemas"]["AddressIn"];
+            /**
+             * Preferred Date
+             * @description Today or later, as a UTC date.
+             */
+            preferred_date?: string | null;
+            /** @description When in the preferred date; as POST /v1/requests takes it. */
+            preferred_period?: components["schemas"]["PreferredPeriod"] | null;
+            /**
+             * Intake Answers
+             * @description Answers to the category's intake_questions, checked as POST /v1/requests checks them (the same schema and size limit).
+             */
+            intake_answers?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            utm?: components["schemas"]["UtmIn"] | null;
+            contact: components["schemas"]["WebContactIn"];
+            /**
+             * Consent Version
+             * @description The id of the consent words the visitor saw, stored with the time: letters, digits, ".", "-" and "_", 1 to 64 characters.
+             */
+            consent_version: string;
+            /**
+             * Locale
+             * @description The page's language.
+             * @default en
+             * @enum {string}
+             */
+            locale: "en" | "es";
+            /**
+             * Website
+             * @description The form's honeypot, hidden from people: leave it empty. A request with it filled in is answered as usual and stored nowhere.
+             * @default
+             */
+            website: string;
+        };
         /**
          * WebhookReceived
          * @description Stripe reads only the status code; the body says the event is safely stored.
@@ -10820,6 +10935,87 @@ export interface operations {
             };
         };
     };
+    create_web_request_v1_web_requests_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description A UUID the web service makes per visitor submit: the same key with the same body answers the same code and writes nothing. */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebRequestIn"];
+            };
+        };
+        responses: {
+            /** @description Received: in the BDC's queue. The same answer for a replay of the same Idempotency-Key and body. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebRequestCreated"];
+                };
+            };
+            /** @description invalid_service_key: no X-JFI-Web-Key, or not the web service's (the body is never read). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description out_of_area: the ZIP is not served; no request was made and the contact is on the ZIP's waitlist. idempotency_key_reused: the key already made a request with another body. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description length_required: no Content-Length. */
+            411: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payload_too_large: the body is over WEB_REQUEST_MAX_BODY_BYTES. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a bad field (as POST /v1/requests checks them), a phone outside the allowed country codes, an unknown field, or no Idempotency-Key; invalid_category / invalid_intake_answers as POST /v1/requests answers them. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many requests from this visitor's address, or for this email or phone, in the window or the day; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     receive_stripe_event_v1_webhooks_stripe_post: {
         parameters: {
             query?: never;
@@ -12500,7 +12696,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description request_held: another agent holds the request. invalid_transition: the request is accepted, expired or cancelled. request_not_classified: it has no category yet. One code per reason the pro cannot take it: pro_already_offered (they have, or had, this request), pro_not_approved, pro_payouts_disabled, pro_category_mismatch, pro_out_of_area. Nothing was written. */
+            /** @description request_held: another agent holds the request. request_without_account: a web request made without an account (#86), never sent to a pro. invalid_transition: the request is accepted, expired or cancelled. request_not_classified: it has no category yet. One code per reason the pro cannot take it: pro_already_offered (they have, or had, this request), pro_not_approved, pro_payouts_disabled, pro_category_mismatch, pro_out_of_area. Nothing was written. */
             409: {
                 headers: {
                     [name: string]: unknown;

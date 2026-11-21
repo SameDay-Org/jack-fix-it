@@ -21,6 +21,15 @@ class UserRole(StrEnum):
 class UserStatus(StrEnum):
     ACTIVE = "active"
     SUSPENDED = "suspended"
+    # The customer of a request made on the web without an account (#86): never signs in,
+    # holds no contact (the request's web contact has it, staff only), is never dispatched.
+    GUEST = "guest"
+
+
+# A guest's stored email and password hash (#86): an address that is never delivered (the
+# .invalid TLD, RFC 2606) and unique per guest, and a hash no password verifies (not a hash).
+GUEST_EMAIL_DOMAIN: Final = "guest.invalid"
+GUEST_PASSWORD_HASH: Final = "!guest"  # noqa: S105 - no secret: a marker no password verifies
 
 
 class Keep(Enum):

@@ -213,6 +213,7 @@ class ServiceRequestRepository:
         dispatched: Select[uuid.UUID],
         statuses: Collection[RequestStatus],
         *,
+        guests: Select[uuid.UUID],
         created_after: datetime,
         limit: int,
         category_ids: Collection[uuid.UUID] | None,
@@ -224,7 +225,8 @@ class ServiceRequestRepository:
         after `created_after`, whose id is not in `dispatched`, oldest first by (created_at,
         id), after `after` when given. Every filter is in the statement, before the limit. A
         request the BDC holds while it waits for the customer (info_requested_at, #82) is left
-        out."""
+        out, and so is a guest's (`guests`, the users module's: a web request without an
+        account, #86)."""
         statement = select(
             ServiceRequest.id, ServiceRequest.address_id, ServiceRequest.created_at
         ).where(
@@ -233,6 +235,7 @@ class ServiceRequestRepository:
             ServiceRequest.info_requested_at.is_(None),
             ServiceRequest.created_at >= created_after,
             ServiceRequest.id.not_in(dispatched),
+            ServiceRequest.customer_id.not_in(guests),
         )
         if category_ids is not None:
             statement = statement.where(ServiceRequest.category_id.in_(category_ids))

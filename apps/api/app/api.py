@@ -44,6 +44,7 @@ from app.modules.support.router import router as support_router
 from app.modules.support.router import staff_router as staff_support_router
 from app.modules.uploads.router import router as uploads_router
 from app.modules.waitlist.router import router as waitlist_router
+from app.modules.web_requests.router import router as web_requests_router
 from app.modules.webhooks.router import router as webhooks_router
 
 # Documents the real 422 body (the error contract) instead of FastAPI's default schema.
@@ -77,6 +78,7 @@ v1_router.include_router(chat_flags_router)
 v1_router.include_router(devices_router)
 v1_router.include_router(waitlist_router)
 v1_router.include_router(interest_router)
+v1_router.include_router(web_requests_router)
 v1_router.include_router(webhooks_router)
 v1_router.include_router(addresses_router)
 v1_router.include_router(notification_preferences_router)

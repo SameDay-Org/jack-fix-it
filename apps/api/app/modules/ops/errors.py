@@ -101,6 +101,14 @@ class ProCategoryMismatchError(ConflictError):
     message = "This pro does not take this category."
 
 
+class RequestWithoutAccountError(ConflictError):
+    """A manual assignment of a web request whose customer has no account (#86): a pro's
+    quote could never be accepted. The BDC calls the customer, who requests in the app."""
+
+    code = "request_without_account"
+    message = "This request was made without an account: it cannot be sent to a pro."
+
+
 class ProOutOfAreaError(ConflictError):
     """A manual assignment to a pro who does not serve the request's ZIP (#82)."""
 
