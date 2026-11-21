@@ -161,14 +161,19 @@ def client_ip(request: Request) -> str:
     if request.client is None:
         return "unknown"
     host = request.client.host
+    return normalized_ip(host) or host
+
+
+def normalized_ip(value: str) -> str | None:
+    """`value` as an address, the one form a bucket is keyed by; None when it is not one."""
     try:
-        address = ipaddress.ip_address(host)
+        address = ipaddress.ip_address(value)
     except ValueError:
-        return host
+        return None
     # An IPv4 client on the dual-stack socket arrives as ::ffff:a.b.c.d: one client, one bucket.
     if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
         return str(address.ipv4_mapped)
-    return host
+    return str(address)
 
 
 def limit_per_ip(scope: str) -> Callable[..., Awaitable[None]]:

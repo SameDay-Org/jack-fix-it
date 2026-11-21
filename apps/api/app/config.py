@@ -64,6 +64,9 @@ _TWILIO_SETTINGS: tuple[str, ...] = (
 # The HMAC key for PII in rate-limit keys (#137): required where a weak one stops startup.
 RATE_LIMIT_KEY_SECRET_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
 RATE_LIMIT_KEY_SECRET_MIN_LENGTH = 32
+# The web service's key (#409, #86): required where deployed, as long as the HMAC keys.
+WEB_SERVICE_KEY_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
+WEB_SERVICE_KEY_MIN_LENGTH = 32
 # The HMAC key that derives each rotated refresh token (#152): required when deployed.
 REFRESH_ROTATION_SECRET_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
 REFRESH_ROTATION_SECRET_MIN_LENGTH = 32
@@ -194,6 +197,10 @@ class Settings(BaseSettings):
     # Seconds after a rotation during which the old refresh token, presented again, gets the
     # same successor instead of revoking the session (#152). 0 turns the grace window off.
     refresh_reuse_grace_seconds: int = Field(default=30, ge=0)
+    # The key the web app's server sends as X-JFI-Web-Key (#409, #86): only behind it is the
+    # visitor address it forwards (X-JFI-Client-IP) trusted. Required in staging and production;
+    # unset elsewhere, the web service's routes refuse every call.
+    web_service_key: SecretStr | None = None
     # Proxies whose X-Forwarded-For uvicorn trusts for the client IP (CSV, or "*").
     forwarded_allow_ips: str = "127.0.0.1"
     # Object storage, S3-compatible (R2 or Railway Buckets), reached only through presigned URLs.
@@ -359,6 +366,11 @@ class Settings(BaseSettings):
     # Waitlist (D8.4, #46): joins per client IP and per contact (email or phone, hashed), per
     # AUTH_RATE_LIMIT_WINDOW_SECONDS.
     waitlist_join_limit: int = Field(default=5, gt=0)
+    # The app-launch interest list (#409): joins per visitor address and per email (hashed), per
+    # INTEREST_WINDOW_SECONDS.
+    interest_ip_limit: int = Field(default=10, gt=0)
+    interest_email_limit: int = Field(default=3, gt=0)
+    interest_window_seconds: int = Field(default=3_600, gt=0)
     # Saved addresses (D8.2, #214): the most one customer may keep in their address book, and
     # how many writes (create, edit, delete together) one customer may make per window.
     saved_addresses_max_per_user: int = Field(default=4, gt=0)
@@ -728,6 +740,7 @@ class Settings(BaseSettings):
         "twilio_auth_token",
         "twilio_verify_service_sid",
         "rate_limit_key_secret",
+        "web_service_key",
         "refresh_rotation_secret",
         "resend_api_key",
         "email_from",
@@ -935,6 +948,18 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"RATE_LIMIT_KEY_SECRET must be set to at least "
                 f"{RATE_LIMIT_KEY_SECRET_MIN_LENGTH} characters when APP_ENV is {self.app_env}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_web_service_key_when_deployed(self) -> Self:
+        if self.app_env not in WEB_SERVICE_KEY_REQUIRED_IN:
+            return self
+        key = self.web_service_key
+        if key is None or len(key.get_secret_value()) < WEB_SERVICE_KEY_MIN_LENGTH:
+            raise ValueError(
+                f"WEB_SERVICE_KEY must be set to at least {WEB_SERVICE_KEY_MIN_LENGTH} "
+                f"characters when APP_ENV is {self.app_env}"
             )
         return self
 
