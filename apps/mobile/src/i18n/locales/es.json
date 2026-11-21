@@ -2174,7 +2174,8 @@
       "noCategory": "Trabajo",
       "paidOn": "Pagado el {{date}}",
       "completed": "Completado el {{date}}",
-      "confirmedBy": "Suele confirmarse para el {{date}}"
+      "confirmedBy": "Suele confirmarse para el {{date}}",
+      "tip": "+ {{amount}} de propina"
     },
     "empty": {
       "title": "Aún no hay ganancias",
@@ -2207,5 +2208,28 @@
       "body": "Conecta una cuenta de pagos con Stripe para que podamos enviarte tus ganancias.",
       "action": "Configurar pagos"
     }
+  },
+  "tips": {
+    "title": "¿Quieres dejarle una propina a {{name}}?",
+    "body": "Las propinas son opcionales. {{name}} recibe el 100%.",
+    "group": "Monto de la propina",
+    "none": "Sin propina",
+    "percent": "{{percent}}% · {{amount}}",
+    "custom": "Otra cantidad",
+    "customLabel": "Monto de la propina",
+    "customHint": "De {{min}} a {{max}}",
+    "customOutOfRange": "Ingresa un monto de {{min}} a {{max}}.",
+    "customInvalid": "Ingresa un monto, como 10 o 12.50.",
+    "pay": "Dar {{amount}} de propina",
+    "payNoAmount": "Dar propina",
+    "done": "Le diste {{amount}} de propina a {{name}}. ¡Gracias!",
+    "skipped": "Sin propina",
+    "failed": "La propina no se procesó. Tu trabajo sigue confirmado.",
+    "offline": "Estás sin conexión. Tu trabajo sigue confirmado; intenta la propina de nuevo cuando vuelvas.",
+    "generic": "Algo salió mal con la propina. Tu trabajo sigue confirmado.",
+    "delayed": "Seguimos confirmando tu propina. Aparecerá aquí pronto.",
+    "rateLimited": "Demasiados intentos en poco tiempo. Espera un momento y vuelve a intentarlo. Tu trabajo sigue confirmado.",
+    "inProgress": "Esta propina ya se está procesando. Aparecerá aquí pronto.",
+    "needsReview": "Nuestro equipo de soporte está revisando esta propina. Tu trabajo sigue confirmado; no necesitas hacer nada."
   }
 }
