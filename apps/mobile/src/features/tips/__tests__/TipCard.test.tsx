@@ -1,17 +1,28 @@
 import "@/i18n";
 
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react-native";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react-native";
 import * as Haptics from "expo-haptics";
+import type { ReactNode } from "react";
 
 import { ApiError, apiGet, apiPost, NetworkError } from "@/api";
 import { customerJobQueryOptions } from "@/features/jobs/api";
 import type { CustomerJob } from "@/features/jobs/phase";
+import { paymentConfig } from "@/features/payments/config";
 import { openPaymentSheet } from "@/features/payments/paymentSheet";
 
 import { confirmedJob } from "../../jobs/__tests__/helpers";
 import type { TipOut, TipStatus } from "../api";
 import { TipCard } from "../TipCard";
+import { useTip } from "../useTip";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
@@ -404,5 +415,183 @@ describe("TipCard (#273)", () => {
     await renderCard(tipOut({ status: "succeeded", amount_cents: 2500, can_tip: false }));
     expect(screen.getByTestId("tip-done")).toHaveTextContent("You tipped Dan $25.00. Thank you!");
     expect(screen.queryByTestId("tip-options")).toBeNull();
+    // Only a tip paid from this card is felt; opening one paid before is not.
+    await flush();
+    expect(Haptics.notificationAsync).not.toHaveBeenCalled();
   });
+
+  it("a preset the server no longer offers (422) says so and asks for the job again", async () => {
+    await renderCard();
+    jest.mocked(apiPost).mockRejectedValue(new ApiError(422, "tip_percent_not_offered"));
+    const reads = () => jest.mocked(apiGet).mock.calls.length;
+    const before = reads();
+
+    await act(async () => fireEvent.press(chip("10% · $9.99")));
+    await act(async () => fireEvent.press(payButton()));
+    await flush();
+
+    expect(screen.getByTestId("tip-failed")).toHaveTextContent(
+      "Something went wrong with the tip. Your job is still confirmed.",
+    );
+    // The presets changed meanwhile: the job's answer brings the ones offered now.
+    expect(reads()).toBeGreaterThan(before);
+  });
+
+  it.each([
+    ["1", 100],
+    ["180", 18_000],
+  ])("a custom amount on the server's bound ($%s) is sent", async (typed, cents) => {
+    await renderCard();
+    jest.mocked(apiPost).mockResolvedValue({
+      tip: tipOut({ status: "requires_payment" }),
+      sheet: SHEET,
+    } as never);
+    jest.mocked(openPaymentSheet).mockResolvedValue({ kind: "canceled" });
+
+    await act(async () => fireEvent.press(chip("Custom")));
+    await act(async () => fireEvent.changeText(screen.getByTestId("tip-custom-amount"), typed));
+    await act(async () => fireEvent.press(payButton()));
+
+    expect(tipCalls()[0]?.[1]).toEqual({ choice: "custom", amount_cents: cents });
+  });
+
+  it("a press while a tip is under way is ignored: one request, one sheet, every choice disabled", async () => {
+    await renderCard();
+    let answerTip: (value: unknown) => void = () => undefined;
+    jest.mocked(apiPost).mockImplementation(
+      (() =>
+        new Promise((resolve) => {
+          answerTip = resolve;
+        })) as unknown as typeof apiPost,
+    );
+    jest.mocked(openPaymentSheet).mockResolvedValue({ kind: "canceled" });
+    const noTip = () => screen.getByRole("button", { name: "No tip" });
+
+    await act(async () => fireEvent.press(chip("10% · $9.99")));
+    await act(async () => fireEvent.press(payButton()));
+
+    try {
+      // The API has not answered yet: Tip says it is busy, and no other choice can be made.
+      expect(payButton().props.accessibilityState).toMatchObject({ disabled: true, busy: true });
+      expect(noTip().props.accessibilityState).toMatchObject({ disabled: true });
+      for (const name of ["5% · $9.01", "10% · $9.99", "15% · $27.01", "Custom"]) {
+        expect(chip(name).props.accessibilityState).toMatchObject({ disabled: true });
+      }
+      await act(async () => fireEvent.press(payButton()));
+      await act(async () => fireEvent.press(noTip()));
+      await act(async () => fireEvent.press(chip("5% · $9.01")));
+      expect(tipCalls()).toHaveLength(1);
+    } finally {
+      // Answered even when an expectation above fails, so the app-wide sheet lock is free again.
+      await act(async () =>
+        answerTip({ tip: tipOut({ status: "requires_payment" }), sheet: SHEET }),
+      );
+      await tick();
+    }
+    expect(tipCalls()).toEqual([[TIP_PATH, { choice: "percent", percent: 10 }, expect.anything()]]);
+    expect(openPaymentSheet).toHaveBeenCalledTimes(1);
+    // The sheet closed: the first choice is still the one picked, and every choice is open again.
+    expect(chip("10% · $9.99").props.accessibilityState).toMatchObject({
+      checked: true,
+      disabled: false,
+    });
+    expect(payButton().props.accessibilityState).toMatchObject({ disabled: false });
+    expect(noTip().props.accessibilityState).toMatchObject({ disabled: false });
+  });
+
+  it("two taps before the card redraws send once: the first takes the one sheet", async () => {
+    jest.mocked(apiPost).mockResolvedValue({
+      tip: tipOut({ status: "requires_payment" }),
+      sheet: SHEET,
+    } as never);
+    jest.mocked(openPaymentSheet).mockResolvedValue({ kind: "canceled" });
+    const job = withTip(tipOut());
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = await renderHook(() => useTip(REQUEST_ID, job), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+
+    await act(async () => result.current.select({ kind: "percent", percent: 10 }));
+    // Both taps reach the card as drawn (enabled, idle) before the busy card is drawn: the sheet
+    // lock is what ignores the second.
+    const drawn = result.current;
+    await act(async () => {
+      drawn.pay();
+      drawn.pay();
+    });
+    await tick();
+
+    expect(tipCalls()).toHaveLength(1);
+    expect(openPaymentSheet).toHaveBeenCalledTimes(1);
+  });
+
+  it("paid in the sheet and still no answer when the wait ends: it says the tip shows soon, no second tip", async () => {
+    await renderCard();
+    jest.mocked(apiPost).mockImplementation((async () => {
+      answer("requires_payment", { choice: "percent", percent: 10, amount_cents: 999 });
+      return { tip: tipOut({ status: "requires_payment", amount_cents: 999 }), sheet: SHEET };
+    }) as unknown as typeof apiPost);
+    jest.mocked(openPaymentSheet).mockResolvedValue({ kind: "paid" });
+
+    await act(async () => fireEvent.press(chip("10% · $9.99")));
+    await act(async () => fireEvent.press(payButton()));
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(paymentConfig.pollTimeoutMs - 1);
+    });
+    expect(screen.queryByTestId("tip-delayed")).toBeNull();
+    expect(payButton().props.accessibilityState).toMatchObject({ busy: true });
+
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(paymentConfig.pollIntervalMs);
+    });
+    await tick();
+    expect(screen.getByTestId("tip-delayed")).toHaveTextContent(
+      "We're still confirming your tip. It shows here soon.",
+    );
+    expect(screen.queryByTestId("tip-failed")).toBeNull();
+    expect(screen.queryByTestId("tip-done")).toBeNull();
+    // The payment may still land: the card offers no second one meanwhile.
+    expect(payButton().props.accessibilityState).toMatchObject({ disabled: true });
+    expect(screen.getByRole("button", { name: "No tip" }).props.accessibilityState).toMatchObject({
+      disabled: true,
+    });
+    expect(tipCalls()).toHaveLength(1);
+  });
+
+  it("a custom amount the server refuses (422) says so on the field, not as a failure", async () => {
+    await renderCard();
+    jest.mocked(apiPost).mockRejectedValue(new ApiError(422, "tip_amount_out_of_range"));
+
+    await act(async () => fireEvent.press(chip("Custom")));
+    await act(async () => fireEvent.changeText(screen.getByTestId("tip-custom-amount"), "12.5"));
+    await act(async () => fireEvent.press(payButton()));
+
+    // Within the bounds the card knew, so it was sent; the server's answer is the field's error.
+    expect(tipCalls()).toHaveLength(1);
+    expect(screen.getByText("Enter an amount from $1.00 to $180.00.")).toBeTruthy();
+    expect(screen.queryByTestId("tip-failed")).toBeNull();
+    expect(screen.getByTestId("tip-custom-amount").props.value).toBe("12.5");
+    expect(payButton().props.accessibilityState).toMatchObject({ disabled: false });
+  });
+
+  it.each([500, 503])(
+    "a %i says something went wrong and the retry carries the same key",
+    async (status) => {
+      await renderCard();
+      jest.mocked(apiPost).mockRejectedValue(new ApiError(status, "server_error"));
+
+      await act(async () => fireEvent.press(chip("10% · $9.99")));
+      await act(async () => fireEvent.press(payButton()));
+      expect(screen.getByTestId("tip-failed")).toHaveTextContent(
+        "Something went wrong with the tip. Your job is still confirmed.",
+      );
+      await act(async () => fireEvent.press(payButton()));
+
+      const [first, retry] = sentKeys();
+      expect(first).toMatch(UUID);
+      expect(retry).toBe(first);
+    },
+  );
 });
