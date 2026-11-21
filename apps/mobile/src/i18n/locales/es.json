@@ -827,7 +827,9 @@
       "refreshFailed": "No pudimos actualizar tus trabajos.",
       "retry": "Intentar de nuevo",
       "row": "{{status}}. {{when}}. {{what}}.",
-      "for": "{{category}} para {{name}}"
+      "for": "{{category}} para {{name}}",
+      "startedTime": "Empezó {{time}}",
+      "startedWhen": "Empezó {{day}}, {{time}}"
     },
     "day": {
       "today": "Hoy",

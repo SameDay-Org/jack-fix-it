@@ -179,7 +179,11 @@ describe("YourJobs", () => {
       customer_first_name: null,
     });
     const checkedIn = arrived({ id: jobN(3).id, scheduled_start_at: TOMORROW });
-    const started = working({ id: jobN(4).id, scheduled_start_at: NEXT_WEEK });
+    const started = working({
+      id: jobN(4).id,
+      scheduled_start_at: NEXT_WEEK,
+      started_at: TODAY_EARLY,
+    });
     answer(jobPage([started, checkedIn, onTheWay, scheduled]));
     await renderWithQuery(<YourJobs />);
     await findRow(scheduled.id);
@@ -190,11 +194,14 @@ describe("YourJobs", () => {
       [checkedIn, "Arrived", TOMORROW],
       [started, "Working", NEXT_WEEK],
     ];
-    for (const [job, status, at] of cases) {
+    for (const [job, status, at] of cases.slice(0, 3)) {
       expect(line(job.id, "time").props.children).toBe(timeOf(at));
       expect(within(line(job.id, "status")).getByText(status, HIDDEN)).toBeTruthy();
       expect(line(job.id, "category").props.children).toBe("Painting");
     }
+    // A started job shows when the work started, not its scheduled day (#566).
+    expect(line(started.id, "time").props.children).toBe(`Started ${timeOf(TODAY_EARLY)}`);
+    expect(within(line(started.id, "status")).getByText("Working", HIDDEN)).toBeTruthy();
 
     // The name and the city never break apart inside themselves: no-break spaces join them.
     expect(line(scheduled.id, "place").props.children).toBe(`Maria${NBSP}· Fort${NBSP}Lauderdale`);
@@ -203,6 +210,22 @@ describe("YourJobs", () => {
     expect(within(row(onTheWay.id)).queryByText(/Maria/, HIDDEN)).toBeNull();
     // The lines are for sighted users; the row's label reads them out.
     expect(within(row(scheduled.id)).queryByText("Painting")).toBeNull();
+  });
+
+  it("reads a started job by when the work started, not by its scheduled day (#566)", async () => {
+    const started = working({
+      id: jobN(1).id,
+      scheduled_start_at: TOMORROW,
+      started_at: TODAY_EARLY,
+    });
+    answer(jobPage([started]));
+    await renderWithQuery(<YourJobs />);
+    await findRow(started.id);
+
+    expect(rowLabel(started.id)).toBe(
+      `Working. Started today, ${timeOf(TODAY_EARLY)}. Painting for Maria, Fort Lauderdale.`,
+    );
+    expect(String(rowLabel(started.id))).not.toMatch(/Tomorrow/);
   });
 
   it("leaves the place line out when the job has neither a name nor a city", async () => {
