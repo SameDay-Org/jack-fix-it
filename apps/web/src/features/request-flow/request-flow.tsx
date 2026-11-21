@@ -26,6 +26,7 @@ import {
   phoneInput,
   zipInput,
 } from "./input";
+import { type LaterSteps, loadLaterSteps } from "./later-steps-loader";
 import { QuestionField, questionErrorText, questionFieldId } from "./question-field";
 import { type IntakeAnswers, intakeAnswersFor, questionErrors } from "./questions";
 import type { ReviewRefusal } from "./review-step";
@@ -146,10 +147,9 @@ export type RequestFlowProps = {
 
 const EMPTY_ADDRESS: AddressDraft = { line1: "", line2: "", city: "", state: "" };
 const EMPTY_CONTACT: ContactDraft = { firstName: "", phone: "", email: "" };
+/** The city and state a ZIP answer filled in: none. */
+const NO_PLACE = { city: "", state: "" };
 
-/** The steps after the description, loaded apart from the page (later-steps.ts). */
-type LaterSteps = typeof import("./later-steps");
-const loadLaterSteps = (): Promise<LaterSteps> => import("./later-steps");
 const LATER_SCREENS: readonly Screen[] = ["where", "when", "contact", "review", "done"];
 
 /** How the flow ended: sent (with its number; none for the trap field), or on the waitlist. */
@@ -179,6 +179,8 @@ export function RequestFlow(props: RequestFlowProps) {
   const [categoryId, setCategoryId] = useState(props.initialCategoryId);
   const [answers, setAnswers] = useState<Record<string, IntakeAnswers>>({});
   const [address, setAddress] = useState(EMPTY_ADDRESS);
+  /** What the last ZIP answer put in the city and state, told apart from what was typed. */
+  const [zipPlace, setZipPlace] = useState(NO_PLACE);
   const [date, setDate] = useState("");
   const [period, setPeriod] = useState<PreferredPeriod>("flexible");
   const [contact, setContact] = useState(EMPTY_CONTACT);
@@ -189,8 +191,14 @@ export function RequestFlow(props: RequestFlowProps) {
 
   const [later, setLater] = useState<LaterSteps | null>(null);
   const needsLater = LATER_SCREENS.includes(screen);
+  /** Counts the visitor's "Try again" presses when the later steps' code did not come. */
+  const [laterTry, setLaterTry] = useState(0);
+  /** The ask that failed last: its try, and whether a later screen was waiting for it. */
+  const [laterFailure, setLaterFailure] = useState<{ attempt: number; needed: boolean } | null>(
+    null,
+  );
   // Asked for as soon as the flow shows, so they are there long before the visitor is; asked
-  // again on reaching one of them if that first try failed.
+  // again on reaching one of them if that first ask failed, and on each "Try again".
   useEffect(() => {
     if (later) return;
     let live = true;
@@ -198,18 +206,25 @@ export function RequestFlow(props: RequestFlowProps) {
       (steps) => {
         if (live) setLater(steps);
       },
-      () => undefined,
+      () => {
+        if (live) setLaterFailure({ attempt: laterTry, needed: needsLater });
+      },
     );
     return () => {
       live = false;
     };
-  }, [later, needsLater]);
+  }, [later, needsLater, laterTry]);
+  /** Whether the latest ask failed: one made since (a later screen reached, "Try again") waits. */
+  const laterFailed =
+    laterFailure !== null &&
+    laterFailure.attempt === laterTry &&
+    laterFailure.needed === needsLater;
   /** Whether the screen itself shows (a later step waits for its code). */
   const shown = !needsLater || later !== null;
 
   useEffect(() => {
     if (moved.current) heading.current?.focus();
-  }, [screen, shown]);
+  }, [screen, shown, laterFailed]);
 
   const category = categories?.find((item) => item.id === categoryId) ?? null;
   const questions = category?.questions ?? [];
@@ -425,14 +440,36 @@ export function RequestFlow(props: RequestFlowProps) {
   }
 
   if (needsLater) {
-    if (!later) {
+    if (later) return laterScreen(later);
+    // Each its own frame (key), so its heading is focused, and read, as it shows.
+    if (laterFailed) {
       return (
-        <StepFrame heading={heading} progress={null} title={text.loading} support={null}>
-          {null}
+        <StepFrame
+          key="later-failed"
+          heading={heading}
+          progress={null}
+          title={text.loadFailed.title}
+          support={text.loadFailed.body}
+        >
+          <Actions>
+            <button type="button" className={PRIMARY} onClick={() => setLaterTry((n) => n + 1)}>
+              {text.loadFailed.retry}
+            </button>
+          </Actions>
         </StepFrame>
       );
     }
-    return laterScreen(later);
+    return (
+      <StepFrame
+        key="later-loading"
+        heading={heading}
+        progress={null}
+        title={text.loading}
+        support={null}
+      >
+        {null}
+      </StepFrame>
+    );
   }
 
   switch (screen) {
@@ -462,14 +499,20 @@ export function RequestFlow(props: RequestFlowProps) {
           onAnswer={(result) => {
             setArea(result.zip);
             setServed(result.kind === "served");
-            if (result.kind === "served") {
-              // The served city fills in an empty address; what the visitor typed stays.
-              setAddress((current) => ({
-                ...current,
-                city: current.city || (result.city ?? ""),
-                state: current.state || (result.state ?? ""),
-              }));
-            }
+            // A served ZIP fills in its city and state. A new answer replaces what the last one
+            // filled in (or clears it when it names none); what the visitor typed stays.
+            const place =
+              result.kind === "served"
+                ? { city: result.city ?? "", state: result.state ?? "" }
+                : NO_PLACE;
+            const filled = (typed: string, before: string, now: string) =>
+              typed === "" || typed === before ? now : typed;
+            setAddress((current) => ({
+              ...current,
+              city: filled(current.city, zipPlace.city, place.city),
+              state: filled(current.state, zipPlace.state, place.state),
+            }));
+            setZipPlace(place);
             go(result.kind === "served" ? "describe" : "waitlist");
           }}
         />

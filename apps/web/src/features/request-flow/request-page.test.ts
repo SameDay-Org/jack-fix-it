@@ -12,10 +12,29 @@ import es from "@/i18n/locales/es.json";
 import { getT } from "@/i18n/server";
 import { routeFetch } from "@/lib/test-helpers";
 
+import { checkFormToken } from "@/lib/public-form/form-token";
+
 import { requestFlowText } from "./copy";
 import { requestMetadata } from "./metadata";
+import type { RequestFlowProps } from "./request-flow";
 import { preselectedCategoryId, RequestPage } from "./request-page";
 import type { RequestCategory } from "./server";
+
+/** What the page handed the flow the last time it showed it. */
+const handed = vi.hoisted(() => ({ props: null as RequestFlowProps | null }));
+vi.mock("./request-flow", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./request-flow")>();
+  const { createElement } = await import("react");
+  return {
+    ...actual,
+    RequestFlow: (props: RequestFlowProps) => {
+      handed.props = props;
+      return createElement(actual.RequestFlow, props);
+    },
+  };
+});
+
+const FORM_SECRET = "form-secret-for-tests-0123456789abcdef";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -33,7 +52,9 @@ beforeEach(() => {
   vi.stubEnv("API_TIMEOUT_MS", "1000");
   vi.stubEnv("CONTACT_EMAIL", "");
   vi.stubEnv("REQUEST_FLOW_ENABLED", "true");
-  vi.stubEnv("REQUEST_FORM_SECRET", "form-secret-for-tests-0123456789abcdef");
+  vi.stubEnv("REQUEST_FORM_SECRET", FORM_SECRET);
+  vi.stubEnv("APP_STORE_URL", "");
+  vi.stubEnv("PLAY_STORE_URL", "");
   vi.stubEnv("WEB_SERVICE_KEY", "web-service-key-for-tests-0123456789");
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockImplementation(routeFetch({ "/v1/categories": () => Response.json([HANDYMAN]) }));
@@ -84,6 +105,26 @@ describe("the request page (#86)", () => {
       expect(html).not.toMatch(/type="submit"[^>]*>(Send|Enviar)/);
     },
   );
+
+  it("hands the flow the campaign of its address, a token for this form, the stores once set", async () => {
+    await page("en", { utm_source: "google", utm_campaign: "launch", service: "x" });
+    expect(handed.props?.utm).toEqual({ source: "google", campaign: "launch" });
+    // A token for the request form (not the interest form's), old enough once the visitor sends.
+    const timings = { minSeconds: 3, maxAgeSeconds: 3600 };
+    const later = Date.now() + 60_000;
+    const token = handed.props?.formToken;
+    expect(checkFormToken(token, FORM_SECRET, "request", later, timings).ok).toBe(true);
+    expect(handed.props?.storeLinks).toBeNull();
+
+    vi.stubEnv("APP_STORE_URL", "https://apps.apple.com/app/id100");
+    vi.stubEnv("PLAY_STORE_URL", "https://play.google.com/store/apps/details?id=x");
+    await page("en");
+    expect(handed.props?.utm).toBeNull();
+    expect(handed.props?.storeLinks).toEqual({
+      appStore: "https://apps.apple.com/app/id100",
+      playStore: "https://play.google.com/store/apps/details?id=x",
+    });
+  });
 
   it("reads the services once for every visitor (cached for an hour), not once each", async () => {
     await page("en");

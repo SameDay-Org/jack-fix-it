@@ -16,6 +16,11 @@ export function requestFlowText(t: TFunction): RequestFlowText {
     counter: t("request.counter", { length: "{{length}}", max: "{{max}}" }),
     check: t("request.check"),
     loading: t("request.loading"),
+    loadFailed: {
+      title: t("request.loadFailed.title"),
+      body: t("request.loadFailed.body"),
+      retry: t("request.loadFailed.retry"),
+    },
     zip: {
       title: t("request.zip.title"),
       support: t("request.zip.support"),

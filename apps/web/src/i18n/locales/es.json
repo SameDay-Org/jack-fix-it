@@ -1360,6 +1360,11 @@
     "counter": "{{length}} / {{max}}",
     "check": "Algunas respuestas necesitan revisión:",
     "loading": "Cargando…",
+    "loadFailed": {
+      "title": "Este paso no cargó",
+      "body": "Revisa tu conexión y vuelve a intentarlo. Tus respuestas se conservan.",
+      "retry": "Volver a intentar"
+    },
     "zip": {
       "title": "¿Dónde es el trabajo?",
       "support": "Primero, veamos si Jack trabaja en tu zona.",

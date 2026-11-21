@@ -6,6 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { getT } from "@/i18n/server";
 
 import { requestFlowText } from "./copy";
+import { type LaterSteps, loadLaterSteps } from "./later-steps-loader";
 import { RequestFlow, type RequestFlowProps } from "./request-flow";
 import type { RequestCategory } from "./server";
 import type {
@@ -16,6 +17,14 @@ import type {
   WaitlistResult,
   ZipCheckResult,
 } from "./types";
+
+// The later steps' code comes as it does in the page; a test makes it wait or fail.
+vi.mock("./later-steps-loader", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./later-steps-loader")>();
+  return { loadLaterSteps: vi.fn(actual.loadLaterSteps) };
+});
+const realLoad = async (): Promise<LaterSteps> => import("./later-steps");
+const offline = (): Promise<LaterSteps> => Promise.reject(new Error("offline"));
 
 // React's act() expects to be told it runs in a test.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -83,6 +92,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  vi.mocked(loadLaterSteps).mockReset().mockImplementation(realLoad);
   checkZip = vi.fn(async (zip: string): Promise<ZipCheckResult> => ({
     kind: "served",
     zip: zip.slice(0, 5),
@@ -428,6 +438,83 @@ describe("where the job is", () => {
     await click(button(TEXT.next));
     expect(heading().textContent).toBe(TEXT.when.title);
   });
+
+  /** Back to the ZIP from the address, another ZIP, and on to the address again. */
+  async function otherZip(answer: ZipCheckResult): Promise<void> {
+    await click(button(TEXT.where.changeZip));
+    checkZip.mockResolvedValueOnce(answer);
+    await served("33101");
+    await click(button(TEXT.next));
+    expect(heading().textContent).toBe(TEXT.where.title);
+  }
+  const city = () => (field(TEXT.where.city) as HTMLInputElement).value;
+  const state = () => (field(TEXT.where.state) as HTMLInputElement).value;
+
+  it("takes the new ZIP's city and state in place of those the first one filled in", async () => {
+    await atWhere();
+    await otherZip({ kind: "served", zip: "33101", city: "Miami", state: "FL" });
+    expect([city(), state()]).toEqual(["Miami", "FL"]);
+    expect(text()).toContain("ZIP code: 33101");
+  });
+
+  it("clears what the first ZIP filled in when the new one names no city", async () => {
+    await atWhere();
+    await otherZip({ kind: "served", zip: "33101", city: null, state: null });
+    expect([city(), state()]).toEqual(["", ""]);
+  });
+
+  it("keeps a city and a state the visitor typed", async () => {
+    await atWhere();
+    await type(field(TEXT.where.city), "Dania Beach");
+    await type(field(TEXT.where.state), "fl");
+    await otherZip({ kind: "served", zip: "33101", city: "Miami", state: "FL" });
+    expect([city(), state()]).toEqual(["Dania Beach", "fl"]);
+  });
+});
+
+describe("the steps that load after the description (later-steps.ts)", () => {
+  it("shows Loading until their code comes, then the step with its heading focused", async () => {
+    let arrive: () => void = () => undefined;
+    vi.mocked(loadLaterSteps).mockImplementation(
+      () => new Promise((resolve) => (arrive = () => void realLoad().then(resolve))),
+    );
+    await atWhere();
+    expect(heading().textContent).toBe(TEXT.loading);
+    expect(document.activeElement).toBe(heading());
+    await act(async () => arrive());
+    expect(heading().textContent).toBe(TEXT.where.title);
+    expect(document.activeElement).toBe(heading());
+  });
+
+  it("asks again on reaching them when the first ask failed", async () => {
+    vi.mocked(loadLaterSteps).mockImplementationOnce(offline);
+    await atWhere();
+    expect(loadLaterSteps).toHaveBeenCalledTimes(2);
+    expect(heading().textContent).toBe(TEXT.where.title);
+  });
+
+  it("says so with a Try again when they do not come, as many times as it takes", async () => {
+    vi.mocked(loadLaterSteps).mockImplementation(offline);
+    await atWhere();
+    expect(heading().textContent).toBe(TEXT.loadFailed.title);
+    expect(document.activeElement).toBe(heading());
+    expect(text()).toContain(TEXT.loadFailed.body);
+
+    await click(button(TEXT.loadFailed.retry));
+    expect(heading().textContent).toBe(TEXT.loadFailed.title);
+    expect(document.activeElement).toBe(heading());
+
+    vi.mocked(loadLaterSteps).mockImplementation(realLoad);
+    await click(button(TEXT.loadFailed.retry));
+    expect(loadLaterSteps).toHaveBeenCalledTimes(4);
+    expect(heading().textContent).toBe(TEXT.where.title);
+    expect(document.activeElement).toBe(heading());
+    // Nothing typed was lost on the way.
+    await click(button(TEXT.back));
+    expect((field(TEXT.describe.label) as HTMLTextAreaElement).value).toBe(
+      "The kitchen sink leaks.",
+    );
+  });
 });
 
 describe("when it suits", () => {
@@ -664,6 +751,34 @@ describe("the review and the send", () => {
     expect(heading().textContent).toBe(TEXT.describe.title);
     expect(text()).toContain(TEXT.notices.invalidCategory);
     expect((field(TEXT.describe.notSure) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("goes back to the questions when the service's questions changed (422 invalid_intake_answers)", async () => {
+    sendRequest.mockResolvedValueOnce({ kind: "error", error: "invalid_answers" });
+    await mount({ initialCategoryId: HANDYMAN.id });
+    await served();
+    await type(field(TEXT.describe.label), "Mount a TV");
+    await click(button(TEXT.next));
+    await type(field("How many rooms?"), "3");
+    await click(button(TEXT.next));
+    await fillAddress();
+    await click(button(TEXT.next));
+    await click(button(TEXT.next));
+    await fillContact();
+    await click(button(TEXT.next));
+    await click(button(TEXT.review.send));
+    expect(heading().textContent).toBe(HANDYMAN.name);
+    expect(document.activeElement).toBe(heading());
+    expect(text()).toContain(TEXT.notices.invalidAnswers);
+    expect((field("How many rooms?") as HTMLInputElement).value).toBe("3");
+  });
+
+  it("goes back to the description for a service without questions (422 invalid_intake_answers)", async () => {
+    sendRequest.mockResolvedValueOnce({ kind: "error", error: "invalid_answers" });
+    await atReview();
+    await click(button(TEXT.review.send));
+    expect(heading().textContent).toBe(TEXT.describe.title);
+    expect(text()).toContain(TEXT.notices.invalidAnswers);
   });
 
   it("says the visitor is on the waitlist when the ZIP stopped being served (409 out_of_area)", async () => {

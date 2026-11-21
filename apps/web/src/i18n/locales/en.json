@@ -1360,6 +1360,11 @@
     "counter": "{{length}} / {{max}}",
     "check": "Some answers need a look:",
     "loading": "Loading…",
+    "loadFailed": {
+      "title": "This step didn't load",
+      "body": "Check your connection, then try again. Your answers are kept.",
+      "retry": "Try again"
+    },
     "zip": {
       "title": "Where's the job?",
       "support": "First, let's check that Jack works in your area.",

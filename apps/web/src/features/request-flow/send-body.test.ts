@@ -84,7 +84,9 @@ describe("webRequestBody (POST /v1/web/requests, #86)", () => {
       NOW,
       "+1",
     );
-    expect(body).toMatchObject({ locale: "en", utm: { source: "google" } });
+    expect(body.locale).toBe("en");
+    // toEqual, not toMatchObject: a gclid kept must fail this.
+    expect(body.utm).toEqual({ source: "google" });
   });
 });
 

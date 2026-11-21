@@ -107,6 +107,8 @@ export type RequestFlowText = {
   check: string;
   /** While the later steps are on their way (a slow connection). */
   loading: string;
+  /** When the later steps' code did not come: what to do, and the button that asks again. */
+  loadFailed: { title: string; body: string; retry: string };
   zip: {
     title: string;
     support: string;
