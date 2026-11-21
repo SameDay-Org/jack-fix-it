@@ -587,6 +587,9 @@ class Settings(BaseSettings):
     # Days after a job's confirmation at which a review of it counts for its target even if
     # the target wrote none (the publication rule; Cesar may adjust the window).
     review_publish_after_days: int = Field(default=14, gt=0)
+    # Reads of pros' public profiles and reviews per user per window (#78).
+    pro_public_read_limit: int = Field(default=120, gt=0)
+    pro_public_read_window_seconds: int = Field(default=60, gt=0)
     # The original of a redacted chat message (#72, Cesar 2026-11-07): kept encrypted for staff
     # only (app.crypto), deleted after CHAT_ORIGINAL_RETENTION_DAYS. CHAT_ORIGINAL_KEYS is a JSON
     # object {key_id: base64 32-byte key}; CHAT_ORIGINAL_ACTIVE_KEY_ID names the key new originals
