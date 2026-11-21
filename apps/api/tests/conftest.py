@@ -378,7 +378,10 @@ async def committed(app: FastAPI, test_database_url: URL) -> AsyncIterator[Commi
         await engine.dispose()
 
 
-LOCK_WAIT_DEADLINE_SECONDS = 5
+# How long a test waits for one backend to be seen waiting on another's lock. Generous on
+# purpose: it bounds a polled condition, so a pass is as fast as before, and only a machine
+# under load (or a real bug) gets near it; 5 s failed under CI load (#448).
+LOCK_WAIT_DEADLINE_SECONDS = 30
 
 
 async def backend_pid(session: AsyncSession) -> int:
