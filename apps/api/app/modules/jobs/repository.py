@@ -17,6 +17,12 @@ class JobRepository:
         self._session = session
 
     @staticmethod
+    def request_ids() -> Subquery:
+        """Every job's id (`job_id`) and its request (`request_id`) only, as a subquery for
+        another module's query (#503)."""
+        return select(Job.id.label("job_id"), Job.request_id.label("request_id")).subquery()
+
+    @staticmethod
     def confirmations() -> Subquery:
         """Every job's id (`job_id`) and confirmation time (`confirmed_at`, NULL when it was
         never confirmed) only, as a subquery for another module's query."""

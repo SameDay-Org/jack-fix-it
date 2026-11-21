@@ -13,6 +13,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Final
 
 import pytest
 from arq.connections import ArqRedis
@@ -44,6 +45,20 @@ FAST: dict[str, object] = {
     "media_sanitize_job_timeout_seconds": 2,
     "media_sanitize_max_tries": 2,
     "media_sanitize_retry_seconds": 1,
+}
+# For the tests on the real clock, FAST three times over (#448): under load a database step can
+# take most of a 0.1 s step, and a retry found no time left to start its file (one upload seen,
+# not two). The proportions these tests reason on stay the same; the scripted clocks keep FAST.
+REAL_CLOCK_SCALE: Final = 3
+_TIMINGS: Final = (
+    "media_sanitize_timeout_seconds",
+    "media_sanitize_overhead_seconds",
+    "media_sanitize_settle_seconds",
+    "media_sanitize_job_timeout_seconds",
+)
+REAL_CLOCK: dict[str, object] = {
+    key: value * REAL_CLOCK_SCALE if key in _TIMINGS and isinstance(value, int | float) else value
+    for key, value in FAST.items()
 }
 
 
@@ -178,7 +193,7 @@ async def test_a_stalled_transfer_is_retried_then_failed_never_left_pending(
 ) -> None:
     storage = stalled(released, stage)
     media = await make_media(db_session, storage, gps_jpeg())
-    settings = make_settings(**FAST)
+    settings = make_settings(**REAL_CLOCK)
 
     async with worker_for(db_session, settings, storage, media.request_id) as (worker, redis):
         queued = await run_job(worker, redis, media.request_id)
@@ -199,7 +214,7 @@ async def test_a_stall_on_the_last_try_still_settles_every_row(
     storage = stalled(released, "download")
     media = await make_media(db_session, storage, gps_jpeg())
     await more_photos(db_session, storage, media, 9)
-    settings = make_settings(**FAST)
+    settings = make_settings(**REAL_CLOCK)
     final = settings.media_sanitize_max_tries + SANITIZE_SPARE_TRIES
 
     with caplog.at_level(logging.INFO):
@@ -407,7 +422,8 @@ async def test_a_stalled_transfer_keeps_its_files_until_its_thread_ends(
 ) -> None:
     storage = stalled(released, stage)
     media = await make_media(db_session, storage, gps_jpeg())
-    sanitize = SanitizeConfig(1_000_000, 85, "ffmpeg", 0.1)
+    # The step on the real clock, scaled as REAL_CLOCK is (#448).
+    sanitize = SanitizeConfig(1_000_000, 85, "ffmpeg", 0.1 * REAL_CLOCK_SCALE)
     jobs = MediaCopier(sessions_of(db_session), storage, MediaCopyConfig(3, sanitize))
 
     async with asyncio.timeout(BOUND):

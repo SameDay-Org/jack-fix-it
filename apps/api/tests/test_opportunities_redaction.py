@@ -39,7 +39,7 @@ from tests.contact_overlaps import (
     PHONE_EMAIL_OVERLAPS,
 )
 from tests.glue_variants import glue_sample
-from tests.helpers import async_best_seconds_without_gc
+from tests.helpers import TIMED_RUNS, async_seconds_without_gc
 from tests.test_intake_questions import labels, option
 from tests.test_opportunities_api import BASE, Pro, dispatch, make_pro
 from tests.test_redaction import (
@@ -692,17 +692,28 @@ async def test_a_street_of_repeated_suffixes_does_not_slow_a_read(
         street="100 " + " ".join(["St"] * 25),
     )
 
-    async def read() -> None:
+    # A baseline: the same read of an ordinary request, its own pro's (#448).
+    _, plain_pro, _, plain_id, _ = await dispatched(
+        db_client, db_session, email="baseline-reader@example.invalid", phone="+13055550177"
+    )
+
+    async def read(who: Pro, target: uuid.UUID) -> None:
         response = await db_client.get(
-            BASE if route == "list" else f"{BASE}/{dispatch_id}", headers=pro.caller.headers
+            BASE if route == "list" else f"{BASE}/{target}", headers=who.caller.headers
         )
         assert response.status_code == 200, response.text
 
-    # The best of three reads: a busy test machine can stall one read; backtracking would make
-    # every read take seconds.
-    seconds = await async_best_seconds_without_gc(read)
-
-    assert seconds < 0.25, f"{source}/{route}: {seconds:.3f} s"
+    # Each round times the baseline, then the read under test, back to back: load stretches
+    # both (a full parallel run made the fixed 0.25 s fail, #448), backtracking only the
+    # second, by seconds. The first round within twice the baseline plus 0.25 s passes.
+    rounds: list[tuple[float, float]] = []
+    for _ in range(TIMED_RUNS):
+        baseline = await async_seconds_without_gc(lambda: read(plain_pro, plain_id))
+        seconds = await async_seconds_without_gc(lambda: read(pro, dispatch_id))
+        rounds.append((baseline, seconds))
+        if seconds < 2 * baseline + 0.25:
+            return
+    pytest.fail(f"{source}/{route}: over twice the baseline plus 0.25 s: {rounds}")
 
 
 @pytest.mark.parametrize(("line", "text", "number", "name"), glue_sample(30))

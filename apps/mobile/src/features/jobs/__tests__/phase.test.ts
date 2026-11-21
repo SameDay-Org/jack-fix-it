@@ -283,6 +283,34 @@ describe("jobText", () => {
     });
   });
 
+  it("a job its pro cancelled says so, costs nothing and points to a new request (#69)", async () => {
+    const byPro = job({
+      status: "cancelled",
+      cancellation: {
+        cancelled_by: "pro",
+        reason_code: "cannot_make_it",
+        cancelled_at: iso(-30),
+        customer_total_cents: 18_050,
+        fee_cents: 0,
+        refund_cents: 18_050,
+        refund_status: "pending",
+      },
+    });
+    expect(jobText(t, byPro, NOW, CLOSE, EN)).toEqual({
+      headline: "Dan cancelled this job",
+      support: "This costs you nothing. You can start a new request to find another pro.",
+    });
+    expect(
+      jobText(t, { ...byPro, pro: { ...byPro.pro, name: null } }, NOW, CLOSE, EN).headline,
+    ).toBe("Your pro cancelled this job");
+    await i18n.changeLanguage("es");
+    expect(jobText(t, byPro, NOW, CLOSE, "es")).toEqual({
+      headline: "Dan canceló este trabajo",
+      support:
+        "Esto no te cuesta nada. Puedes empezar una nueva solicitud para encontrar otro profesional.",
+    });
+  });
+
   it("on the way without an ETA, or once it is due", () => {
     const noEta = job({ status: "on_the_way", timeline: [...BOOKED, moved("on_the_way", -1)] });
     expect(jobText(t, noEta, NOW, CLOSE, EN).support).toBe("On the way to you");

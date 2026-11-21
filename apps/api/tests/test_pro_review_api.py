@@ -3,8 +3,8 @@ POST .../documents/{id}/review and POST .../decision."""
 
 import logging
 import uuid
-from datetime import UTC, date, datetime, timedelta
-from typing import Any, Final
+from datetime import UTC, date, datetime, timedelta, tzinfo
+from typing import Any, Final, Self
 
 import httpx
 import pytest
@@ -20,6 +20,8 @@ from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
 from app.modules.audit.types import ActorNotStaffError
 from app.modules.categories.models import Category
+from app.modules.pros import documents as documents_module
+from app.modules.pros import review as review_module
 from app.modules.pros.models import (
     ProCategory,
     ProDocument,
@@ -59,7 +61,24 @@ LEAKY_REASON: Final = (
 MASKED_REASON: Final = "Blurry ID. Email •••, call ••• or visit •••"
 REASON_CONTACTS: Final = ("reviewer41@example", "555 0146", "5550146", "docs41.example")
 CONTACT_LEAKS = (LAST, EMAIL, PHONE, STREET)
-TODAY = datetime.now(UTC).date()
+# The review and the uploads read today on the server's clock (UTC). Frozen at noon for every
+# test (frozen_today), so a run that crosses midnight cannot move it between a test's setup and
+# its request (#448: TODAY was the real date at import, and a run past midnight failed 7 tests).
+FROZEN: Final = datetime(2030, 6, 15, 12, 0, tzinfo=UTC)
+TODAY: Final = FROZEN.date()
+
+
+class _FrozenDatetime(datetime):
+    @classmethod
+    def now(cls, tz: tzinfo | None = None) -> Self:
+        return cls.fromtimestamp(FROZEN.timestamp(), tz)
+
+
+@pytest.fixture(autouse=True)
+def frozen_today(monkeypatch: pytest.MonkeyPatch) -> None:
+    for module in (review_module, documents_module):
+        monkeypatch.setattr(module, "datetime", _FrozenDatetime)
+
 
 FORBIDDEN = {"error": {"code": "forbidden", "message": "You do not have access to this resource."}}
 VALIDATION_ERROR = {"error": {"code": "validation_error", "message": "The request is invalid."}}

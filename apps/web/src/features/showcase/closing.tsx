@@ -1,4 +1,5 @@
 import type { TFunction } from "i18next";
+import type { ReactNode } from "react";
 import { ChevronDown, Smartphone } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -12,9 +13,10 @@ const PLATFORMS = ["ios", "android"] as const;
 
 /**
  * The store notice. The app is not in the stores yet, so this is a notice and not a button:
- * no store badge, no link, nothing that looks like a download.
+ * no store badge, no link, nothing that looks like a download. `interest` is the "tell me when
+ * it's out" form (#409), only while it is on.
  */
-export function ComingSoon({ t }: { t: TFunction }) {
+export function ComingSoon({ t, interest = null }: { t: TFunction; interest?: ReactNode }) {
   return (
     <section id={ANCHORS.soon} aria-labelledby="soon-title" className="py-20 lg:py-28">
       <div className={cn(CONTAINER, "flex flex-col items-center gap-6 text-center")}>
@@ -43,6 +45,7 @@ export function ComingSoon({ t }: { t: TFunction }) {
             </li>
           ))}
         </ul>
+        {interest}
       </div>
     </section>
   );

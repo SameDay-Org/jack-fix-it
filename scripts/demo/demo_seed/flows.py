@@ -481,3 +481,24 @@ async def open_ticket(
 
 async def claim(world: World, agent: Actor, request: RequestRef) -> None:
     await world.call(agent, "POST", f"/v1/admin/requests/{request.id}/claim", what="claim")
+
+
+async def add_note(world: World, staff: Actor, request: RequestRef, body: str) -> None:
+    """An internal note on the request, as the staff member."""
+    await world.call(
+        staff, "POST", f"/v1/admin/requests/{request.id}/notes", json={"body": body}, what="note"
+    )
+
+
+async def schedule_followup(
+    world: World, staff: Actor, request: RequestRef, due_at: datetime, note: str
+) -> None:
+    """A follow-up on the request for the staff member, due at `due_at` (in the future: the
+    API refuses any other)."""
+    await world.call(
+        staff,
+        "POST",
+        f"/v1/admin/requests/{request.id}/followups",
+        json={"due_at": due_at.isoformat(), "note": note},
+        what="follow-up",
+    )

@@ -25,6 +25,7 @@ from tests.conftest import (
     TEST_STORAGE_SETTINGS,
     TEST_STRIPE_SETTINGS,
     TEST_TWILIO_SETTINGS,
+    TEST_WEB_SERVICE_SETTINGS,
 )
 
 RAILWAY_DOC = Path(__file__).resolve().parents[3] / "docs" / "railway.md"
@@ -41,6 +42,7 @@ COMPLETE: dict[str, object] = {
     **TEST_TWILIO_SETTINGS,
     **TEST_RATE_LIMIT_SETTINGS,
     **TEST_REFRESH_SETTINGS,
+    **TEST_WEB_SERVICE_SETTINGS,
     **TEST_EMAIL_SETTINGS,
     **TEST_STRIPE_SETTINGS,
 }

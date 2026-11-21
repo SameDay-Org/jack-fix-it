@@ -1,7 +1,9 @@
+import { router } from "expo-router";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 
+import { Button } from "@/components/ui";
 import { formatLocale, formatMoneyExact, formatRate } from "@/features/quotes/format";
 
 import type { CancelPreview, JobCancellation } from "./api";
@@ -60,6 +62,26 @@ export function CancellationStatus({ cancellation }: { cancellation: JobCancella
           {line}
         </Text>
       ))}
+    </View>
+  );
+}
+
+/**
+ * After the pro called the job off, the customer's way on: a new request, started from Home's
+ * categories (the API closed this one for good). Screens over the tabs come off; from another
+ * tab, Home shows (the tab navigator ignores a dismiss).
+ */
+export function NewRequestAction() {
+  const { t } = useTranslation();
+  const home = () => (router.canDismiss() ? router.dismissTo("/") : router.navigate("/"));
+  return (
+    <View className="flex-row">
+      <Button
+        label={t("cancellation.newRequest")}
+        variant="secondary"
+        onPress={home}
+        testID="job-new-request"
+      />
     </View>
   );
 }
