@@ -2,7 +2,9 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { Href } from "expo-router";
 
 import type { SessionUser } from "@/api";
+import { chatHref } from "@/features/chat/api";
 import { customerJobQueryOptions, isNoJobYet, jobHref } from "@/features/jobs/api";
+import type { CustomerJob } from "@/features/jobs/phase";
 import { opportunityQueryOptions } from "@/features/opportunities/useOpportunity";
 import { proJobHref, proJobQueryOptions } from "@/features/pro-jobs/api";
 import { quotesQueryOptions } from "@/features/quotes/useRequestQuotes";
@@ -22,6 +24,10 @@ export const ALLOWED_PUSH_PATHS = [
   "/quotes/{id}",
   "/opportunities/{id}",
   "/",
+  // A new chat message (#73): the pro's chat of a job, and the customer's, named by their request
+  // (the chat route takes the job's id, which the customer's job read gives).
+  "/jobs/{id}/chat",
+  "/requests/{id}/job/chat",
 ] as const;
 
 export type PushPath = (typeof ALLOWED_PUSH_PATHS)[number];
@@ -66,9 +72,21 @@ type Role = SessionUser["role"];
  */
 type PushRoute = {
   role: Role;
-  href: (id: string) => Href;
   probe: (client: QueryClient, id: string, generation: number) => Promise<unknown>;
+  /** The screen to open, from the link's id and the probe's answer (none when it failed). */
+  href: (id: string, answer?: unknown) => Href;
+  /**
+   * The pathname that screen shows, to leave it as it is when it is already on top. The link
+   * itself when omitted: an allowed path is its screen's own pathname (`/jobs/<id>`).
+   */
+  path?: (id: string, answer?: unknown) => string;
 };
+
+/** The customer's job a probe answered with, if it did (a failed probe answers nothing). */
+const answeredJob = (answer: unknown): CustomerJob | null =>
+  typeof answer === "object" && answer !== null && "id" in answer && typeof answer.id === "string"
+    ? (answer as CustomerJob)
+    : null;
 
 const requestHref = (id: string): Href => ({ pathname: "/requests/[id]", params: { id } });
 const opportunityHref = (id: string): Href => ({ pathname: "/opportunities/[id]", params: { id } });
@@ -109,6 +127,29 @@ const ROUTES: Record<IdPushPath, PushRoute | null> = {
     role: "pro",
     href: opportunityHref,
     probe: (client, id) => client.fetchQuery(opportunityQueryOptions(id)),
+  },
+  // A message from the customer (#73): the pro's chat of the job. The job read the chat's header
+  // reads (the customer's name, whether the chat is closed) is the check.
+  "/jobs/{id}/chat": {
+    role: "pro",
+    href: (id) => chatHref(id),
+    probe: (client, id, generation) => client.fetchQuery(proJobQueryOptions(id, generation)),
+  },
+  // A message from the pro (#73): the chat over the job of the customer's request. The job read by
+  // the request is the check, and gives the job's id the chat route takes (and the pro's name in
+  // its header). Without an answer (offline, a server error), the job screen opens: it shows its
+  // own error and retry, and its way into the chat.
+  "/requests/{id}/job/chat": {
+    role: "customer",
+    href: (id, answer) => {
+      const job = answeredJob(answer);
+      return job ? chatHref(job.id, id) : jobHref(id);
+    },
+    path: (id, answer) => {
+      const job = answeredJob(answer);
+      return job ? `/jobs/${job.id}/chat` : `/requests/${id}/job`;
+    },
+    probe: (client, id, generation) => client.fetchQuery(customerJobQueryOptions(id, generation)),
   },
 };
 
