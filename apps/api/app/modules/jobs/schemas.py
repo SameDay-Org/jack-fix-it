@@ -16,6 +16,7 @@ from app.modules.disputes.outcomes import DisputeResolution, DisputeStatus
 from app.modules.jobs.models import JobPhotoKind, JobStatus
 from app.modules.payments.payout_status import PayoutStatus
 from app.modules.quotes.schemas import QuotePro
+from app.modules.tips.views import TipOut
 
 # "On my way" asks how far the pro is: from 5 minutes to 4 hours (#63).
 ETA_MIN_MINUTES: Final = 5
@@ -132,6 +133,13 @@ class CustomerJob(_Out):
     )
     unread_messages: int = Field(
         description="The pro's chat messages the customer has not marked read (#71)."
+    )
+    tip: TipOut | None = Field(
+        default=None,
+        description="The customer's tip for the pro (#273): set once the job was confirmed (by "
+        "the customer or automatically), inside the tip window and after it; null for a job that "
+        "takes no tip (not confirmed yet, disputed, refunded or cancelled). Always sent; optional "
+        "in the schema so clients built before #273 keep compiling.",
     )
 
 
