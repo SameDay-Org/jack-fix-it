@@ -79,6 +79,12 @@ CALLERS = (
     Caller(
         "push_job_cancelled", "customer_id", "job_cancelled:{job_id}", "/requests/{request_id}/job"
     ),
+    Caller(
+        "push_job_cancelled_by_pro",
+        "customer_id",
+        "job_cancelled_by_pro:{job_id}",
+        "/requests/{request_id}/job",
+    ),
     *(
         Caller(f"push_{name}", "customer_id", f"{name}:{{job_id}}", "/requests/{request_id}/job")
         for name in ("dispute_refunded", "dispute_partly_refunded", "dispute_closed")

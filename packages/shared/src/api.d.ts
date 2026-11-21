@@ -122,8 +122,8 @@ export interface paths {
          * Log out
          * @description Revokes the session the refresh token belongs to. No bearer token is needed.
          *
-         *     Always 204, so the endpoint cannot be used to test tokens. The access token is not revoked
-         *     on the server: it stops working when it expires (`expires_in`).
+         *     Always 204, so the endpoint cannot be used to test tokens. The session's access tokens stop
+         *     working at once too: every bearer route refuses them with 401 invalid_token (#161).
          */
         post: operations["logout_v1_auth_logout_post"];
         delete?: never;
@@ -2050,6 +2050,30 @@ export interface paths {
          *     notified. A job is cancelled once: sending again returns that cancellation (200).
          */
         post: operations["cancel_job_v1_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/me/jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a job I can no longer do (pro)
+         * @description The pro cancels their scheduled or on-the-way job. The customer is never charged: their
+         *     whole payment, tax included, goes back to the original payment method through Stripe. The
+         *     job and its request are cancelled (the request is not reopened: the customer starts a new
+         *     one), and the customer is notified. A job is cancelled once: sending again, or after the
+         *     customer cancelled, returns that cancellation (200).
+         */
+        post: operations["pro_cancel_job_v1_pros_me_jobs__job_id__cancel_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4532,6 +4556,43 @@ export interface components {
          * @enum {string}
          */
         PreferredPeriod: "morning" | "afternoon" | "evening" | "flexible";
+        /** ProCancelIn */
+        ProCancelIn: {
+            reason_code: components["schemas"]["ProCancelReason"];
+            /**
+             * Note
+             * @description Optional, plain text. Contact details are masked before it is stored; only the masked text is kept, for staff.
+             */
+            note?: string | null;
+        };
+        /**
+         * ProCancelReason
+         * @description Why the pro cancels: the reasons their app offers.
+         * @enum {string}
+         */
+        ProCancelReason: "cannot_make_it" | "customer_unreachable" | "scope_changed" | "other";
+        /**
+         * ProCancellationOut
+         * @description The cancel's answer to the pro: their job view's cancellation (who, why and when; never
+         *     the money or the note) with the job. cancelled_by is customer when the customer cancelled
+         *     first.
+         */
+        ProCancellationOut: {
+            cancelled_by: components["schemas"]["CancelParty"];
+            reason_code: components["schemas"]["CancelReason"];
+            /**
+             * Cancelled At
+             * Format: date-time
+             */
+            cancelled_at: string;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /** @description cancelled. */
+            job_status: components["schemas"]["JobStatus"];
+        };
         /**
          * ProDisputeOut
          * @description The report on the pro's job: the photos' safe copies only, once ready.
@@ -7191,7 +7252,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserOut"];
                 };
             };
-            /** @description invalid_token: missing, invalid or expired access token. */
+            /** @description invalid_token: missing, invalid or expired access token, or its session ended (logout, password reset). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -7233,7 +7294,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserOut"];
                 };
             };
-            /** @description invalid_token: missing, invalid or expired access token. */
+            /** @description invalid_token: missing, invalid or expired access token, or its session ended (logout, password reset). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -13153,6 +13214,89 @@ export interface operations {
                 };
             };
             /** @description rate_limited: too many previews or cancels by this customer in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    pro_cancel_job_v1_pros_me_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description A UUID the app makes once per cancel and sends again with every retry of it. A retry answers 200 with the cancellation as it is now and writes nothing; the same key with another body, or on another job, answers 409 idempotency_key_reused. With or without it, a job is cancelled once. */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProCancelIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProCancellationOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros cancel here (a customer's cancel is separate). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description cancel_not_allowed: the work started, or the job is done, confirmed, paid out, disputed or refunded (the message names its status); cancel_needs_review: the job's payment needs a look by staff first; idempotency_key_reused: the caller already used this Idempotency-Key with a different body or on another job. Nothing was changed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an unknown or a customer's reason_code; a note longer than 500 characters, holding a NUL, or empty once invisible characters are dropped; an unknown field; a job_id or an Idempotency-Key that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many cancels by this pro in the window; Retry-After says when to try again. */
             429: {
                 headers: {
                     [name: string]: unknown;
