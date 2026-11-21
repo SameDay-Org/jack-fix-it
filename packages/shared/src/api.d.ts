@@ -122,8 +122,8 @@ export interface paths {
          * Log out
          * @description Revokes the session the refresh token belongs to. No bearer token is needed.
          *
-         *     Always 204, so the endpoint cannot be used to test tokens. The access token is not revoked
-         *     on the server: it stops working when it expires (`expires_in`).
+         *     Always 204, so the endpoint cannot be used to test tokens. The session's access tokens stop
+         *     working at once too: every bearer route refuses them with 401 invalid_token (#161).
          */
         post: operations["logout_v1_auth_logout_post"];
         delete?: never;
@@ -1714,6 +1714,119 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/requests/{request_id}/more-info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask the customer for more information (staff)
+         * @description Keeps the question as an internal note, moves the request to reviewing (the state
+         *     machine's staff edge) and holds it there: no re-dispatch takes it until staff resume it,
+         *     change its status or assign a pro. The customer is not messaged (`customer_notified` is
+         *     false): no channel takes a staff message yet. Recorded in the audit log.
+         */
+        post: operations["staff_request_more_info_v1_admin_requests__request_id__more_info_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release a request held for the customer's answer (staff)
+         * @description Clears the hold; the next re-dispatch sweep takes the request when it can (received or
+         *     reviewing, a category, no offer yet). A request not on hold: nothing changes. Recorded in
+         *     the audit log.
+         */
+        post: operations["staff_resume_request_v1_admin_requests__request_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change a request's status (staff)
+         * @description Only to one of the card's allowed_status_changes, through the request state machine,
+         *     with the reason kept as an internal note. Releases a hold. Recorded in the audit log.
+         */
+        post: operations["staff_change_request_status_v1_admin_requests__request_id__status_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/eligible-pros": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The pros a request may be assigned to (staff)
+         * @description The approved pros in the request's category and area, best ranked first (as dispatch
+         *     ranks them), each with whether payouts are enabled and whether they have the request
+         *     already: first name and last initial, no contact. At most OPS_ELIGIBLE_PROS_LIMIT (`more`
+         *     says when others match). Empty for a request with no category or past quoting.
+         */
+        get: operations["staff_eligible_pros_v1_admin_requests__request_id__eligible_pros_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/requests/{request_id}/assign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Offer a request to a pro (staff)
+         * @description One offer for the pro the agent chose, made by dispatch: the pro must be approved, with
+         *     payouts enabled, in the request's category and area, and not have the request already. A
+         *     received or reviewing request moves to finding a pro; one finding a pro or with quotes
+         *     ready stays where it is. Releases a hold. The pro gets the new request push. Recorded in
+         *     the audit log.
+         */
+        post: operations["staff_assign_pro_v1_admin_requests__request_id__assign_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/requests/{request_id}/followups": {
         parameters: {
             query?: never;
@@ -1943,6 +2056,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pros/me/jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a job I can no longer do (pro)
+         * @description The pro cancels their scheduled or on-the-way job. The customer is never charged: their
+         *     whole payment, tax included, goes back to the original payment method through Stripe. The
+         *     job and its request are cancelled (the request is not reopened: the customer starts a new
+         *     one), and the customer is notified. A job is cancelled once: sending again, or after the
+         *     customer cancelled, returns that cancellation (200).
+         */
+        post: operations["pro_cancel_job_v1_pros_me_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pros/me/jobs/{job_id}/dispute": {
         parameters: {
             query?: never;
@@ -2132,6 +2269,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pros/{pro_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a pro's public profile
+         * @description An approved pro's public profile: their first name and last initial, the verified flag,
+         *     the average of their published reviews to one decimal (null with none) and how many, the
+         *     jobs they completed, their years of experience, their bio with contact details masked,
+         *     their categories and the month they joined. No photo, contact, address or document.
+         */
+        get: operations["read_public_pro_v1_pros__pro_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/{pro_id}/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a pro's published reviews
+         * @description An approved pro's published reviews, newest first: each one's overall rating, its
+         *     comment (contact details masked when written), the reviewer's first name and last initial
+         *     and the day. A review counts once the pro reviewed the job too, or 14 days
+         *     (REVIEW_PUBLISH_AFTER_DAYS) after the job's confirmation. Up to REQUEST_LIST_MAX_LIMIT per
+         *     page.
+         */
+        get: operations["read_public_pro_reviews_v1_pros__pro_id__reviews_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2191,6 +2375,35 @@ export interface components {
          * @enum {string}
          */
         ApprovalBlockerKind: "document_missing" | "document_expired" | "no_category" | "no_service_area";
+        /** AssignIn */
+        AssignIn: {
+            /**
+             * Pro Id
+             * Format: uuid
+             * @description The pro's profile id, from the request's eligible-pros list.
+             */
+            pro_id: string;
+        };
+        /**
+         * AssignOut
+         * @description The request offered to the pro: finding a pro now if it was received or reviewing, else
+         *     where it was. Off hold.
+         */
+        AssignOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["RequestStatus"];
+            /**
+             * Pro Id
+             * Format: uuid
+             */
+            pro_id: string;
+            /** Info Requested At */
+            info_requested_at?: null;
+        };
         /**
          * AssignedFilter
          * @enum {string}
@@ -3299,6 +3512,50 @@ export interface components {
              */
             currency: string;
         };
+        /**
+         * EligibleProOut
+         * @description A pro staff may weigh for the request: approved, in its category and its area. No
+         *     contact, no last name.
+         */
+        EligibleProOut: {
+            /**
+             * Id
+             * Format: uuid
+             * @description The pro's profile id: what an assignment takes.
+             */
+            id: string;
+            /**
+             * Name
+             * @description First name and last initial, as customers see the pro; null when the account has no usable name.
+             */
+            name: string | null;
+            /** Categories */
+            categories: components["schemas"]["CategorySummary"][];
+            /**
+             * Payouts Enabled
+             * @description False: the pro cannot be paid out yet, and an assignment is refused (pro_payouts_disabled).
+             */
+            payouts_enabled: boolean;
+            /**
+             * Already Offered
+             * @description True: the pro has (or had) this request, and an assignment is refused (pro_already_offered).
+             */
+            already_offered: boolean;
+        };
+        /**
+         * EligiblePros
+         * @description Best ranked first, as dispatch ranks pros. Empty for a request with no category, or
+         *     one past quoting (accepted, expired, cancelled).
+         */
+        EligiblePros: {
+            /** Items */
+            items: components["schemas"]["EligibleProOut"][];
+            /**
+             * More
+             * @description True when more pros match than OPS_ELIGIBLE_PROS_LIMIT lists.
+             */
+            more: boolean;
+        };
         /** ErrorDetail */
         ErrorDetail: {
             /** Code */
@@ -3746,6 +4003,37 @@ export interface components {
              * @description One point per day of the range, in order.
              */
             series: components["schemas"]["SeriesPoint"][];
+        };
+        /** MoreInfoIn */
+        MoreInfoIn: {
+            /**
+             * Question
+             * @description What the BDC asks the customer, kept as an internal note: plain text, 1 to 2000 characters (staff only, never logged).
+             */
+            question: string;
+        };
+        /**
+         * MoreInfoOut
+         * @description The request on hold in reviewing, and the question as a note.
+         */
+        MoreInfoOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["RequestStatus"];
+            /**
+             * Info Requested At
+             * Format: date-time
+             */
+            info_requested_at: string;
+            note: components["schemas"]["NoteOut"];
+            /**
+             * Customer Notified
+             * @description Whether the customer was messaged. Always false today: no channel takes a staff message to the customer yet, so the agent reaches the customer themselves.
+             */
+            customer_notified: boolean;
         };
         /** MultiChoiceQuestion */
         MultiChoiceQuestion: {
@@ -4315,6 +4603,43 @@ export interface components {
          * @enum {string}
          */
         PreferredPeriod: "morning" | "afternoon" | "evening" | "flexible";
+        /** ProCancelIn */
+        ProCancelIn: {
+            reason_code: components["schemas"]["ProCancelReason"];
+            /**
+             * Note
+             * @description Optional, plain text. Contact details are masked before it is stored; only the masked text is kept, for staff.
+             */
+            note?: string | null;
+        };
+        /**
+         * ProCancelReason
+         * @description Why the pro cancels: the reasons their app offers.
+         * @enum {string}
+         */
+        ProCancelReason: "cannot_make_it" | "customer_unreachable" | "scope_changed" | "other";
+        /**
+         * ProCancellationOut
+         * @description The cancel's answer to the pro: their job view's cancellation (who, why and when; never
+         *     the money or the note) with the job. cancelled_by is customer when the customer cancelled
+         *     first.
+         */
+        ProCancellationOut: {
+            cancelled_by: components["schemas"]["CancelParty"];
+            reason_code: components["schemas"]["CancelReason"];
+            /**
+             * Cancelled At
+             * Format: date-time
+             */
+            cancelled_at: string;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /** @description cancelled. */
+            job_status: components["schemas"]["JobStatus"];
+        };
         /**
          * ProDisputeOut
          * @description The report on the pro's job: the photos' safe copies only, once ready.
@@ -4578,6 +4903,65 @@ export interface components {
             service_areas: components["schemas"]["ServiceAreaOut"][];
         };
         /**
+         * ProProfilePublicOut
+         * @description A pro's public profile (#78), for any signed-in user: an approved pro only. The fields of
+         *     the profile behind a quote (#53), the rating counting published reviews only. Never the
+         *     photo, a contact, an address, a document or license, the account's id or payouts.
+         */
+        ProProfilePublicOut: {
+            /**
+             * Id
+             * Format: uuid
+             * @description The pro's profile id.
+             */
+            id: string;
+            /**
+             * Name
+             * @description The first name and the last name's initial, e.g. "María P."; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked.
+             */
+            name: string | null;
+            /**
+             * Rating Avg
+             * @description The average of the overall ratings of the pro's published reviews, to one decimal, rounded half up, as a string; null before the first one (never 0.0).
+             * @example 4.7
+             */
+            rating_avg: string | null;
+            /**
+             * Rating Count
+             * @description How many published reviews the average is of.
+             */
+            rating_count?: number;
+            /**
+             * Jobs Count
+             * @description Jobs completed on the platform (confirmed).
+             */
+            jobs_count: number;
+            /** Years Of Experience */
+            years_of_experience: number | null;
+            /**
+             * Verified
+             * @description The platform approved the pro's verification.
+             */
+            verified: boolean;
+            /**
+             * Bio
+             * @description What the pro wrote about their work, with contact details masked (app.redaction), as in a quote's scope: the pro's own email and phone, then every contact pattern; null when the pro wrote none.
+             */
+            bio: string | null;
+            /**
+             * Categories
+             * @description The active categories the pro works in, by slug.
+             */
+            categories: components["schemas"]["CategorySummary"][];
+            /**
+             * Member Since
+             * Format: date
+             * @description The first day of the month the pro joined: month precision only.
+             * @example 2026-10-01
+             */
+            member_since: string;
+        };
+        /**
          * ProProfileUpdate
          * @description Only the fields sent change. Verification, payouts, rating and job count are set by the
          *     platform: sending them is a 422 (extra="forbid").
@@ -4627,13 +5011,18 @@ export interface components {
             name: string | null;
             /**
              * Rating Avg
-             * @description The average rating as a decimal string; null before the first review.
-             * @example 4.80
+             * @description The average of the overall ratings of the pro's published reviews, to one decimal, rounded half up, as a string; null before the first one (never 0.0).
+             * @example 4.7
              */
             rating_avg: string | null;
             /**
+             * Rating Count
+             * @description How many published reviews the average is of.
+             */
+            rating_count?: number;
+            /**
              * Jobs Count
-             * @description Jobs completed on the platform.
+             * @description Jobs completed on the platform (confirmed).
              */
             jobs_count: number;
             /** Years Of Experience */
@@ -4678,6 +5067,46 @@ export interface components {
          * @enum {string}
          */
         ProVerificationStatus: "pending" | "approved" | "rejected";
+        /**
+         * PublicReviewOut
+         * @description A published review of a pro, as anyone signed in may read it. Never its id or a user's.
+         */
+        PublicReviewOut: {
+            /**
+             * Rating
+             * @description The overall rating.
+             */
+            rating: number;
+            /**
+             * Comment
+             * @description The reviewer's comment as stored: contact details were masked when it was written (app.redaction); null without one.
+             */
+            comment: string | null;
+            /**
+             * Reviewer
+             * @description The reviewer's first name and last initial, e.g. "María P."; null when a name is missing or shows a contact detail.
+             */
+            reviewer: string | null;
+            /**
+             * Created On
+             * Format: date
+             * @description The day the review was written (UTC).
+             */
+            created_on: string;
+        };
+        /** PublicReviewPage */
+        PublicReviewPage: {
+            /**
+             * Items
+             * @description Newest first.
+             */
+            items: components["schemas"]["PublicReviewOut"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for the next page; null on the last one.
+             */
+            next_cursor: string | null;
+        };
         /** QueueAgent */
         QueueAgent: {
             /**
@@ -4901,13 +5330,18 @@ export interface components {
             name: string | null;
             /**
              * Rating Avg
-             * @description The average rating as a decimal string; null before the first review.
-             * @example 4.80
+             * @description The average of the overall ratings of the pro's published reviews, to one decimal, rounded half up, as a string; null before the first one (never 0.0).
+             * @example 4.7
              */
             rating_avg: string | null;
             /**
+             * Rating Count
+             * @description How many published reviews the average is of.
+             */
+            rating_count?: number;
+            /**
              * Jobs Count
-             * @description Jobs completed on the platform.
+             * @description Jobs completed on the platform (confirmed).
              */
             jobs_count: number;
             /** Years Of Experience */
@@ -5196,6 +5630,16 @@ export interface components {
              * @default true
              */
             actions_allowed: boolean;
+            /**
+             * Info Requested At
+             * @description When the BDC asked the customer for more information (#82): the request waits in reviewing and no re-dispatch takes it until staff resume it, change its status or assign a pro. Null when it is not on hold.
+             */
+            info_requested_at?: string | null;
+            /**
+             * Allowed Status Changes
+             * @description The statuses staff may move the request to now (#82), from the request state machine's staff edges: never finding_pro, which dispatch owns. The API stays the guard (409 invalid_transition).
+             */
+            allowed_status_changes?: components["schemas"]["RequestStatus"][];
         };
         /** RequestCreate */
         RequestCreate: {
@@ -5342,6 +5786,21 @@ export interface components {
              * @description Requests of the range with a first contact.
              */
             denominator: number;
+        };
+        /**
+         * ResumeOut
+         * @description The request off hold: the next re-dispatch sweep (REDISPATCH_SWEEP_MINUTES) takes it
+         *     when it is received or reviewing with a category and no offer yet.
+         */
+        ResumeOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["RequestStatus"];
+            /** Info Requested At */
+            info_requested_at?: null;
         };
         /**
          * ReverseAddressOut
@@ -6279,6 +6738,26 @@ export interface components {
              */
             next_cursor: string | null;
         };
+        /** StatusChangeIn */
+        StatusChangeIn: {
+            /** @description One of the card's allowed_status_changes. */
+            to: components["schemas"]["RequestStatus"];
+            /**
+             * Reason
+             * @description Why, kept as an internal note: plain text, 1 to 2000 characters.
+             */
+            reason: string;
+        };
+        /** StatusChangeOut */
+        StatusChangeOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            status: components["schemas"]["RequestStatus"];
+            note: components["schemas"]["NoteOut"];
+        };
         /** SupportTicketCreatedOut */
         SupportTicketCreatedOut: {
             /**
@@ -6929,7 +7408,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserOut"];
                 };
             };
-            /** @description invalid_token: missing, invalid or expired access token. */
+            /** @description invalid_token: missing, invalid or expired access token, or its session ended (logout, password reset). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -6971,7 +7450,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserOut"];
                 };
             };
-            /** @description invalid_token: missing, invalid or expired access token. */
+            /** @description invalid_token: missing, invalid or expired access token, or its session ended (logout, password reset). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -11801,6 +12280,380 @@ export interface operations {
             };
         };
     };
+    staff_request_more_info_v1_admin_requests__request_id__more_info_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MoreInfoIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MoreInfoOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins (checked again as the action is written). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request. invalid_transition: the request cannot move there from its current status. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_resume_request_v1_admin_requests__request_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResumeOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins (checked again as the action is written). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request (they, or an admin, act on it). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_change_request_status_v1_admin_requests__request_id__status_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StatusChangeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusChangeOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins (checked again as the action is written). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request. invalid_transition: the request cannot move there from its current status. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_eligible_pros_v1_admin_requests__request_id__eligible_pros_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EligiblePros"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only agents and admins. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a request_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    staff_assign_pro_v1_admin_requests__request_id__assign_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssignIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssignOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only active agents and admins (checked again as the action is written). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_not_found: no request with this id. pro_not_found: no pro profile with this id, or its account is no longer an active pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description request_held: another agent holds the request. invalid_transition: the request is accepted, expired or cancelled. request_not_classified: it has no category yet. One code per reason the pro cannot take it: pro_already_offered (they have, or had, this request), pro_not_approved, pro_payouts_disabled, pro_category_mismatch, pro_out_of_area. Nothing was written. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than OPS_ACTION_LIMIT actions in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     staff_schedule_followup_v1_admin_requests__request_id__followups_post: {
         parameters: {
             query?: never;
@@ -12538,6 +13391,89 @@ export interface operations {
             };
         };
     };
+    pro_cancel_job_v1_pros_me_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description A UUID the app makes once per cancel and sends again with every retry of it. A retry answers 200 with the cancellation as it is now and writes nothing; the same key with another body, or on another job, answers 409 idempotency_key_reused. With or without it, a job is cancelled once. */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProCancelIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProCancellationOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros cancel here (a customer's cancel is separate). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description cancel_not_allowed: the work started, or the job is done, confirmed, paid out, disputed or refunded (the message names its status); cancel_needs_review: the job's payment needs a look by staff first; idempotency_key_reused: the caller already used this Idempotency-Key with a different body or on another job. Nothing was changed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an unknown or a customer's reason_code; a note longer than 500 characters, holding a NUL, or empty once invisible characters are dropped; an unknown field; a job_id or an Idempotency-Key that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many cancels by this pro in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     read_reported_problem_v1_pros_me_jobs__job_id__dispute_get: {
         parameters: {
             query?: never;
@@ -13027,6 +13963,143 @@ export interface operations {
             };
             /** @description The request is invalid. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_public_pro_v1_pros__pro_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pro_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProProfilePublicOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no approved pro with an active account has this id (none, pending, rejected, suspended or no longer a pro: the same answer). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a pro_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many profile reads by this user in the window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_public_pro_reviews_v1_pros__pro_id__reviews_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number | null;
+            };
+            header?: never;
+            path: {
+                pro_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicReviewPage"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no approved pro with an active account has this id (none, pending, rejected, suspended or no longer a pro: the same answer). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a pro_id that is not a UUID, a cursor this API did not write, or a limit out of range. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many profile reads by this user in the window. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

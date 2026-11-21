@@ -53,16 +53,24 @@ class UserService:
         self._users = UserRepository(session)
 
     @staticmethod
+    def active_ids_of_role(role: UserRole) -> Select[uuid.UUID]:
+        """The ids of the active (not suspended) accounts with `role`, as a statement for
+        another module's query: one statement then decides who may be shown (#78)."""
+        return UserRepository.active_ids_of_role(role)
+
+    @staticmethod
     def photo_keys_among(keys: Collection[str]) -> Select[str | None]:
         """The upload keys among `keys` that a user holds as their ID photo (#250), as a
         statement (the uploads sweep of unreferenced uploads, #191)."""
         return UserRepository.photo_keys_among(keys)
 
     async def active_ids_with_role(
-        self, user_ids: Collection[uuid.UUID], role: UserRole
+        self, user_ids: Collection[uuid.UUID], role: UserRole, *, lock: bool = False
     ) -> set[uuid.UUID]:
-        """The ids among `user_ids` of active (not suspended) accounts with `role`."""
-        return await self._users.active_ids_with_role(user_ids, role)
+        """The ids among `user_ids` of active (not suspended) accounts with `role`. `lock`:
+        those accounts' rows FOR SHARE until the caller's transaction ends (#511), so a role or
+        status change committed first is read, and one made after waits for that commit."""
+        return await self._users.active_ids_with_role(user_ids, role, lock=lock)
 
     async def ids_with_role(
         self, user_ids: Collection[uuid.UUID], role: UserRole

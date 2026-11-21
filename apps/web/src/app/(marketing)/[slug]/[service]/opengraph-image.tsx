@@ -6,6 +6,11 @@ export const alt = catalog.seo.service.meta.ogAlt;
 export const size = OG_SIZE;
 export const contentType = "image/png";
 
-export default async function OpenGraphImage({ params }: { params: Promise<{ service: string }> }) {
-  return serviceOgImage("en", (await params).service);
+export default async function OpenGraphImage({
+  params,
+}: {
+  params: Promise<{ slug: string; service: string }>;
+}) {
+  const { slug, service } = await params;
+  return serviceOgImage("en", service, slug);
 }

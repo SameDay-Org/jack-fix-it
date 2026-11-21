@@ -37,7 +37,7 @@ apps/web/         Next.js: landing (src/app/(marketing)) and admin/BDC panel (sr
 apps/mobile/      Expo + Expo Router: one app, customer and pro modes
 packages/shared/  @jack/shared: TypeScript types generated from the API's OpenAPI schema
 docs/             plan, context, ADRs, glossary, Railway, agent roles
-scripts/          repo scripts (setup-labels.sh)
+scripts/          repo scripts (setup-labels.sh); demo/ is the demo video's kit (docs/demo-video.md)
 ```
 
 ## Commands

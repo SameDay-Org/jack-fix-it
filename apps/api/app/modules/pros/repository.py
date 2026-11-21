@@ -2,7 +2,6 @@ import uuid
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
 
 from sqlalchemy import Select, Subquery, delete, exists, func, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
@@ -80,6 +79,85 @@ class ProProfileRepository:
         )
         return list((await self._session.scalars(statement)).all())
 
+    async def approved_in(
+        self, category_id: uuid.UUID, service_area_ids: Collection[uuid.UUID]
+    ) -> list[ProProfile]:
+        """The approved profiles in the category and in one of the areas, payouts enabled or
+        not: the pros staff may weigh for a request (#82)."""
+        if not service_area_ids:
+            return []
+        in_category = select(ProCategory.pro_id).where(ProCategory.category_id == category_id)
+        in_areas = select(ProServiceArea.pro_id).where(
+            ProServiceArea.service_area_id.in_(service_area_ids)
+        )
+        statement = select(ProProfile).where(
+            ProProfile.verification_status == ProVerificationStatus.APPROVED,
+            ProProfile.id.in_(in_category),
+            ProProfile.id.in_(in_areas),
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def with_coverage(
+        self,
+        pro_id: uuid.UUID,
+        category_id: uuid.UUID,
+        service_area_ids: Collection[uuid.UUID],
+        *,
+        lock: bool = False,
+    ) -> tuple[ProProfile, bool, bool] | None:
+        """(the profile, whether it lists the category, whether it lists one of the areas), in
+        one query; None when no profile has this id (#82). `lock` (#511): the profile row, then
+        its category row and its rows for these areas, FOR SHARE until the caller's transaction
+        ends, in three queries: a change to any of them committed first is read, one made after
+        waits for that commit."""
+        if lock:
+            return await self._locked_coverage(pro_id, category_id, service_area_ids)
+        in_category = exists().where(
+            ProCategory.pro_id == pro_id, ProCategory.category_id == category_id
+        )
+        in_area = exists().where(
+            ProServiceArea.pro_id == pro_id,
+            ProServiceArea.service_area_id.in_(service_area_ids),
+        )
+        statement = select(ProProfile, in_category, in_area).where(ProProfile.id == pro_id)
+        row = (await self._session.execute(statement)).one_or_none()
+        return None if row is None else (row[0], bool(row[1]), bool(row[2]))
+
+    async def _locked_coverage(
+        self, pro_id: uuid.UUID, category_id: uuid.UUID, service_area_ids: Collection[uuid.UUID]
+    ) -> tuple[ProProfile, bool, bool] | None:
+        # The profile first: every writer of a profile, its categories or its areas locks the
+        # profile's row FOR UPDATE before anything else, so these waits never cross.
+        profile = await self._session.scalar(
+            select(ProProfile)
+            .where(ProProfile.id == pro_id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        if profile is None:
+            return None
+        in_category = await self._session.scalar(
+            select(ProCategory.pro_id)
+            .where(ProCategory.pro_id == pro_id, ProCategory.category_id == category_id)
+            .with_for_update(read=True)
+        )
+        in_area: list[uuid.UUID] = []
+        if service_area_ids:
+            in_area = list(
+                (
+                    await self._session.scalars(
+                        select(ProServiceArea.service_area_id)
+                        .where(
+                            ProServiceArea.pro_id == pro_id,
+                            ProServiceArea.service_area_id.in_(service_area_ids),
+                        )
+                        .order_by(ProServiceArea.service_area_id)
+                        .with_for_update(read=True)
+                    )
+                ).all()
+            )
+        return profile, in_category is not None, bool(in_area)
+
     @staticmethod
     def photo_keys_among(keys: Collection[str]) -> Select[str | None]:
         """The photo keys among `keys` that profiles hold, for another module's query."""
@@ -92,26 +170,57 @@ class ProProfileRepository:
 
     async def public_fields(
         self, pro_ids: Collection[uuid.UUID], *, hireable_only: bool
-    ) -> list[tuple[uuid.UUID, uuid.UUID, Decimal | None, int, int | None, ProVerificationStatus]]:
-        """(id, user_id, rating_avg, jobs_count, years_of_experience, verification_status) only:
-        never the bio, the photo key or the Stripe account. With `hireable_only`, only the pros
-        who still receive requests (approved, payouts enabled): the others cannot be hired or
-        paid out (#189)."""
+    ) -> list[tuple[uuid.UUID, uuid.UUID, int | None, ProVerificationStatus]]:
+        """(id, user_id, years_of_experience, verification_status) only: never the bio, the
+        photo key or the Stripe account. With `hireable_only`, only the pros who still receive
+        requests (approved, payouts enabled): the others cannot be hired or paid out (#189).
+        The rating and the jobs completed are computed by the reviews module (#78): the stored
+        rating_avg and jobs_count columns are never read."""
         if not pro_ids:
             return []
         hireable = _RECEIVES_REQUESTS if hireable_only else ()
         statement = select(
             ProProfile.id,
             ProProfile.user_id,
-            ProProfile.rating_avg,
-            ProProfile.jobs_count,
             ProProfile.years_of_experience,
             ProProfile.verification_status,
         ).where(ProProfile.id.in_(pro_ids), *hireable)
         return [
-            (row[0], row[1], row[2], row[3], row[4], row[5])
+            (row[0], row[1], row[2], row[3])
             for row in (await self._session.execute(statement)).all()
         ]
+
+    async def visible_profile(
+        self, pro_id: uuid.UUID, active_users: Select[uuid.UUID]
+    ) -> tuple[uuid.UUID, str | None, int | None, datetime, list[uuid.UUID]] | None:
+        """(user_id, bio, years_of_experience, created_at, category ids) of the profile when
+        it is approved and its account is among `active_users`; None otherwise (no such
+        profile, pending, rejected, an account suspended or no longer a pro's): one statement
+        whatever the reason (#78)."""
+        statement = (
+            select(
+                ProProfile.user_id,
+                ProProfile.bio,
+                ProProfile.years_of_experience,
+                ProProfile.created_at,
+                func.array_agg(ProCategory.category_id).filter(
+                    ProCategory.category_id.is_not(None)
+                ),
+            )
+            .outerjoin(ProCategory, ProCategory.pro_id == ProProfile.id)
+            .where(
+                ProProfile.id == pro_id,
+                ProProfile.verification_status == ProVerificationStatus.APPROVED,
+                ProProfile.user_id.in_(active_users),
+            )
+            .group_by(ProProfile.id)
+        )
+        row = (await self._session.execute(statement)).one_or_none()
+        if row is None:
+            return None
+        user_id, bio, years, created_at, category_ids = row
+        # array_agg over no row is NULL.
+        return user_id, bio, years, created_at, list(category_ids or [])
 
     async def public_details(
         self, pro_id: uuid.UUID

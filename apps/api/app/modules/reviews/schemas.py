@@ -5,12 +5,13 @@ leaves the API here. A user's rating is the average and the count alone: no revi
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from app.modules.addresses.schemas import NO_NUL
+from app.modules.quotes.schemas import ProPublicProfile
 from app.modules.reviews.models import COMMENT_MAX_LENGTH, RATING_MAX, RATING_MIN
 
 # A JSON integer only: no "5", no 5.0, no true.
@@ -92,4 +93,32 @@ class RatingOut(_Out):
     count: int = Field(
         description="How many published reviews the caller received. A review the caller has "
         "not answered yet is not counted until it is published."
+    )
+
+
+class ProProfilePublicOut(ProPublicProfile):
+    """A pro's public profile (#78), for any signed-in user: an approved pro only. The fields of
+    the profile behind a quote (#53), the rating counting published reviews only. Never the
+    photo, a contact, an address, a document or license, the account's id or payouts."""
+
+
+class PublicReviewOut(_Out):
+    """A published review of a pro, as anyone signed in may read it. Never its id or a user's."""
+
+    rating: int = Field(ge=RATING_MIN, le=RATING_MAX, description="The overall rating.")
+    comment: str | None = Field(
+        description="The reviewer's comment as stored: contact details were masked when it was "
+        "written (app.redaction); null without one."
+    )
+    reviewer: str | None = Field(
+        description='The reviewer\'s first name and last initial, e.g. "María P."; null when a '
+        "name is missing or shows a contact detail."
+    )
+    created_on: date = Field(description="The day the review was written (UTC).")
+
+
+class PublicReviewPage(_Out):
+    items: list[PublicReviewOut] = Field(description="Newest first.")
+    next_cursor: str | None = Field(
+        description="Pass as `cursor` for the next page; null on the last one."
     )

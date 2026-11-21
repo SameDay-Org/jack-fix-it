@@ -405,6 +405,7 @@ async def test_me_requires_bearer(db_client: httpx.AsyncClient, db_session: Asyn
     expired = security.create_access_token(
         user_id=user.id,
         role=user.role,
+        session_id=None,
         secret=TEST_JWT_SECRET,
         ttl_seconds=900,
         now=datetime.now(UTC) - timedelta(seconds=901),
@@ -425,6 +426,7 @@ async def test_me_rejects_token_signed_with_another_secret(
     forged = security.create_access_token(
         user_id=user.id,
         role=UserRole.ADMIN,
+        session_id=None,
         secret="another-secret-of-at-least-32-characters",
         ttl_seconds=900,
         now=datetime.now(UTC),
@@ -465,6 +467,7 @@ async def test_me_rejects_token_of_unknown_user(db_client: httpx.AsyncClient) ->
     token = security.create_access_token(
         user_id=uuid.uuid4(),
         role=UserRole.CUSTOMER,
+        session_id=None,
         secret=TEST_JWT_SECRET,
         ttl_seconds=900,
         now=datetime.now(UTC),
