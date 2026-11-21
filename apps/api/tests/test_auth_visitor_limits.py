@@ -8,27 +8,37 @@ anonymous script could lock every staff member out of the panel (logins) and sig
 """
 
 import logging
-from collections.abc import Callable
+import uuid
+from collections.abc import AsyncIterator
 from typing import Final
 
 import httpx
 import pytest
 from fastapi import FastAPI
+from redis.asyncio import Redis
 
 from app.config import Settings
+from app.integrations.email import get_email_sender
+from app.modules.auth.password_reset import ResetCodeStore, get_reset_code_store
 from app.rate_limit import get_rate_limiter
 from tests.conftest import TEST_WEB_SERVICE_SETTINGS, InMemoryRateLimiter, make_settings
+from tests.test_password_reset_api import FakeSender
 
 KEY: Final = str(TEST_WEB_SERVICE_SETTINGS["web_service_key"])
 ATTACKER: Final = "203.0.113.10"
 STAFF: Final = "198.51.100.20"
-LIMIT: Final = 10  # AUTH_RATE_LIMIT_REQUESTS's default
+LIMIT: Final = 10  # AUTH_RATE_LIMIT_REQUESTS: register, login, refresh and logout, per address
+RESET_LIMIT: Final = 3  # PASSWORD_RESET_REQUEST_LIMIT: forgot, per address and per email
 NOW: Final = 1_000.0
 
 
 @pytest.fixture
 def settings() -> Settings:
-    return make_settings(**TEST_WEB_SERVICE_SETTINGS)
+    return make_settings(
+        **TEST_WEB_SERVICE_SETTINGS,
+        auth_rate_limit_requests=LIMIT,
+        password_reset_request_limit=RESET_LIMIT,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -78,24 +88,74 @@ async def test_one_visitors_garbage_refreshes_do_not_sign_the_staff_out(
     assert staff == 401  # an invalid token, not a 429
 
 
-async def test_one_visitors_logouts_and_reset_requests_have_their_own_bucket(
-    db_client: httpx.AsyncClient,
+@pytest.fixture
+async def reset_sender(app: FastAPI) -> AsyncIterator[FakeSender]:
+    """The reset code store on the test Redis, under a prefix of its own, and a fake mailer, so
+    a forgot request answers its real 202 and never an error."""
+    redis = Redis.from_url(Settings().redis_url)
+    prefix = f"pwreset-visitor-test-{uuid.uuid4().hex}"
+    sender = FakeSender()
+    app.dependency_overrides[get_email_sender] = lambda: sender
+    app.dependency_overrides[get_reset_code_store] = lambda: ResetCodeStore(
+        redis, timeout_seconds=5.0, prefix=prefix
+    )
+    try:
+        yield sender
+    finally:
+        keys = [key async for key in redis.scan_iter(match=f"{prefix}:*")]
+        if keys:
+            await redis.delete(*keys)
+        await redis.aclose()
+
+
+async def test_one_visitors_logouts_have_their_own_bucket(db_client: httpx.AsyncClient) -> None:
+    async def logout(n: int, headers: dict[str, str]) -> int:
+        body = {"refresh_token": f"not-a-refresh-token-{n}"}
+        return (await db_client.post("/v1/auth/logout", json=body, headers=headers)).status_code
+
+    attacker = [await logout(n, from_web(ATTACKER)) for n in range(LIMIT + 1)]
+    staff = await logout(99, from_web(STAFF))
+
+    assert attacker == [204] * LIMIT + [429]
+    assert staff == 204  # always 204 for an unknown token, and not the attacker's 429
+
+
+async def test_one_visitors_reset_requests_have_their_own_bucket(
+    db_client: httpx.AsyncClient, reset_sender: FakeSender
 ) -> None:
     """A new email each time, so only the per-address bucket fills (forgot also counts per
     email)."""
-    bodies: dict[str, Callable[[int], dict[str, str]]] = {
-        "/v1/auth/logout": lambda n: {"refresh_token": f"not-a-refresh-token-{n}"},
-        "/v1/auth/password/forgot": lambda n: {"email": f"nobody-{n}@example.com"},
-    }
-    for path, body in bodies.items():
-        spent = [
-            (await db_client.post(path, json=body(n), headers=from_web(ATTACKER))).status_code
-            for n in range(LIMIT + 1)
-        ]
-        other = (await db_client.post(path, json=body(99), headers=from_web(STAFF))).status_code
 
-        assert spent[-1] == 429, path
-        assert other != 429, path
+    async def forgot(n: int, headers: dict[str, str]) -> int:
+        body = {"email": f"nobody-{n}@example.com"}
+        return (
+            await db_client.post("/v1/auth/password/forgot", json=body, headers=headers)
+        ).status_code
+
+    attacker = [await forgot(n, from_web(ATTACKER)) for n in range(RESET_LIMIT + 1)]
+    staff = await forgot(99, from_web(STAFF))
+
+    assert attacker == [202] * RESET_LIMIT + [429]
+    assert staff == 202  # the route's own answer, not the attacker's 429
+    assert reset_sender.sent == []  # no account has these emails
+
+
+async def test_one_visitors_registrations_do_not_use_up_another_visitors(
+    db_client: httpx.AsyncClient,
+) -> None:
+    async def register(n: int, headers: dict[str, str]) -> int:
+        body = {
+            "email": f"new-{n}@example.com",
+            "password": "correct horse battery",
+            "role": "customer",
+        }
+        return (await db_client.post("/v1/auth/register", json=body, headers=headers)).status_code
+
+    attacker = [await register(n, from_web(ATTACKER)) for n in range(LIMIT + 1)]
+    visitor = await register(99, from_web(STAFF))
+
+    assert attacker == [201] * LIMIT + [429]  # one visitor does hit the limit
+    assert visitor == 201  # through the same web key, another visitor's bucket is untouched
 
 
 @pytest.mark.parametrize("key", [None, "not-the-web-service-key"], ids=["no_key", "wrong_key"])
