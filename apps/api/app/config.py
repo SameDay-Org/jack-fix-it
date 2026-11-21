@@ -130,6 +130,15 @@ def parse_codecs(value: str) -> list[str]:
     return [codec.strip().lower() for codec in value.split(",") if codec.strip()]
 
 
+def parse_percents(value: str) -> list[int]:
+    """Split a CSV of whole percents such as "5,10,15"; ignore blanks. ASCII digits only:
+    int() would take other scripts' digits too."""
+    parts = [part.strip() for part in value.split(",") if part.strip()]
+    if not all(re.fullmatch(r"[0-9]{1,4}", part) for part in parts):
+        raise ValueError("TIP_PRESET_PERCENTS must list whole percents such as 5,10,15")
+    return [int(part) for part in parts]
+
+
 def parse_cors_origins(value: str) -> list[str]:
     """Split a CSV of origins; ignore blanks and trailing slashes."""
     return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
@@ -400,6 +409,20 @@ class Settings(BaseSettings):
     payment_unpaid_cancel_after_seconds: int = Field(default=7_200, gt=0)
     payment_unpaid_sweep_minutes: int = Field(default=10, ge=1, le=60)
     payment_unpaid_sweep_timeout_seconds: int = Field(default=540, gt=0)
+    # Tips at confirmation (#273; Foreman decisions 2026-11-19, Cesar may change them): the
+    # percents offered, of the job's price before tax; a custom amount's bounds in integer
+    # cents (at least TIP_MIN_CENTS, at most TIP_MAX_PERCENT of the price and never above
+    # TIP_MAX_CENTS); and how many hours after the confirmation a tip may still be added. A
+    # tip left unpaid is canceled by the unpaid sweep above, on its window and cadence.
+    tip_preset_percents: Annotated[list[int], NoDecode] = Field(default=[5, 10, 15])
+    tip_min_cents: int = Field(default=100, gt=0)
+    tip_max_percent: int = Field(default=100, gt=0, le=1000)
+    tip_max_cents: int = Field(default=50_000, gt=0)
+    tip_window_hours: int = Field(default=168, gt=0)
+    # Tip choices one customer may send per window, replays included (#510 round 1): each
+    # may cancel, create or read a PaymentIntent and mints a CustomerSession.
+    tip_choice_limit: int = Field(default=20, gt=0)
+    tip_choice_window_seconds: int = Field(default=600, gt=0)
     # Transfers to the pros (D13.3, #68): once a job is confirmed its pro's payout is
     # transferred to their Stripe account, by a worker task queued at the confirmation and by a
     # sweep for whatever is left. How often the worker sweeps (a cron, in minutes of the hour),
@@ -558,6 +581,8 @@ class Settings(BaseSettings):
     ops_action_window_seconds: int = Field(default=60, gt=0)
     # The most pros a request's eligible list names for a manual assignment (#82).
     ops_eligible_pros_limit: int = Field(default=50, gt=0)
+    # Hours a request whose pro cancelled its job stays under problems in the queue (#69).
+    ops_pro_cancel_attention_hours: int = Field(default=72, gt=0)
     # The IANA time zone "scheduled today" is read in, as Postgres names it.
     business_time_zone: str = Field(
         default="America/New_York", pattern=r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$"
@@ -579,6 +604,9 @@ class Settings(BaseSettings):
     # Days after a job's confirmation at which a review of it counts for its target even if
     # the target wrote none (the publication rule; Cesar may adjust the window).
     review_publish_after_days: int = Field(default=14, gt=0)
+    # Reads of pros' public profiles and reviews per user per window (#78).
+    pro_public_read_limit: int = Field(default=120, gt=0)
+    pro_public_read_window_seconds: int = Field(default=60, gt=0)
     # The original of a redacted chat message (#72, Cesar 2026-11-07): kept encrypted for staff
     # only (app.crypto), deleted after CHAT_ORIGINAL_RETENTION_DAYS. CHAT_ORIGINAL_KEYS is a JSON
     # object {key_id: base64 32-byte key}; CHAT_ORIGINAL_ACTIVE_KEY_ID names the key new originals
@@ -644,6 +672,11 @@ class Settings(BaseSettings):
     @classmethod
     def _split_codecs(cls, value: object) -> object:
         return parse_codecs(value) if isinstance(value, str) else value
+
+    @field_validator("tip_preset_percents", mode="before")
+    @classmethod
+    def _split_tip_percents(cls, value: object) -> object:
+        return parse_percents(value) if isinstance(value, str) else value
 
     @field_validator("phone_allowed_country_codes", mode="before")
     @classmethod
@@ -780,6 +813,19 @@ class Settings(BaseSettings):
                 "ORPHAN_UPLOAD_MIN_AGE_HOURS: the sweep must never reach an upload a job "
                 "may still attach"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _tip_bounds(self) -> Self:
+        # The presets are offered in this order, each a distinct whole percent the maximum
+        # allows; an empty list would leave the customer only a custom amount.
+        presets = self.tip_preset_percents
+        if not presets or presets != sorted(set(presets)):
+            raise ValueError("TIP_PRESET_PERCENTS must list distinct percents, ascending")
+        if presets[0] < 1 or presets[-1] > self.tip_max_percent:
+            raise ValueError("TIP_PRESET_PERCENTS must be between 1 and TIP_MAX_PERCENT")
+        if self.tip_min_cents > self.tip_max_cents:
+            raise ValueError("TIP_MIN_CENTS must be at most TIP_MAX_CENTS")
         return self
 
     @model_validator(mode="after")

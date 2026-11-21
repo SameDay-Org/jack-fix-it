@@ -325,6 +325,67 @@ def is_reviewable(job: Job) -> bool:
     return job.status in REVIEWABLE
 
 
+# A tip the customer paid (#273): a line of the job's history, no status change.
+TIP_ADDED: Final = "tip_added"
+
+
+@dataclass(frozen=True)
+class JobTipFacts:
+    """What a tip reads of its job (#273): its ids, the price before tax a percent is taken of,
+    and when the job was confirmed, by its customer (#66) or by the auto-confirm (#67). None
+    for a job never confirmed: still under way, disputed, refunded, cancelled, or paid out by
+    an admin's release of a dispute (is_reviewable); such a job takes no tip."""
+
+    job_id: uuid.UUID
+    request_id: uuid.UUID
+    customer_id: uuid.UUID
+    pro_id: uuid.UUID
+    price_cents: int
+    confirmed_at: datetime | None
+
+
+def tip_facts(job: Job) -> JobTipFacts:
+    return JobTipFacts(
+        job_id=job.id,
+        request_id=job.request_id,
+        customer_id=job.customer_id,
+        pro_id=job.pro_id,
+        # The quote's price, before tax: the base of a tip's percent (#273, Q-T4).
+        price_cents=job.customer_price_cents,
+        confirmed_at=job.confirmed_at if is_reviewable(job) else None,
+    )
+
+
+class JobTipReader:
+    """A job as a tip needs it, for the tips module (#273). Reads only, unlocked: a confirmed
+    job only moves on to paid_out, and confirmed_at is never cleared, so what this says stays
+    true."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._jobs = JobRepository(session)
+
+    async def of_customer_request(
+        self, customer_id: uuid.UUID, request_id: uuid.UUID
+    ) -> JobTipFacts | None:
+        """The request's job when `customer_id` is its customer; None otherwise, and while the
+        request has no job."""
+        job = await self._jobs.get_of_request(request_id)
+        if job is None or job.customer_id != customer_id:
+            return None
+        return tip_facts(job)
+
+
+class JobTimeline:
+    """Lines other modules add to a job's history without changing its status."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._jobs = JobRepository(session)
+
+    async def tip_added(self, job_id: uuid.UUID, customer_id: uuid.UUID) -> None:
+        """The customer's tip succeeded (#273): its customer is the event's actor."""
+        await self._jobs.add_event(JobEvent(job_id=job_id, type=TIP_ADDED, actor_id=customer_id))
+
+
 @dataclass(frozen=True)
 class StaffJobEvent:
     """One line of a job's history as staff read it in the request card (#81): what happened
@@ -406,6 +467,11 @@ class JobPartiesReader:
         """Each job's id (`job_id`) and confirmation time (`confirmed_at`), as a subquery: a
         review's publication window is read in the reviews' own query (#77)."""
         return JobRepository.confirmations()
+
+    async def completed_counts(self, pro_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, int]:
+        """How many jobs each pro completed: confirmed by the customer or the auto-confirm,
+        paid out since included (is_reviewable); a pro with none is left out. One query (#78)."""
+        return await self._jobs.completed_counts(pro_ids)
 
     async def parties(self, job_id: uuid.UUID, *, lock: bool = False) -> JobParties | None:
         """The job's parties, or None for an unknown job: for staff, who may read any job.

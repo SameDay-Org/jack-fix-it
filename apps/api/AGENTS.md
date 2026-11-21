@@ -19,6 +19,11 @@ rules apply.
   wrong role is 403. Resources addressed by id call `ensure_owner` (404 for anyone else) or a
   feature rule, and carry a test proving user A cannot read or change user B's.
   `tests/test_route_permissions.py` fails CI on a route with no decision.
+- Sessions (#161): an access token names its refresh family (`sid`). Every authenticated
+  request reads the account (status and role) and whether that family is still live, never
+  cached, so logout, reuse detection, a password reset, a suspension or a demotion take effect
+  at the next request. Database reads only, no Redis: with the database down a request fails,
+  it never passes. A token without `sid` was issued before #161 and works until it expires.
 - Errors: raise an `AppError` subclass from `app/errors.py`; responses always have the shape
   `{"error": {"code", "message"}}`. Unexpected exceptions become a generic 500.
 - Logging: `logging.getLogger(__name__)`, an event-style message plus `extra={...}`; the JSON
@@ -271,6 +276,15 @@ them idempotent: they can run twice.
   attempt are committed before Stripe; a retry looks the refund up first. One
   `dispute.resolve` audit row per resolution (`AuditService.record`); staff reads in
   `disputes/staff.py` (the detail is audited, `dispute.read`).
+- **Ratings (#78).** A pro's rating (the average of the published reviews' `overall`, one
+  decimal, half up, `reviews/ratings.py::rounded_average`; None and 0 with none, never 0.0) and
+  jobs completed (confirmed, paid out after a confirmation) are computed by query wherever a pro
+  is shown: the public profile, quote cards, the job's pro card, dispatch's ranking, always
+  through `reviews.ratings.ProRatings` (two grouped queries per list). Nothing is stored: the
+  publication window passes without a write. `pro_profiles.rating_avg` and `jobs_count` stay in
+  the table unread; never read or write them. The public profile (`GET /v1/pros/{id}` and its
+  `/reviews`) shows only an approved pro with an active account, the same 404 for every other
+  case, and never the photo (#53).
 
 ## Stripe webhooks (#40, #280)
 
