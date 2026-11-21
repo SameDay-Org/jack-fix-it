@@ -27,6 +27,7 @@ from app.modules.payments.tasks import cancel_unpaid_payments
 from app.modules.payments.transfer_tasks import check_transfer_reversals, release_confirmed_jobs
 from app.modules.quotes.tasks import expire_quotes
 from app.modules.requests.tasks import SANITIZE_SPARE_TRIES
+from app.modules.tips.tasks import cancel_unpaid_tips
 from app.modules.uploads.tasks import sweep_orphan_uploads
 from app.worker import WorkerSettings, every
 from tests.conftest import make_settings
@@ -144,6 +145,13 @@ def test_cron_jobs_keep_names_cadences_and_timeouts() -> None:
         ),
         "cron:cancel_unpaid_payments": (
             cancel_unpaid_payments,
+            every(get_settings().payment_unpaid_sweep_minutes),
+            get_settings().payment_unpaid_sweep_timeout_seconds,
+            1,
+        ),
+        # Tips left unpaid (#273): the unpaid payments' cadence and timeout.
+        "cron:cancel_unpaid_tips": (
+            cancel_unpaid_tips,
             every(get_settings().payment_unpaid_sweep_minutes),
             get_settings().payment_unpaid_sweep_timeout_seconds,
             1,
