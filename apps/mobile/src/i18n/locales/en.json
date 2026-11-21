@@ -791,6 +791,7 @@
       "sent": "Sent",
       "description": "What's going on",
       "redacted": "Contact details were hidden.",
+      "answers": "Their answers",
       "sendQuote": "Send a quote"
     },
     "media": {
