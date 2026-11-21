@@ -131,6 +131,7 @@ async def test_customer_sees_own_job(
         "id": str(world.pro.profile_id),
         "name": "María P.",
         "rating_avg": None,
+        "rating_count": 0,
         "jobs_count": 0,
         "years_of_experience": 7,
         "verified": True,

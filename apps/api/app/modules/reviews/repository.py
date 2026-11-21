@@ -1,8 +1,8 @@
 import uuid
+from collections.abc import Collection
 from datetime import datetime
-from decimal import Decimal
 
-from sqlalchemy import ColumnElement, Subquery, exists, func, or_, select
+from sqlalchemy import ColumnElement, Subquery, exists, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -40,20 +40,46 @@ class ReviewRepository:
         statement = select(Review).where(Review.job_id == job_id, Review.author_id == author_id)
         return (await self._session.scalars(statement)).one_or_none()
 
-    async def rating_of(
-        self, target_id: uuid.UUID, confirmations: Subquery, confirmed_by: datetime
-    ) -> tuple[Decimal | None, int]:
-        """The average of `overall` over the published reviews of this user, rounded to one
-        decimal by Postgres on the exact numeric (a tie rounds away from zero: 4.25 is 4.3),
-        and their count; (None, 0) with none. `confirmations` is the jobs module's `job_id`,
+    async def ratings_of(
+        self, target_ids: Collection[uuid.UUID], confirmations: Subquery, confirmed_by: datetime
+    ) -> dict[uuid.UUID, tuple[int, int]]:
+        """(the sum of `overall`, the count) over the published reviews of each of these
+        users, in one grouped query; a user with none is left out. Integers only: the caller
+        rounds (ratings.rounded_average). `confirmations` is the jobs module's `job_id`,
         `confirmed_at` subquery; `confirmed_by` as in published()."""
+        if not target_ids:
+            return {}
         statement = (
-            select(func.round(func.avg(Review.overall), 1), func.count())
+            select(Review.target_id, func.sum(Review.overall), func.count())
+            .join(confirmations, confirmations.c.job_id == Review.job_id)
+            .where(Review.target_id.in_(target_ids), published(confirmations, confirmed_by))
+            .group_by(Review.target_id)
+        )
+        rows = (await self._session.execute(statement)).all()
+        return {target_id: (int(total), int(count)) for target_id, total, count in rows}
+
+    async def published_page(
+        self,
+        target_id: uuid.UUID,
+        confirmations: Subquery,
+        confirmed_by: datetime,
+        *,
+        after: tuple[datetime, uuid.UUID] | None,
+        limit: int,
+    ) -> list[Review]:
+        """The published reviews of this user, newest first (created_at, then id), strictly
+        after the `after` key, at most `limit`: the index on (target_id, created_at) serves
+        it. A review not published yet is never in it."""
+        statement = (
+            select(Review)
             .join(confirmations, confirmations.c.job_id == Review.job_id)
             .where(Review.target_id == target_id, published(confirmations, confirmed_by))
+            .order_by(Review.created_at.desc(), Review.id.desc())
+            .limit(limit)
         )
-        average, count = (await self._session.execute(statement)).one()
-        return average, count
+        if after is not None:
+            statement = statement.where(tuple_(Review.created_at, Review.id) < tuple_(*after))
+        return list((await self._session.scalars(statement)).all())
 
 
 def published(confirmations: Subquery, confirmed_by: datetime) -> ColumnElement[bool]:

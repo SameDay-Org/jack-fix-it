@@ -50,6 +50,7 @@ CONFIG = JobExecutionConfig(
     enqueue_timeout_seconds=1.0,
     auto_confirm_after=timedelta(hours=48),
     tips=TipConfig.from_settings(make_settings()),
+    review_publish_after=timedelta(days=14),
 )
 
 

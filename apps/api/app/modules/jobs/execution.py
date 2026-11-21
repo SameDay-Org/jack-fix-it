@@ -156,6 +156,7 @@ from app.modules.quotes.schemas import QuotePro
 from app.modules.quotes.service import QuoteReader
 from app.modules.requests.errors import InvalidRequestError
 from app.modules.requests.service import CustomerRequestReader, ProRequestReader
+from app.modules.reviews.ratings import ProRatings
 from app.modules.tips.service import TipConfig, TipReader
 from app.modules.uploads.keys import owned_upload, upload_issued_at
 from app.modules.uploads.schemas import UploadPurpose
@@ -194,6 +195,8 @@ class JobExecutionConfig:
     enqueue_timeout_seconds: float
     auto_confirm_after: timedelta
     tips: TipConfig
+    # REVIEW_PUBLISH_AFTER_DAYS, for the pro's rating on the card (#78).
+    review_publish_after: timedelta
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "JobExecutionConfig":
@@ -207,6 +210,7 @@ class JobExecutionConfig:
             enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
             auto_confirm_after=timedelta(hours=settings.job_auto_confirm_after_hours),
             tips=TipConfig.from_settings(settings),
+            review_publish_after=timedelta(days=settings.review_publish_after_days),
         )
 
 
@@ -229,6 +233,7 @@ class JobExecutionService:
         self._photos = JobPhotoRepository(session)
         self._signer = JobPhotoSigner(storage, config.photo_url_ttl_seconds)
         self._pros = ProService(session)
+        self._ratings = ProRatings(session, config.review_publish_after)
         self._locations = locations
         self._machine = JobStateMachine(session, self._pros, locations)
         self._customer_requests = CustomerRequestReader(session)
@@ -252,6 +257,7 @@ class JobExecutionService:
         card = (await self._pros.cards([job.pro_id])).get(job.pro_id)
         if card is None:  # pragma: no cover - jobs.pro_id is a foreign key
             raise NotFoundError
+        rating = (await self._ratings.of({card.pro_id: card.user_id}))[card.pro_id]
         events = await self._jobs.events_of(job.id)
         photos = await self._photos.of_jobs([job.id])
         unread = await self._chat.unread_counts([job.id], user.id)
@@ -267,8 +273,9 @@ class JobExecutionService:
             pro=QuotePro(
                 id=card.pro_id,
                 name=card.name,
-                rating_avg=None if card.rating_avg is None else format(card.rating_avg, ".2f"),
-                jobs_count=card.jobs_count,
+                rating_avg=rating.text,
+                rating_count=rating.count,
+                jobs_count=rating.jobs_completed,
                 years_of_experience=card.years_of_experience,
                 verified=card.verified,
             ),
