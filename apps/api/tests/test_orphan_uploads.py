@@ -86,6 +86,10 @@ NOT_UPLOAD_KEYS = {
     "transfers.idempotency_key",
     # A job's cancellation (#69): the customer's Idempotency-Key.
     "job_cancellations.idempotency_key",
+    # A tip's transfer to its pro (#273): Stripe's idempotency key.
+    "tips.transfer_idempotency_key",
+    # A tip choice's Idempotency-Key (#510 round 1): the customer's.
+    "tip_requests.idempotency_key",
 }
 
 

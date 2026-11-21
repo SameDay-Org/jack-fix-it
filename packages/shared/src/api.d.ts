@@ -122,8 +122,8 @@ export interface paths {
          * Log out
          * @description Revokes the session the refresh token belongs to. No bearer token is needed.
          *
-         *     Always 204, so the endpoint cannot be used to test tokens. The access token is not revoked
-         *     on the server: it stops working when it expires (`expires_in`).
+         *     Always 204, so the endpoint cannot be used to test tokens. The session's access tokens stop
+         *     working at once too: every bearer route refuses them with 401 invalid_token (#161).
          */
         post: operations["logout_v1_auth_logout_post"];
         delete?: never;
@@ -2056,6 +2056,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pros/me/jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a job I can no longer do (pro)
+         * @description The pro cancels their scheduled or on-the-way job. The customer is never charged: their
+         *     whole payment, tax included, goes back to the original payment method through Stripe. The
+         *     job and its request are cancelled (the request is not reopened: the customer starts a new
+         *     one), and the customer is notified. A job is cancelled once: sending again, or after the
+         *     customer cancelled, returns that cancellation (200).
+         */
+        post: operations["pro_cancel_job_v1_pros_me_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pros/me/jobs/{job_id}/dispute": {
         parameters: {
             query?: never;
@@ -2237,6 +2261,77 @@ export interface paths {
          *     side's score of a job before writing their own.
          */
         get: operations["read_my_rating_v1_users_me_rating_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/requests/{request_id}/job/tip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Tip the pro of my confirmed job, or choose no tip
+         * @description The customer's tip for the pro of their confirmed job, inside the window the job's tip
+         *     shows (closes_at): "No tip", one of the offered percents, or an amount within the bounds.
+         *     The server computes every amount. A tip to pay comes with what the Payment Sheet needs
+         *     (the same PaymentIntent while the amount stays the same; a new amount cancels the earlier
+         *     one first); "No tip" comes with no sheet. Sending the same choice again is safe.
+         */
+        post: operations["choose_tip_v1_requests__request_id__job_tip_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/{pro_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a pro's public profile
+         * @description An approved pro's public profile: their first name and last initial, the verified flag,
+         *     the average of their published reviews to one decimal (null with none) and how many, the
+         *     jobs they completed, their years of experience, their bio with contact details masked,
+         *     their categories and the month they joined. No photo, contact, address or document.
+         */
+        get: operations["read_public_pro_v1_pros__pro_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/{pro_id}/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a pro's published reviews
+         * @description An approved pro's published reviews, newest first: each one's overall rating, its
+         *     comment (contact details masked when written), the reviewer's first name and last initial
+         *     and the day. A review counts once the pro reviewed the job too, or 14 days
+         *     (REVIEW_PUBLISH_AFTER_DAYS) after the job's confirmation. Up to REQUEST_LIST_MAX_LIMIT per
+         *     page.
+         */
+        get: operations["read_public_pro_reviews_v1_pros__pro_id__reviews_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2892,6 +2987,20 @@ export interface components {
              */
             first_contact_at: string;
         };
+        /** CustomTipIn */
+        CustomTipIn: {
+            /**
+             * Choice
+             * @constant
+             */
+            choice: "custom";
+            /**
+             * Amount Cents
+             * @description The tip in integer cents, within the options' bounds.
+             * @example 1250
+             */
+            amount_cents: number;
+        };
         /** CustomerCancelIn */
         CustomerCancelIn: {
             reason_code: components["schemas"]["CustomerCancelReason"];
@@ -3034,6 +3143,8 @@ export interface components {
              * @description The pro's chat messages the customer has not marked read (#71).
              */
             unread_messages: number;
+            /** @description The customer's tip for the pro (#273): set once the job was confirmed (by the customer or automatically), inside the tip window and after it; null for a job that takes no tip (not confirmed yet, disputed, refunded or cancelled). Always sent; optional in the schema so clients built before #273 keep compiling. */
+            tip?: components["schemas"]["TipOut"] | null;
         };
         /**
          * CustomerJobCancellation
@@ -4053,6 +4164,14 @@ export interface components {
              */
             next_cursor: string | null;
         };
+        /** NoTipIn */
+        NoTipIn: {
+            /**
+             * Choice
+             * @constant
+             */
+            choice: "none";
+        };
         /** NoteIn */
         NoteIn: {
             /**
@@ -4466,6 +4585,20 @@ export interface components {
          * @enum {string}
          */
         PayoutsStatus: "not_started" | "incomplete" | "in_review" | "enabled";
+        /** PercentTipIn */
+        PercentTipIn: {
+            /**
+             * Choice
+             * @constant
+             */
+            choice: "percent";
+            /**
+             * Percent
+             * @description One of the percents the job's tip options offer.
+             * @example 10
+             */
+            percent: number;
+        };
         /** PhoneSendRequest */
         PhoneSendRequest: {
             /**
@@ -4532,6 +4665,43 @@ export interface components {
          * @enum {string}
          */
         PreferredPeriod: "morning" | "afternoon" | "evening" | "flexible";
+        /** ProCancelIn */
+        ProCancelIn: {
+            reason_code: components["schemas"]["ProCancelReason"];
+            /**
+             * Note
+             * @description Optional, plain text. Contact details are masked before it is stored; only the masked text is kept, for staff.
+             */
+            note?: string | null;
+        };
+        /**
+         * ProCancelReason
+         * @description Why the pro cancels: the reasons their app offers.
+         * @enum {string}
+         */
+        ProCancelReason: "cannot_make_it" | "customer_unreachable" | "scope_changed" | "other";
+        /**
+         * ProCancellationOut
+         * @description The cancel's answer to the pro: their job view's cancellation (who, why and when; never
+         *     the money or the note) with the job. cancelled_by is customer when the customer cancelled
+         *     first.
+         */
+        ProCancellationOut: {
+            cancelled_by: components["schemas"]["CancelParty"];
+            reason_code: components["schemas"]["CancelReason"];
+            /**
+             * Cancelled At
+             * Format: date-time
+             */
+            cancelled_at: string;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /** @description cancelled. */
+            job_status: components["schemas"]["JobStatus"];
+        };
         /**
          * ProDisputeOut
          * @description The report on the pro's job: the photos' safe copies only, once ready.
@@ -4795,6 +4965,65 @@ export interface components {
             service_areas: components["schemas"]["ServiceAreaOut"][];
         };
         /**
+         * ProProfilePublicOut
+         * @description A pro's public profile (#78), for any signed-in user: an approved pro only. The fields of
+         *     the profile behind a quote (#53), the rating counting published reviews only. Never the
+         *     photo, a contact, an address, a document or license, the account's id or payouts.
+         */
+        ProProfilePublicOut: {
+            /**
+             * Id
+             * Format: uuid
+             * @description The pro's profile id.
+             */
+            id: string;
+            /**
+             * Name
+             * @description The first name and the last name's initial, e.g. "María P."; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked.
+             */
+            name: string | null;
+            /**
+             * Rating Avg
+             * @description The average of the overall ratings of the pro's published reviews, to one decimal, rounded half up, as a string; null before the first one (never 0.0).
+             * @example 4.7
+             */
+            rating_avg: string | null;
+            /**
+             * Rating Count
+             * @description How many published reviews the average is of.
+             */
+            rating_count?: number;
+            /**
+             * Jobs Count
+             * @description Jobs completed on the platform (confirmed).
+             */
+            jobs_count: number;
+            /** Years Of Experience */
+            years_of_experience: number | null;
+            /**
+             * Verified
+             * @description The platform approved the pro's verification.
+             */
+            verified: boolean;
+            /**
+             * Bio
+             * @description What the pro wrote about their work, with contact details masked (app.redaction), as in a quote's scope: the pro's own email and phone, then every contact pattern; null when the pro wrote none.
+             */
+            bio: string | null;
+            /**
+             * Categories
+             * @description The active categories the pro works in, by slug.
+             */
+            categories: components["schemas"]["CategorySummary"][];
+            /**
+             * Member Since
+             * Format: date
+             * @description The first day of the month the pro joined: month precision only.
+             * @example 2026-10-01
+             */
+            member_since: string;
+        };
+        /**
          * ProProfileUpdate
          * @description Only the fields sent change. Verification, payouts, rating and job count are set by the
          *     platform: sending them is a 422 (extra="forbid").
@@ -4844,13 +5073,18 @@ export interface components {
             name: string | null;
             /**
              * Rating Avg
-             * @description The average rating as a decimal string; null before the first review.
-             * @example 4.80
+             * @description The average of the overall ratings of the pro's published reviews, to one decimal, rounded half up, as a string; null before the first one (never 0.0).
+             * @example 4.7
              */
             rating_avg: string | null;
             /**
+             * Rating Count
+             * @description How many published reviews the average is of.
+             */
+            rating_count?: number;
+            /**
              * Jobs Count
-             * @description Jobs completed on the platform.
+             * @description Jobs completed on the platform (confirmed).
              */
             jobs_count: number;
             /** Years Of Experience */
@@ -4895,6 +5129,46 @@ export interface components {
          * @enum {string}
          */
         ProVerificationStatus: "pending" | "approved" | "rejected";
+        /**
+         * PublicReviewOut
+         * @description A published review of a pro, as anyone signed in may read it. Never its id or a user's.
+         */
+        PublicReviewOut: {
+            /**
+             * Rating
+             * @description The overall rating.
+             */
+            rating: number;
+            /**
+             * Comment
+             * @description The reviewer's comment as stored: contact details were masked when it was written (app.redaction); null without one.
+             */
+            comment: string | null;
+            /**
+             * Reviewer
+             * @description The reviewer's first name and last initial, e.g. "María P."; null when a name is missing or shows a contact detail.
+             */
+            reviewer: string | null;
+            /**
+             * Created On
+             * Format: date
+             * @description The day the review was written (UTC).
+             */
+            created_on: string;
+        };
+        /** PublicReviewPage */
+        PublicReviewPage: {
+            /**
+             * Items
+             * @description Newest first.
+             */
+            items: components["schemas"]["PublicReviewOut"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for the next page; null on the last one.
+             */
+            next_cursor: string | null;
+        };
         /** QueueAgent */
         QueueAgent: {
             /**
@@ -5118,13 +5392,18 @@ export interface components {
             name: string | null;
             /**
              * Rating Avg
-             * @description The average rating as a decimal string; null before the first review.
-             * @example 4.80
+             * @description The average of the overall ratings of the pro's published reviews, to one decimal, rounded half up, as a string; null before the first one (never 0.0).
+             * @example 4.7
              */
             rating_avg: string | null;
             /**
+             * Rating Count
+             * @description How many published reviews the average is of.
+             */
+            rating_count?: number;
+            /**
              * Jobs Count
-             * @description Jobs completed on the platform.
+             * @description Jobs completed on the platform (confirmed).
              */
             jobs_count: number;
             /** Years Of Experience */
@@ -6639,6 +6918,95 @@ export interface components {
          */
         TicketTopic: "account" | "payment" | "job" | "safety" | "app_problem" | "other";
         /**
+         * TipChoice
+         * @description What the customer chose (#273): no tip, one of the offered percents, or an amount.
+         * @enum {string}
+         */
+        TipChoice: "none" | "percent" | "custom";
+        /** TipCreateOut */
+        TipCreateOut: {
+            tip: components["schemas"]["TipOut"];
+            /** @description What the Payment Sheet needs to pay the tip (its amount, no tax); null for No tip. */
+            sheet: components["schemas"]["PaymentSheetOut"] | null;
+        };
+        /** TipOptions */
+        TipOptions: {
+            /**
+             * Presets
+             * @description The percents offered for this job, ascending; a percent whose amount falls outside the bounds below is left out.
+             */
+            presets: components["schemas"]["TipPreset"][];
+            /**
+             * Min Cents
+             * @description The smallest tip, inclusive.
+             */
+            min_cents: number;
+            /**
+             * Max Cents
+             * @description The largest tip, inclusive: a share of the job's price, capped.
+             */
+            max_cents: number;
+        };
+        /**
+         * TipOut
+         * @description The job's tip: what the customer chose, where its payment stands and what they may do.
+         */
+        TipOut: {
+            /** @description null until the customer chooses. declined: No tip. requires_payment: the Payment Sheet is open or was closed. processing, succeeded, failed, canceled: the payment's. A failed or canceled tip can be tried again while can_tip is true. */
+            status: components["schemas"]["TipStatus"] | null;
+            /** @description null until the customer chooses. */
+            choice: components["schemas"]["TipChoice"] | null;
+            /**
+             * Percent
+             * @description The offered percent chosen; null otherwise.
+             */
+            percent: number | null;
+            /**
+             * Amount Cents
+             * @description The tip, in integer cents; 0 until chosen and for No tip.
+             */
+            amount_cents: number;
+            /**
+             * Currency
+             * @description Stripe's lower-case currency code.
+             * @example usd
+             */
+            currency: string;
+            options: components["schemas"]["TipOptions"];
+            /**
+             * Can Tip
+             * @description Whether a tip may be chosen or paid now: inside the window, nothing paid or being paid yet.
+             */
+            can_tip: boolean;
+            /**
+             * Closes At
+             * Format: date-time
+             * @description When the window closes: the job's confirmation plus TIP_WINDOW_HOURS.
+             */
+            closes_at: string;
+        };
+        /** TipPreset */
+        TipPreset: {
+            /**
+             * Percent
+             * @description A whole percent of the job's price.
+             * @example 10
+             */
+            percent: number;
+            /**
+             * Amount Cents
+             * @description What that percent comes to, computed by the server (rounded half up): the app shows it as is.
+             */
+            amount_cents: number;
+        };
+        /**
+         * TipStatus
+         * @description Where a tip stands. `declined` is the choice "No tip" (no PaymentIntent); the others
+         *     follow the current attempt's PaymentIntent, moved by its payment_intent.* events.
+         * @enum {string}
+         */
+        TipStatus: "declined" | "requires_payment" | "processing" | "succeeded" | "failed" | "canceled";
+        /**
          * TransferOut
          * @description A job's transfer to its pro as staff see it (#68): the row, without the idempotency
          *     key.
@@ -7191,7 +7559,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserOut"];
                 };
             };
-            /** @description invalid_token: missing, invalid or expired access token. */
+            /** @description invalid_token: missing, invalid or expired access token, or its session ended (logout, password reset). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -7233,7 +7601,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserOut"];
                 };
             };
-            /** @description invalid_token: missing, invalid or expired access token. */
+            /** @description invalid_token: missing, invalid or expired access token, or its session ended (logout, password reset). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -13163,6 +13531,89 @@ export interface operations {
             };
         };
     };
+    pro_cancel_job_v1_pros_me_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description A UUID the app makes once per cancel and sends again with every retry of it. A retry answers 200 with the cancellation as it is now and writes nothing; the same key with another body, or on another job, answers 409 idempotency_key_reused. With or without it, a job is cancelled once. */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProCancelIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProCancellationOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros cancel here (a customer's cancel is separate). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description cancel_not_allowed: the work started, or the job is done, confirmed, paid out, disputed or refunded (the message names its status); cancel_needs_review: the job's payment needs a look by staff first; idempotency_key_reused: the caller already used this Idempotency-Key with a different body or on another job. Nothing was changed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an unknown or a customer's reason_code; a note longer than 500 characters, holding a NUL, or empty once invisible characters are dropped; an unknown field; a job_id or an Idempotency-Key that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many cancels by this pro in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     read_reported_problem_v1_pros_me_jobs__job_id__dispute_get: {
         parameters: {
             query?: never;
@@ -13652,6 +14103,244 @@ export interface operations {
             };
             /** @description The request is invalid. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    choose_tip_v1_requests__request_id__job_tip_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description A UUID the app makes once per choice and sends again with every retry of it. A retry never changes the choice: while the attempt it settled is still the one to pay it finishes that attempt (the same PaymentIntent, its Payment Sheet), else it answers 200 with the tip as it is now. The same key with another body, or on another job, answers 409 idempotency_key_reused. */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoTipIn"] | components["schemas"]["PercentTipIn"] | components["schemas"]["CustomTipIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TipCreateOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers tip. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id, or no job on it. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description tip_not_available: the job was never confirmed (under way, disputed, refunded, cancelled) or its tip window closed; tip_already_paid: the tip succeeded; tip_in_progress: its payment is processing, or another change of the tip is under way; tip_needs_review: support has to look at the tip first; idempotency_key_reused: the key went with another body or job. Nothing changed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description tip_percent_not_offered: the percent is not one of the job's presets; tip_amount_out_of_range: the amount, or what the percent comes to, is outside the job's bounds; validation_error: a malformed id or body. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: more than TIP_CHOICE_LIMIT choices in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description payments_error: Stripe refused the call; nothing changed, try again. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_configured: payments are not configured; payments_unavailable: Stripe is not reachable or asked to retry later; nothing changed, retry later. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_public_pro_v1_pros__pro_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pro_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProProfilePublicOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no approved pro with an active account has this id (none, pending, rejected, suspended or no longer a pro: the same answer). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a pro_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many profile reads by this user in the window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_public_pro_reviews_v1_pros__pro_id__reviews_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number | null;
+            };
+            header?: never;
+            path: {
+                pro_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicReviewPage"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no approved pro with an active account has this id (none, pending, rejected, suspended or no longer a pro: the same answer). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a pro_id that is not a UUID, a cursor this API did not write, or a limit out of range. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many profile reads by this user in the window. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

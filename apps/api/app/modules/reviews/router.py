@@ -3,17 +3,26 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_app_settings
 from app.db import get_session
 from app.errors import ErrorResponse
 from app.middleware import NoStoreRoute
-from app.modules.auth.permissions import AppUser
+from app.modules.auth.permissions import AppUser, require_roles
 from app.modules.reviews.models import COMMENT_MAX_LENGTH
-from app.modules.reviews.schemas import MyReviewOut, RatingOut, ReviewCreatedOut, ReviewIn
+from app.modules.reviews.public import PageLimits, PublicPros
+from app.modules.reviews.schemas import (
+    MyReviewOut,
+    ProProfilePublicOut,
+    PublicReviewPage,
+    RatingOut,
+    ReviewCreatedOut,
+    ReviewIn,
+)
 from app.modules.reviews.service import ReviewConfig, ReviewService, utc_now
+from app.modules.users.types import UserAccount, UserRole
 from app.rate_limit import RateLimiter, enforce_limit, get_rate_limiter
 
 # The job's customer and pro review each other once it is confirmed (#77).
@@ -21,6 +30,10 @@ from app.rate_limit import RateLimiter, enforce_limit, get_rate_limiter
 router = APIRouter(prefix="/jobs/{job_id}/reviews", tags=["reviews"], route_class=NoStoreRoute)
 # The caller's own rating, as a customer or as a pro (#77, #252).
 rating_router = APIRouter(prefix="/users/me/rating", tags=["reviews"], route_class=NoStoreRoute)
+# A pro's public profile and reviews, for any signed-in user (#78). No HTTP cache keeps them
+# (the project's one convention for answers about a person), errors too. Included after the
+# pros router, so /v1/pros/me stays theirs.
+public_pro_router = APIRouter(prefix="/pros/{pro_id}", tags=["reviews"], route_class=NoStoreRoute)
 
 
 def _error(description: str) -> dict[str, Any]:
@@ -42,6 +55,40 @@ def get_review_service(
 
 
 Reviews = Annotated[ReviewService, Depends(get_review_service)]
+
+
+def get_public_pros(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    clock: Annotated[Callable[[], datetime], Depends(get_review_clock)],
+) -> PublicPros:
+    limits = PageLimits(settings.request_list_default_limit, settings.request_list_max_limit)
+    return PublicPros(session, ReviewConfig.from_settings(settings), limits, clock)
+
+
+Pros = Annotated[PublicPros, Depends(get_public_pros)]
+# Any signed-in user, staff included (Foreman 2026-11-20): never an anonymous one.
+SignedIn = Annotated[
+    UserAccount,
+    Depends(require_roles(UserRole.CUSTOMER, UserRole.PRO, UserRole.AGENT, UserRole.ADMIN)),
+]
+
+
+async def limit_public_pro_reads(
+    user: SignedIn,
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> None:
+    """PRO_PUBLIC_READ_LIMIT reads of public profiles and their reviews per user per
+    PRO_PUBLIC_READ_WINDOW_SECONDS, both routes together: no scraping the pros one by one."""
+    await enforce_limit(
+        limiter,
+        "pro_public_read",
+        str(user.id),
+        limit=settings.pro_public_read_limit,
+        window_seconds=settings.pro_public_read_window_seconds,
+        timeout_seconds=settings.rate_limit_timeout_seconds,
+    )
 
 
 async def limit_review_creates(
@@ -151,3 +198,65 @@ async def read_my_rating(user: AppUser, reviews: Reviews) -> RatingOut:
     comes first: until then it is not in the average or the count, so nobody reads the other
     side's score of a job before writing their own."""
     return await reviews.rating(user)
+
+
+_PRO_NOT_FOUND = _error(
+    "not_found: no approved pro with an active account has this id (none, pending, rejected, "
+    "suspended or no longer a pro: the same answer)."
+)
+
+
+@public_pro_router.get(
+    "",
+    response_model=ProProfilePublicOut,
+    summary="Read a pro's public profile",
+    dependencies=[Depends(limit_public_pro_reads)],
+    responses={
+        **_ACCESS,
+        status.HTTP_404_NOT_FOUND: _PRO_NOT_FOUND,
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
+            "validation_error: a pro_id that is not a UUID."
+        ),
+        status.HTTP_429_TOO_MANY_REQUESTS: _error(
+            "rate_limited: too many profile reads by this user in the window."
+        ),
+    },
+)
+async def read_public_pro(pro_id: uuid.UUID, user: SignedIn, pros: Pros) -> ProProfilePublicOut:
+    """An approved pro's public profile: their first name and last initial, the verified flag,
+    the average of their published reviews to one decimal (null with none) and how many, the
+    jobs they completed, their years of experience, their bio with contact details masked,
+    their categories and the month they joined. No photo, contact, address or document."""
+    return await pros.profile(pro_id)
+
+
+@public_pro_router.get(
+    "/reviews",
+    response_model=PublicReviewPage,
+    summary="Read a pro's published reviews",
+    dependencies=[Depends(limit_public_pro_reads)],
+    responses={
+        **_ACCESS,
+        status.HTTP_404_NOT_FOUND: _PRO_NOT_FOUND,
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
+            "validation_error: a pro_id that is not a UUID, a cursor this API did not write, or "
+            "a limit out of range."
+        ),
+        status.HTTP_429_TOO_MANY_REQUESTS: _error(
+            "rate_limited: too many profile reads by this user in the window."
+        ),
+    },
+)
+async def read_public_pro_reviews(
+    pro_id: uuid.UUID,
+    user: SignedIn,
+    pros: Pros,
+    cursor: Annotated[str | None, Query(max_length=200)] = None,
+    limit: Annotated[int | None, Query(ge=1, le=100)] = None,
+) -> PublicReviewPage:
+    """An approved pro's published reviews, newest first: each one's overall rating, its
+    comment (contact details masked when written), the reviewer's first name and last initial
+    and the day. A review counts once the pro reviewed the job too, or 14 days
+    (REVIEW_PUBLISH_AFTER_DAYS) after the job's confirmation. Up to REQUEST_LIST_MAX_LIMIT per
+    page."""
+    return await pros.reviews(pro_id, cursor=cursor, limit=limit)

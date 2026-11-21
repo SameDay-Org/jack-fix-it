@@ -38,6 +38,7 @@ from app.modules.payments.transfer_tasks import (
 )
 from app.modules.quotes.tasks import expire_quotes
 from app.modules.requests.tasks import sanitize_task
+from app.modules.tips.tasks import cancel_unpaid_tips
 from app.modules.uploads.tasks import sweep_orphan_uploads
 from app.modules.webhooks.tasks import process_stripe_event
 from app.observability import configure_logging, init_sentry
@@ -183,6 +184,14 @@ class WorkerSettings:
         ),
         cron(
             cancel_unpaid_payments,
+            minute=every(get_settings().payment_unpaid_sweep_minutes),
+            timeout=get_settings().payment_unpaid_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        # Tips left unpaid (#273), on the unpaid payments' window, cadence and timeout.
+        cron(
+            cancel_unpaid_tips,
             minute=every(get_settings().payment_unpaid_sweep_minutes),
             timeout=get_settings().payment_unpaid_sweep_timeout_seconds,
             keep_result=0,
