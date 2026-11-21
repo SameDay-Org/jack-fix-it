@@ -3,7 +3,7 @@
 import logging
 import re
 from functools import lru_cache
-from typing import Annotated, Literal, Self
+from typing import Annotated, Final, Literal, Self
 from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, ValidationInfo, field_validator, model_validator
@@ -152,6 +152,14 @@ def check_public_api_url(value: str) -> str:
     return value.rstrip("/")
 
 
+# The most tool runs one file's safe copy makes (#182): an HEVC video's ffprobe of the original,
+# its ffmpeg remux, then ffprobe of the copy, of its decoder configuration and of its hidden
+# frames. With the download and the upload, each bounded by MEDIA_SANITIZE_TIMEOUT_SECONDS, they
+# are one file's timed steps. tests/test_media_sanitize.py counts the runs, so these cannot drift.
+MEDIA_SANITIZE_TOOL_RUNS: Final = 5
+MEDIA_SANITIZE_TIMED_STEPS: Final = MEDIA_SANITIZE_TOOL_RUNS + 2
+
+
 class Settings(BaseSettings):
     # hide_input_in_errors: a validation error must not print env values such as secrets.
     model_config = SettingsConfigDict(
@@ -282,7 +290,8 @@ class Settings(BaseSettings):
     ffmpeg_path: str = Field(default="ffmpeg", min_length=1)
     ffprobe_path: str = Field(default="ffprobe", min_length=1)
     # The only video and audio codecs a safe copy may carry (CSV of ffmpeg codec names): a remux
-    # copies the streams as they are, and an image codec (MJPEG, PNG) keeps its EXIF.
+    # copies the streams as they are, and an image codec (MJPEG, PNG) keeps its EXIF. A video
+    # codec also needs a SEI filter in app/modules/media/sanitize.py (h264, hevc), #182.
     media_video_codecs: Annotated[list[str], NoDecode] = Field(default=["h264", "hevc"])
     media_audio_codecs: Annotated[list[str], NoDecode] = Field(default=["aac", "mp3", "opus"])
     # The longest one sanitize job may run (every media of one request), past which ARQ stops it
@@ -798,9 +807,13 @@ class Settings(BaseSettings):
 
     @property
     def media_sanitize_row_budget_seconds(self) -> float:
-        """The longest one file's copy may take: its download, three ffprobe runs, one ffmpeg
-        run and its upload, each within MEDIA_SANITIZE_TIMEOUT_SECONDS, then its write."""
-        return 6 * self.media_sanitize_timeout_seconds + self.media_sanitize_overhead_seconds
+        """The longest one file's copy may take: its download, MEDIA_SANITIZE_TOOL_RUNS tool
+        runs (an HEVC video's, the most) and its upload, each within
+        MEDIA_SANITIZE_TIMEOUT_SECONDS, then its write."""
+        return (
+            MEDIA_SANITIZE_TIMED_STEPS * self.media_sanitize_timeout_seconds
+            + self.media_sanitize_overhead_seconds
+        )
 
     @property
     def media_sanitize_min_job_seconds(self) -> float:
@@ -826,8 +839,8 @@ class Settings(BaseSettings):
         if self.media_sanitize_job_timeout_seconds < self.media_sanitize_min_job_seconds:
             raise ValueError(
                 "MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS must cover one file: at least "
-                "6 x MEDIA_SANITIZE_TIMEOUT_SECONDS + 2 x MEDIA_SANITIZE_OVERHEAD_SECONDS "
-                "+ MEDIA_SANITIZE_SETTLE_SECONDS"
+                f"{MEDIA_SANITIZE_TIMED_STEPS} x MEDIA_SANITIZE_TIMEOUT_SECONDS + 2 x "
+                "MEDIA_SANITIZE_OVERHEAD_SECONDS + MEDIA_SANITIZE_SETTLE_SECONDS"
             )
         return self
 
