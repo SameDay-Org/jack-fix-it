@@ -1363,6 +1363,7 @@
       "done": "Job confirmed",
       "attention": "This job needs attention",
       "cancelled": "This job was cancelled",
+      "cancelledByPro": "{{name}} cancelled this job",
       "refunded": "Your report was resolved",
       "finished": "{{name}} marked the job done",
       "thanks": "Thanks! Job confirmed"
@@ -1377,6 +1378,7 @@
       "done": "This job is complete.",
       "attention": "A problem was reported on this job.",
       "cancelled": "Nothing more is needed from you.",
+      "cancelledByPro": "This costs you nothing. You can start a new request to find another pro.",
       "refunded": "Your payment for this job went back to your payment method."
     },
     "eta": {
@@ -2051,7 +2053,27 @@
         "title": "That didn't go through",
         "body": "Something went wrong on our side. Try again in a moment."
       }
-    }
+    },
+    "pro": {
+      "intro": "Tell us why. We'll let {{name}} know.",
+      "reason": {
+        "cannot_make_it": "I can't make it",
+        "customer_unreachable": "The customer isn't answering",
+        "scope_changed": "The job is different from what was asked",
+        "other": "Something else"
+      },
+      "costTitle": "What happens",
+      "cost": "Cancelling costs {{name}} nothing: their whole payment goes back to their payment method. You won't be paid for this job.",
+      "byYou": {
+        "title": "You cancelled this job",
+        "body": "We told {{name}}. They won't be charged for it."
+      },
+      "byCustomer": {
+        "title": "This job was cancelled",
+        "body": "It was cancelled by {{name}}. Nothing more is needed from you."
+      }
+    },
+    "newRequest": "New request"
   },
   "disputes": {
     "entry": "Report a problem",
