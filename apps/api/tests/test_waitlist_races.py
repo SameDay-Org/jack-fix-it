@@ -192,6 +192,7 @@ async def signed_in_user(world: World) -> tuple[uuid.UUID, dict[str, str]]:
     access = security.create_access_token(
         user_id=user.id,
         role=user.role,
+        session_id=None,
         secret=TEST_JWT_SECRET,
         ttl_seconds=900,
         now=datetime.now(UTC),

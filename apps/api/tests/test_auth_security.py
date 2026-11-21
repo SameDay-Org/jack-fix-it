@@ -20,6 +20,7 @@ def make_token(*, now: datetime | None = None, secret: str = TEST_JWT_SECRET) ->
     return security.create_access_token(
         user_id=uuid.uuid4(),
         role=UserRole.CUSTOMER,
+        session_id=None,
         secret=secret,
         ttl_seconds=TTL_SECONDS,
         now=now or datetime.now(UTC),
@@ -56,6 +57,7 @@ def test_access_token_roundtrip_claims() -> None:
     token = security.create_access_token(
         user_id=user_id,
         role=UserRole.PRO,
+        session_id=None,
         secret=TEST_JWT_SECRET,
         ttl_seconds=TTL_SECONDS,
         now=datetime.now(UTC),
@@ -73,6 +75,43 @@ def test_access_token_roundtrip_claims() -> None:
     assert raw["exp"] - raw["iat"] == TTL_SECONDS
     assert raw["jti"]
     assert jwt.get_unverified_header(token)["alg"] == "HS256"
+    # Minted without a session: the shape of a token issued before #161.
+    assert "sid" not in raw
+    assert claims.session_id is None
+
+
+def test_access_token_carries_its_session() -> None:
+    session_id = uuid.uuid4()
+    token = security.create_access_token(
+        user_id=uuid.uuid4(),
+        role=UserRole.CUSTOMER,
+        session_id=session_id,
+        secret=TEST_JWT_SECRET,
+        ttl_seconds=TTL_SECONDS,
+        now=datetime.now(UTC),
+    )
+
+    assert jwt.decode(token, TEST_JWT_SECRET, algorithms=["HS256"])["sid"] == str(session_id)
+    assert security.decode_access_token(token, secret=TEST_JWT_SECRET).session_id == session_id
+
+
+@pytest.mark.parametrize("sid", [None, "", "not-a-uuid", 12345, ["a"], {"id": "x"}])
+def test_a_sid_that_is_not_a_uuid_string_is_a_malformed_token(sid: object) -> None:
+    # Present but unreadable is never "no session": that would skip the session check (#161).
+    now = int(datetime.now(UTC).timestamp())
+    claims = {
+        "sub": str(uuid.uuid4()),
+        "role": "customer",
+        "iat": now,
+        "exp": now + TTL_SECONDS,
+        "jti": uuid.uuid4().hex,
+        "typ": "access",
+        "sid": sid,
+    }
+    token = jwt.encode(claims, TEST_JWT_SECRET, algorithm="HS256")
+
+    with pytest.raises(security.InvalidAccessTokenError):
+        security.decode_access_token(token, secret=TEST_JWT_SECRET)
 
 
 def test_access_tokens_have_unique_jti() -> None:

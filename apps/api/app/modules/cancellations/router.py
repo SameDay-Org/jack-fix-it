@@ -8,9 +8,15 @@ from app.config import Settings, get_app_settings
 from app.db import get_session
 from app.errors import ErrorResponse
 from app.middleware import NoStoreRoute
-from app.modules.auth.permissions import CustomerUser
+from app.modules.auth.permissions import CustomerUser, ProUser
 from app.modules.cancellations.models import NOTE_MAX_LENGTH
-from app.modules.cancellations.schemas import CancellationOut, CancelPreviewOut, CustomerCancelIn
+from app.modules.cancellations.schemas import (
+    CancellationOut,
+    CancelPreviewOut,
+    CustomerCancelIn,
+    ProCancelIn,
+    ProCancellationOut,
+)
 from app.modules.cancellations.service import CancelConfig, CancellationService
 from app.modules.jobs.location import JobLocationStore, get_job_location_store
 from app.queue import JobQueue, get_job_queue
@@ -20,6 +26,10 @@ from app.rate_limit import RateLimiter, enforce_limit, get_rate_limiter
 # no HTTP cache keeps any answer, errors too.
 customer_router = APIRouter(
     prefix="/jobs/{job_id}", tags=["cancellations"], route_class=NoStoreRoute
+)
+# The pro cancels their job (#69): the customer gets everything back. Never cached either.
+pro_router = APIRouter(
+    prefix="/pros/me/jobs/{job_id}", tags=["cancellations"], route_class=NoStoreRoute
 )
 
 
@@ -59,6 +69,23 @@ async def limit_cancels(
     """CANCEL_WRITE_LIMIT cancels per customer per CANCEL_WRITE_WINDOW_SECONDS, whatever
     the job and the answer: a retry with the same Idempotency-Key counts too (it reads
     and locks like the first)."""
+    await enforce_limit(
+        limiter,
+        "cancel_write",
+        str(user.id),
+        limit=settings.cancel_write_limit,
+        window_seconds=settings.cancel_write_window_seconds,
+        timeout_seconds=settings.rate_limit_timeout_seconds,
+    )
+
+
+async def limit_pro_cancels(
+    user: ProUser,
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> None:
+    """CANCEL_WRITE_LIMIT cancels per pro per CANCEL_WRITE_WINDOW_SECONDS, as for customers:
+    the same window, counted per user."""
     await enforce_limit(
         limiter,
         "cancel_write",
@@ -160,4 +187,48 @@ async def cancel_job(
     cancellation, _ = await cancellations.cancel_as_customer(
         user, job_id, data, queue, idempotency_key
     )
+    return cancellation
+
+
+@pro_router.post(
+    "/cancel",
+    response_model=ProCancellationOut,
+    summary="Cancel a job I can no longer do (pro)",
+    dependencies=[Depends(limit_pro_cancels)],
+    responses={
+        401: _UNAUTHORIZED,
+        403: _error("forbidden: only pros cancel here (a customer's cancel is separate)."),
+        404: _error("not_found: no job with this id of which the caller is the pro."),
+        409: _error(
+            "cancel_not_allowed: the work started, or the job is done, confirmed, paid out, "
+            "disputed or refunded (the message names its status); cancel_needs_review: the "
+            "job's payment needs a look by staff first; idempotency_key_reused: the caller "
+            "already used this Idempotency-Key with a different body or on another job. "
+            "Nothing was changed."
+        ),
+        422: _error(
+            "validation_error: an unknown or a customer's reason_code; a note longer than "
+            f"{NOTE_MAX_LENGTH} characters, holding a NUL, or empty once invisible characters "
+            "are dropped; an unknown field; a job_id or an Idempotency-Key that is not a UUID."
+        ),
+        429: _error(
+            "rate_limited: too many cancels by this pro in the window; Retry-After says when to "
+            "try again."
+        ),
+    },
+)
+async def pro_cancel_job(
+    job_id: uuid.UUID,
+    data: ProCancelIn,
+    user: ProUser,
+    cancellations: Cancellations,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+    idempotency_key: IdempotencyKey = None,
+) -> ProCancellationOut:
+    """The pro cancels their scheduled or on-the-way job. The customer is never charged: their
+    whole payment, tax included, goes back to the original payment method through Stripe. The
+    job and its request are cancelled (the request is not reopened: the customer starts a new
+    one), and the customer is notified. A job is cancelled once: sending again, or after the
+    customer cancelled, returns that cancellation (200)."""
+    cancellation, _ = await cancellations.cancel_as_pro(user, job_id, data, queue, idempotency_key)
     return cancellation
