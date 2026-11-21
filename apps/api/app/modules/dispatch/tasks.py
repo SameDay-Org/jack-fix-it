@@ -27,6 +27,7 @@ from app.modules.dispatch.stalled import (
     sweep_batch,
 )
 from app.modules.notifications.events import push_new_request
+from app.modules.reviews.service import ReviewConfig
 from app.queue import JobQueue
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,8 @@ async def dispatch_request(ctx: dict[str, Any], request_id: str) -> str:
     run dispatch again (#82). Once committed, each dispatched pro gets a new request push
     (#55); a push that cannot be queued is logged, never undone."""
     async with ctx["session_factory"]() as session:
-        result = await DispatchService(session).dispatch(uuid.UUID(request_id))
+        publish_after = ReviewConfig.from_settings(ctx["settings"]).publish_after
+        result = await DispatchService(session, publish_after).dispatch(uuid.UUID(request_id))
         await session.commit()
     if result.new:
         settings: Settings = ctx["settings"]

@@ -24,7 +24,7 @@ from app.modules.requests.models import RequestOrigin, RequestStatus, ServiceReq
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
 from tests.conftest import LOCK_WAIT_DEADLINE_SECONDS, backend_pid, wait_until_blocked
-from tests.helpers import as_status_writer
+from tests.helpers import REVIEW_PUBLISH_AFTER, as_status_writer
 from tests.test_quotes_api import quotes_of, status_of
 from tests.test_requests_api import ENQUEUE_TIMEOUT, RecordingQueue
 
@@ -142,12 +142,12 @@ async def accept_at_once(
         try:
             async with asyncio.timeout(2 * LOCK_WAIT_DEADLINE_SECONDS):
                 return await asyncio.gather(
-                    QuoteService(one, RecordingQueue(), ENQUEUE_TIMEOUT).accept(
-                        committed.customer, committed.request_id, first_quote
-                    ),
-                    QuoteService(two, RecordingQueue(), ENQUEUE_TIMEOUT).accept(
-                        committed.customer, committed.request_id, second
-                    ),
+                    QuoteService(
+                        one, RecordingQueue(), ENQUEUE_TIMEOUT, REVIEW_PUBLISH_AFTER
+                    ).accept(committed.customer, committed.request_id, first_quote),
+                    QuoteService(
+                        two, RecordingQueue(), ENQUEUE_TIMEOUT, REVIEW_PUBLISH_AFTER
+                    ).accept(committed.customer, committed.request_id, second),
                     return_exceptions=True,
                 )
         except TimeoutError:

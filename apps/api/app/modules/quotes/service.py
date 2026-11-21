@@ -66,7 +66,6 @@ import uuid
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from typing import Final
 
 from sqlalchemy import Subquery
@@ -99,6 +98,7 @@ from app.modules.quotes.schemas import (
 )
 from app.modules.requests.service import CustomerRequestReader
 from app.modules.requests.state_machine import RequestStateMachine, RequestStatus
+from app.modules.reviews.ratings import ProRatings
 from app.modules.settings.errors import SettingMalformedError, SettingNotConfiguredError
 from app.modules.settings.service import QUOTE_TTL_HOURS, SettingsService
 from app.modules.users.service import UserService
@@ -116,13 +116,19 @@ _QUOTE_SCREEN: Final = frozenset({RequestStatus.QUOTE_READY, RequestStatus.ACCEP
 
 class QuoteService:
     def __init__(
-        self, session: AsyncSession, queue: JobQueue, enqueue_timeout_seconds: float
+        self,
+        session: AsyncSession,
+        queue: JobQueue,
+        enqueue_timeout_seconds: float,
+        review_publish_after: timedelta,
     ) -> None:
+        """`review_publish_after`: REVIEW_PUBLISH_AFTER_DAYS, for the pros' ratings (#78)."""
         self._session = session
         self._queue = queue
         self._enqueue_timeout = enqueue_timeout_seconds
         self._quotes = QuoteRepository(session)
-        self._dispatches = DispatchService(session)
+        self._dispatches = DispatchService(session, review_publish_after)
+        self._ratings = ProRatings(session, review_publish_after)
         self._requests = RequestStateMachine(session)
         self._settings = SettingsService(session)
         self._pros = ProService(session)
@@ -226,13 +232,15 @@ class QuoteService:
         details = await self._pros.details_of(card) if card else None
         if card is None or details is None:
             raise NotFoundError
+        rating = (await self._ratings.of({card.pro_id: card.user_id}))[card.pro_id]
         # The pro's own details, for the known-value pass only: never logged or returned.
         contact = (await self._users.contact_points({card.user_id})).get(card.user_id)
         return ProPublicProfile(
             id=card.pro_id,
             name=card.name,
-            rating_avg=_rating(card.rating_avg),
-            jobs_count=card.jobs_count,
+            rating_avg=rating.text,
+            rating_count=rating.count,
+            jobs_count=rating.jobs_completed,
             years_of_experience=card.years_of_experience,
             verified=card.verified,
             bio=None if details.bio is None else redact_text(details.bio, _known(contact)).text,
@@ -313,9 +321,11 @@ class QuoteService:
         self, quotes: list[Quote], cards: Mapping[uuid.UUID, ProCard]
     ) -> list[CustomerQuote]:
         """The quotes as their customer sees them, in the given order, leaving out those whose
-        pro has no card in `cards`. One query for the pros' contact points."""
+        pro has no card in `cards`. One query for the pros' contact points, two for their
+        ratings (reviews.ratings)."""
         # The pros' own details, for the known-value pass only: never logged or returned.
         contacts = await self._users.contact_points({card.user_id for card in cards.values()})
+        ratings = await self._ratings.of({card.pro_id: card.user_id for card in cards.values()})
         items: list[CustomerQuote] = []
         for quote in quotes:
             card = cards.get(quote.pro_id)
@@ -338,8 +348,9 @@ class QuoteService:
                     pro=QuotePro(
                         id=card.pro_id,
                         name=card.name,
-                        rating_avg=_rating(card.rating_avg),
-                        jobs_count=card.jobs_count,
+                        rating_avg=ratings[card.pro_id].text,
+                        rating_count=ratings[card.pro_id].count,
+                        jobs_count=ratings[card.pro_id].jobs_completed,
                         years_of_experience=card.years_of_experience,
                         verified=card.verified,
                     ),
@@ -393,11 +404,6 @@ def _known(contact: ContactPoints | None) -> KnownValues:
         emails=(contact.email,) if contact else (),
         phones=(contact.phone,) if contact and contact.phone else (),
     )
-
-
-def _rating(value: Decimal | None) -> str | None:
-    """The average rating as a decimal string, never the raw Decimal."""
-    return None if value is None else format(value, ".2f")
 
 
 @dataclass(frozen=True)
