@@ -468,6 +468,25 @@ async def test_the_demo_api_s_stand_in_verifier_takes_its_code_only() -> None:
     assert "246810" not in repr(verifier)
 
 
+def test_the_demo_api_refuses_before_it_builds_the_app(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#572 r1: main() runs the seed's guard first. On a database that is not a local jackdemo
+    it raises DemoGuardError, and the app (with its fixed SMS code) is never built or served."""
+    refused = make_settings(database_url="postgresql://jack:jack@db.example.com:5432/jack")
+    built: list[object] = []
+
+    def build(*args: object, **kwargs: object) -> object:
+        built.append(args)
+        raise AssertionError("the app was built before the guard refused")
+
+    monkeypatch.setattr(demo_api, "get_settings", lambda: refused)
+    monkeypatch.setattr(demo_api, "create_app", build)
+
+    with pytest.raises(guard.DemoGuardError):
+        demo_api.main()
+
+    assert built == []
+
+
 def test_the_demo_api_runs_only_where_the_seed_may() -> None:
     """The guard the seed runs refuses the demo API a database that is not a local jackdemo."""
     settings = make_settings(database_url="postgresql://jack:jack@db.example.com:5432/jack")
