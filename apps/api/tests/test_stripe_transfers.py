@@ -260,3 +260,17 @@ async def test_a_refused_release_reaches_sentry_without_ids_or_amounts(
         assert leak not in wire, leak
         assert leak not in rendered, leak
     assert uuid.UUID(events[0]["extra"]["transfer_id"])
+
+
+async def test_a_tips_transfer_reads_its_kind_and_tip_id() -> None:
+    """#273 PR A2: a tip's transfer names its tip, never a job."""
+    wrapper, _ = client(
+        (200, transfer_body(metadata={"kind": "tip", "tip_id": "tip-1"})),
+        (200, transfer_body()),
+    )
+
+    tip = await wrapper.retrieve_transfer(TRANSFER)
+    job = await wrapper.retrieve_transfer(TRANSFER)
+
+    assert (tip.kind, tip.tip_id, tip.job_id) == ("tip", "tip-1", None)
+    assert (job.kind, job.tip_id, job.job_id) == (None, None, JOB_ID)

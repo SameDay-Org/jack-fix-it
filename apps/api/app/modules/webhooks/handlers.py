@@ -9,7 +9,9 @@ refund (refund.updated, refund.failed, charge.refund.updated: #433 round 1).
 
 A payment_intent.* event goes to the job payment's handler, or to a tip's (#273) when its
 PaymentIntent's metadata kind is "tip": one handler per event, chosen by the event itself, so a
-tip never touches a payment and a payment never touches a tip.
+tip never touches a payment and a payment never touches a tip. transfer.reversed goes the same
+way by its Transfer's metadata kind (#273 PR A2): a tip's transfer to the tips module, any other
+to the job transfer's handler. The kind routes; only the exact Stripe id selects a row.
 
 CONNECT_EVENT_TYPES are the ones the Connect endpoint (POST /v1/webhooks/stripe/connect, its own
 secret) takes: events of the pros' connected accounts. Any other type arriving there is stored
@@ -27,9 +29,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.integrations.stripe_payments import TIP_INTENT_KIND
 from app.modules.disputes.refund_webhooks import REFUND_HANDLERS
-from app.modules.payments.transfer_webhooks import TRANSFER_HANDLERS
+from app.modules.payments.transfer_webhooks import TRANSFER_HANDLERS, transfer_kind
 from app.modules.payments.webhook_handlers import PAYMENT_INTENT_HANDLERS, intent_kind
 from app.modules.payouts.webhook_handlers import ACCOUNT_HANDLERS
+from app.modules.tips.transfer_webhooks import TIP_TRANSFER_REVERSED
 from app.modules.tips.webhooks import TIP_INTENT_HANDLERS
 from app.modules.webhooks.events import AfterCommit, StripeEvent, StripeEventHandler
 
@@ -58,9 +61,23 @@ def _intent_handlers(
     }
 
 
+def _by_transfer_kind(job: StripeEventHandler, tip: StripeEventHandler) -> StripeEventHandler:
+    async def handle(session: AsyncSession, event: StripeEvent, after_commit: AfterCommit) -> None:
+        if transfer_kind(event) == TIP_INTENT_KIND:
+            await tip(session, event, after_commit)
+        else:
+            await job(session, event, after_commit)
+
+    handle.__name__ = job.__name__
+    return handle
+
+
 HANDLERS: dict[str, StripeEventHandler] = {
     **_intent_handlers(PAYMENT_INTENT_HANDLERS, TIP_INTENT_HANDLERS),
     **TRANSFER_HANDLERS,
+    "transfer.reversed": _by_transfer_kind(
+        TRANSFER_HANDLERS["transfer.reversed"], TIP_TRANSFER_REVERSED
+    ),
     **REFUND_HANDLERS,
     **ACCOUNT_HANDLERS,
 }

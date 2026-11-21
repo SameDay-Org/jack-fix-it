@@ -1,7 +1,7 @@
 """launch_interest
 
 Revision ID: 2f18303b6287
-Revises: 65e7971f089a
+Revises: 2aef1127c9ee
 Create Date: 2026-11-20 05:58:52.790066
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "2f18303b6287"
-down_revision: str | Sequence[str] | None = "65e7971f089a"
+down_revision: str | Sequence[str] | None = "2aef1127c9ee"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
