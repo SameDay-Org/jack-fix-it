@@ -371,4 +371,46 @@ describe("the request's answers (#546)", () => {
     expect(pairs).toContainEqual(["urgent", "true"]);
     expect(pairs).toContainEqual(["rooms", "kitchen, attic"]);
   });
+
+  it("are in the request's own category's words, never another's with the same key", async () => {
+    // As in the demo seed: several categories ask "jobs", each with its own words and options.
+    const jobs = (en: string, options: [string, string][]) => [
+      {
+        key: "jobs",
+        type: "multi_choice",
+        required: true,
+        labels: { en, es: en },
+        min_selected: 1,
+        options: options.map(([value, label]) => ({ value, labels: { en: label, es: label } })),
+      },
+    ];
+    const OWN_ID = "c0a7e901-1111-4222-8333-944455556699";
+    const own = { id: OWN_ID, slug: "handyman-own", names: { en: "Handyman", es: "Manitas" } };
+    const categories = [
+      {
+        ...CATEGORIES[0],
+        intake_questions: jobs("Which painting jobs?", [["mounting", "Murals"]]),
+      },
+      {
+        id: "c0a7e901-1111-4222-8333-944455556698",
+        slug: "lawn",
+        names: { en: "Lawn", es: "Césped" },
+        intake_questions: jobs("Which yard jobs?", [["mounting", "Mowing"]]),
+      },
+      { ...own, intake_questions: jobs("Which handyman jobs?", [["mounting", "TV mounting"]]) },
+    ];
+    api(
+      card({ status: "quote_ready", category: own, intake_answers: { jobs: ["mounting"] } }),
+      "agent",
+      "en",
+      categories,
+    );
+
+    const pairs = facts(decoded(await markup()));
+
+    // The catalog's third category, the request's own: not the first, nor another asking "jobs".
+    expect(pairs).toContainEqual(["Which handyman jobs?", "TV mounting"]);
+    expect(pairs.map(([term]) => term)).not.toContain("Which painting jobs?");
+    expect(pairs.map(([term]) => term)).not.toContain("Which yard jobs?");
+  });
 });
