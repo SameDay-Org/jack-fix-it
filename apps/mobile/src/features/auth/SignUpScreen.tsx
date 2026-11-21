@@ -174,6 +174,17 @@ function SignUpFlow({ role, firstStep }: { role: SignUpRole; firstStep: SignUpSt
     useCallback(() => advanceFrom("home"), [advanceFrom]),
   );
   const photo = usePhotoStep(useCallback(() => advanceFrom("photo"), [advanceFrom]));
+  // A photo in the frame pushes "Use photo" under the fold on a phone (#502): once it is there,
+  // the page scrolls to its end. That moves the back row and the progress out of view and keeps
+  // the card, where the photo lands, on screen.
+  const shownPhoto = step === "photo" ? photo.photoUri : undefined;
+  useEffect(() => {
+    if (shownPhoto === undefined) return;
+    const frame = requestAnimationFrame(() =>
+      scrollRef.current?.scrollToEnd({ animated: !reduceMotion }),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [shownPhoto, reduceMotion, scrollRef]);
   // The camera runs only while this screen is in front: a route pushed over sign-up releases it.
   const focused = useIsFocused();
   const phone = usePhoneStep(
