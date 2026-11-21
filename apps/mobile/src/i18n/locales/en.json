@@ -615,6 +615,8 @@
     "expired": "Expired",
     "accepted": "Accepted",
     "acceptedNote": "Quote accepted. Payment comes next.",
+    "acceptedPaid": "Quote accepted and paid.",
+    "acceptedOnly": "Quote accepted.",
     "proFallback": "Jack pro",
     "verified": "Verified by Jack Fix It",
     "nameVerified": "{{name}}, verified",

@@ -615,6 +615,8 @@
     "expired": "Vencido",
     "accepted": "Aceptado",
     "acceptedNote": "Presupuesto aceptado. Lo siguiente es el pago.",
+    "acceptedPaid": "Presupuesto aceptado y pagado.",
+    "acceptedOnly": "Presupuesto aceptado.",
     "proFallback": "Profesional de Jack",
     "verified": "Verificado por Jack Fix It",
     "nameVerified": "{{name}}, verificado",
