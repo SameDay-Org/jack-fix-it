@@ -29,7 +29,7 @@ from app.modules.users.types import UserAccount, UserRole
 from app.observability import JsonFormatter
 from app.queue import get_job_queue
 from tests.conftest import make_settings
-from tests.helpers import mentions_number
+from tests.helpers import REVIEW_PUBLISH_AFTER, mentions_number
 from tests.test_dispatch import record_commits
 from tests.test_opportunities_api import (
     NOT_FOUND,
@@ -571,9 +571,9 @@ async def test_all_writes_roll_back_together(
     savepoint = await db_session.begin_nested()  # the request's transaction
     data = QuoteCreate.model_validate(body())
     with pytest.raises(RuntimeError):
-        await QuoteService(db_session, RecordingQueue(), ENQUEUE_TIMEOUT).submit(
-            actor, dispatch_id, data
-        )
+        await QuoteService(
+            db_session, RecordingQueue(), ENQUEUE_TIMEOUT, REVIEW_PUBLISH_AFTER
+        ).submit(actor, dispatch_id, data)
     await savepoint.rollback()
 
     assert await quotes_of(db_session, request_id) == []

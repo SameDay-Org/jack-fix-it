@@ -15,25 +15,34 @@ from app.modules.auth.permissions import PanelUser
 from app.modules.ops.actions import ActionsConfig, OpsActions, utc_now
 from app.modules.ops.schemas import (
     AssignedFilter,
+    AssignIn,
+    AssignOut,
     BucketFilter,
     ClaimOut,
     ClassifyIn,
     ClassifyOut,
     ContactedOut,
+    EligiblePros,
     FollowupDue,
     FollowupIn,
     FollowupOut,
     FollowupsPage,
     FollowupsSummary,
+    MoreInfoIn,
+    MoreInfoOut,
     NoteIn,
     NoteOut,
     QueuePage,
     QueueSummary,
     RequestCard,
+    ResumeOut,
     StaffList,
+    StatusChangeIn,
+    StatusChangeOut,
 )
 from app.modules.ops.service import OpsConfig, OpsQueueService
 from app.modules.requests.queue import RequestStatus
+from app.queue import JobQueue, get_job_queue
 from app.rate_limit import RateLimiter, enforce_limit, get_rate_limiter
 
 # The BDC and admins work the requests in the panel (#81). No HTTP cache may keep an answer:
@@ -295,6 +304,115 @@ async def staff_classify_request(
     """Only while the request is received or reviewing, to an active category. Runs nothing
     else. Recorded in the audit log."""
     return await actions.classify(user, request_id, data.category_id)
+
+
+_INVALID_TRANSITION = (
+    "request_held: another agent holds the request. invalid_transition: the request cannot "
+    "move there from its current status."
+)
+
+
+@staff_router.post(
+    "/{request_id}/more-info",
+    response_model=MoreInfoOut,
+    summary="Ask the customer for more information (staff)",
+    dependencies=[Depends(limit_ops_actions)],
+    responses={**_ACTION_ERRORS, status.HTTP_409_CONFLICT: _error(_INVALID_TRANSITION)},
+)
+async def staff_request_more_info(
+    request_id: uuid.UUID, data: MoreInfoIn, user: PanelUser, actions: Actions
+) -> MoreInfoOut:
+    """Keeps the question as an internal note, moves the request to reviewing (the state
+    machine's staff edge) and holds it there: no re-dispatch takes it until staff resume it,
+    change its status or assign a pro. The customer is not messaged (`customer_notified` is
+    false): no channel takes a staff message yet. Recorded in the audit log."""
+    return await actions.request_more_info(user, request_id, data.question)
+
+
+@staff_router.post(
+    "/{request_id}/resume",
+    response_model=ResumeOut,
+    summary="Release a request held for the customer's answer (staff)",
+    dependencies=[Depends(limit_ops_actions)],
+    responses=_ACTION_ERRORS,
+)
+async def staff_resume_request(
+    request_id: uuid.UUID, user: PanelUser, actions: Actions
+) -> ResumeOut:
+    """Clears the hold; the next re-dispatch sweep takes the request when it can (received or
+    reviewing, a category, no offer yet). A request not on hold: nothing changes. Recorded in
+    the audit log."""
+    return await actions.resume(user, request_id)
+
+
+@staff_router.post(
+    "/{request_id}/status",
+    response_model=StatusChangeOut,
+    summary="Change a request's status (staff)",
+    dependencies=[Depends(limit_ops_actions)],
+    responses={**_ACTION_ERRORS, status.HTTP_409_CONFLICT: _error(_INVALID_TRANSITION)},
+)
+async def staff_change_request_status(
+    request_id: uuid.UUID, data: StatusChangeIn, user: PanelUser, actions: Actions
+) -> StatusChangeOut:
+    """Only to one of the card's allowed_status_changes, through the request state machine,
+    with the reason kept as an internal note. Releases a hold. Recorded in the audit log."""
+    return await actions.change_status(user, request_id, data.to, data.reason)
+
+
+@staff_router.get(
+    "/{request_id}/eligible-pros",
+    response_model=EligiblePros,
+    summary="The pros a request may be assigned to (staff)",
+    responses={
+        **_STAFF_ACCESS,
+        status.HTTP_404_NOT_FOUND: _NOT_FOUND,
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _BAD_ID,
+    },
+)
+async def staff_eligible_pros(
+    request_id: uuid.UUID, user: PanelUser, actions: Actions
+) -> EligiblePros:
+    """The approved pros in the request's category and area, best ranked first (as dispatch
+    ranks them), each with whether payouts are enabled and whether they have the request
+    already: first name and last initial, no contact. At most OPS_ELIGIBLE_PROS_LIMIT (`more`
+    says when others match). Empty for a request with no category or past quoting."""
+    return await actions.eligible_pros(request_id)
+
+
+@staff_router.post(
+    "/{request_id}/assign",
+    response_model=AssignOut,
+    summary="Offer a request to a pro (staff)",
+    dependencies=[Depends(limit_ops_actions)],
+    responses={
+        **_ACTION_ERRORS,
+        status.HTTP_404_NOT_FOUND: _error(
+            "request_not_found: no request with this id. pro_not_found: no pro profile with "
+            "this id, or its account is no longer an active pro."
+        ),
+        status.HTTP_409_CONFLICT: _error(
+            "request_held: another agent holds the request. invalid_transition: the request "
+            "is accepted, expired or cancelled. request_not_classified: it has no category "
+            "yet. One code per reason the pro cannot take it: pro_already_offered (they have, "
+            "or had, this request), pro_not_approved, pro_payouts_disabled, "
+            "pro_category_mismatch, pro_out_of_area. Nothing was written."
+        ),
+    },
+)
+async def staff_assign_pro(
+    request_id: uuid.UUID,
+    data: AssignIn,
+    user: PanelUser,
+    actions: Actions,
+    queue: Annotated[JobQueue, Depends(get_job_queue)],
+) -> AssignOut:
+    """One offer for the pro the agent chose, made by dispatch: the pro must be approved, with
+    payouts enabled, in the request's category and area, and not have the request already. A
+    received or reviewing request moves to finding a pro; one finding a pro or with quotes
+    ready stays where it is. Releases a hold. The pro gets the new request push. Recorded in
+    the audit log."""
+    return await actions.assign_pro(user, request_id, data.pro_id, queue)
 
 
 @staff_router.post(

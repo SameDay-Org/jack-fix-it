@@ -19,6 +19,11 @@ rules apply.
   wrong role is 403. Resources addressed by id call `ensure_owner` (404 for anyone else) or a
   feature rule, and carry a test proving user A cannot read or change user B's.
   `tests/test_route_permissions.py` fails CI on a route with no decision.
+- Sessions (#161): an access token names its refresh family (`sid`). Every authenticated
+  request reads the account (status and role) and whether that family is still live, never
+  cached, so logout, reuse detection, a password reset, a suspension or a demotion take effect
+  at the next request. Database reads only, no Redis: with the database down a request fails,
+  it never passes. A token without `sid` was issued before #161 and works until it expires.
 - Errors: raise an `AppError` subclass from `app/errors.py`; responses always have the shape
   `{"error": {"code", "message"}}`. Unexpected exceptions become a generic 500.
 - Logging: `logging.getLogger(__name__)`, an event-style message plus `extra={...}`; the JSON
@@ -94,6 +99,33 @@ rules apply.
 - **Claim / release** change `assigned_agent_id` only, under the request's row lock, each with
   its `audit_log` row (`record_staff_action`). They never set `first_contact_at` and never
   touch the status (`RequestStateMachine`).
+- **Hold (#82).** Asking the customer for more information parks the request in `reviewing`
+  with `info_requested_at` set; the re-dispatch (#478, the sweep and the kick) leaves a held
+  request alone, and `DispatchService.dispatch` reads the hold under the request's row lock,
+  so a run queued before the hold (the first dispatch, the sweep, a kick) ends as `held`
+  (#511). Resume, a status change and a manual assignment release it. Whatever else moves a
+  held request on releases the hold in the same transaction.
+- **Status by hand (#82).** Only along the state machine's staff edges, never into
+  `finding_pro` (dispatch owns it: the offer and the move go together) and nothing out of
+  `accepted` (the payment and its cancellation own it). `ops/actions.py::status_changes` is the
+  one list; the card's `allowed_status_changes` reads it.
+- **Manual assignment (#82).** `DispatchService.assign` is the only way to offer a request to a
+  pro staff chose: it asks what the automatic dispatch asks (approved, payouts enabled, the
+  category, an active area with the ZIP, an active pro account), answers one refusal per
+  reason (each its own 409 in `ops/errors.py`), and never sends a request to a pro twice. No
+  other module inserts a `request_dispatches` row. The eligible list (`eligible-pros`) names
+  pros by first name and last initial only.
+- **Offers read the pro under locks (#511).** The request's row lock does not cover a pro's
+  eligibility, so every offer (by hand or automatic) reads the pro again in the writing
+  transaction, FOR SHARE until the commit, in this order: the request (FOR UPDATE), the ZIP's
+  active service areas, the pro's account, its profile, its category and area rows. The
+  account goes first because the one writer of both takes them in that order (a pro's new ID
+  photo: PATCH /v1/auth/me locks the account, then writes the profile's photo, #250); every
+  other profile writer locks the profile FOR UPDATE first and writes no account, and the
+  account writers write the account alone (#511 round 2: the other order deadlocked). A
+  revocation committed before that read refuses the pro; one after waits for the offer's
+  commit. A new writer of these rows keeps that order; `tests/test_dispatch_locks.py` runs
+  the real photo write against both offers.
 
 ## Live position (#350)
 
@@ -247,6 +279,15 @@ them idempotent: they can run twice.
   attempt are committed before Stripe; a retry looks the refund up first. One
   `dispute.resolve` audit row per resolution (`AuditService.record`); staff reads in
   `disputes/staff.py` (the detail is audited, `dispute.read`).
+- **Ratings (#78).** A pro's rating (the average of the published reviews' `overall`, one
+  decimal, half up, `reviews/ratings.py::rounded_average`; None and 0 with none, never 0.0) and
+  jobs completed (confirmed, paid out after a confirmation) are computed by query wherever a pro
+  is shown: the public profile, quote cards, the job's pro card, dispatch's ranking, always
+  through `reviews.ratings.ProRatings` (two grouped queries per list). Nothing is stored: the
+  publication window passes without a write. `pro_profiles.rating_avg` and `jobs_count` stay in
+  the table unread; never read or write them. The public profile (`GET /v1/pros/{id}` and its
+  `/reviews`) shows only an approved pro with an active account, the same 404 for every other
+  case, and never the photo (#53).
 
 ## Stripe webhooks (#40, #280)
 

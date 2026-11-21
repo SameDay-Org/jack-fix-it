@@ -35,6 +35,21 @@ takes, so two staff members acting on one request take turns), and in that trans
   (overdue included) or whenever, by due time, cursor paged. Only an admin may name an
   assignee (another staff member's, or their own): an agent naming one, even themselves, gets
   403. Each names its request by code and status: no contact.
+- More info (part 2): the question is kept as a note; the request goes to reviewing through the
+  state machine's staff edge (already there: it stays) and is held there (info_requested_at),
+  so the re-dispatch (#478) leaves it alone. Nobody messages the customer: no channel exists
+  for a staff message yet (customer_notified is false), so the agent reaches them.
+- Resume: releases the hold; the next re-dispatch sweep takes the request when it can.
+- Status: only to the statuses status_changes() lists, through the state machine, with the
+  reason kept as a note. It releases a hold.
+- Assign a pro (part 2): one offer for a pro the agent chose, made by the dispatch module
+  (DispatchService.assign), which checks the pro as the automatic dispatch does and refuses
+  with one reason: each has its own 409. A received or reviewing request moves to finding_pro
+  with the offer. It releases a hold. Once committed, the pro gets the new request push, as
+  from the automatic dispatch; a push that cannot be queued is logged, never undone.
+- Eligible pros (part 2): who an assignment may name, best ranked first: approved pros in
+  the request's category and area, each with whether payouts are enabled and whether they
+  have the request already. First name and last initial only. A read: nothing is locked.
 
 Logs carry ids and actions only: never a note, a name or a contact.
 """
@@ -43,7 +58,7 @@ import base64
 import binascii
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Final
@@ -52,7 +67,7 @@ from sqlalchemy import TIMESTAMP, Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.errors import ForbiddenError
+from app.errors import AppError, ForbiddenError
 from app.modules.audit.service import AuditService
 from app.modules.audit.types import (
     ActorNotStaffError,
@@ -62,40 +77,91 @@ from app.modules.audit.types import (
     AuditState,
 )
 from app.modules.categories.service import CategoryService
+from app.modules.dispatch.service import ASSIGNABLE, AssignRefusal, DispatchService
+from app.modules.notifications.events import push_new_request
 from app.modules.ops.errors import (
     AssigneeNotStaffError,
     CategoryInactiveError,
     FollowupDueOutOfRangeError,
     FollowupNotFoundError,
     InvalidQueueQueryError,
+    ProAlreadyOfferedError,
+    ProCategoryMismatchError,
+    ProNotApprovedError,
+    ProNotFoundError,
+    ProOutOfAreaError,
+    ProPayoutsDisabledError,
     QueueRequestNotFoundError,
     RequestHeldError,
     RequestNotClassifiableError,
+    RequestNotClassifiedError,
 )
 from app.modules.ops.models import RequestFollowup, RequestNote
 from app.modules.ops.repository import FollowupRepository, NoteRepository
 from app.modules.ops.schemas import (
+    AssignOut,
     ClassifyOut,
     ContactedOut,
+    EligibleProOut,
+    EligiblePros,
     FollowupDue,
     FollowupIn,
     FollowupItem,
     FollowupOut,
     FollowupsPage,
     FollowupsSummary,
+    MoreInfoOut,
     NoteOut,
     QueueAgent,
+    ResumeOut,
     StaffList,
     StaffMemberOut,
+    StatusChangeOut,
 )
+from app.modules.pros.service import ProService
+from app.modules.requests.errors import InvalidTransitionError
 from app.modules.requests.queue import LockedRequest, RequestQueueReader, RequestStatus
+from app.modules.requests.state_machine import RequestStateMachine, staff_moves
+from app.modules.reviews.service import ReviewConfig
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount, UserRole
+from app.queue import JobQueue
 
 logger = logging.getLogger(__name__)
 
 # The statuses a category may be set in: before dispatch takes the request.
 CLASSIFIABLE: Final = frozenset({RequestStatus.RECEIVED, RequestStatus.REVIEWING})
+# Never moved by hand (#82): into finding_pro, which dispatch owns (the offers and the move in
+# one transaction; by hand the request would wait with no offer anything ever sends), nor out
+# of accepted, whose moves the payment and its cancellation own (#61, #69): a paid job's
+# request is accepted.
+_DISPATCH_OWNED: Final = frozenset({RequestStatus.FINDING_PRO})
+_MONEY_OWNED: Final = frozenset({RequestStatus.ACCEPTED})
+# What each refusal of a manual assignment answers: a request past quoting is the state
+# machine's invalid_transition, and each reason a pro cannot take it has its own code.
+_ASSIGN_REFUSALS: Final[Mapping[AssignRefusal, type[AppError]]] = {
+    AssignRefusal.UNKNOWN_REQUEST: QueueRequestNotFoundError,
+    AssignRefusal.NOT_ASSIGNABLE: InvalidTransitionError,
+    AssignRefusal.NOT_CLASSIFIED: RequestNotClassifiedError,
+    AssignRefusal.UNKNOWN_PRO: ProNotFoundError,
+    AssignRefusal.ALREADY_OFFERED: ProAlreadyOfferedError,
+    AssignRefusal.NOT_APPROVED: ProNotApprovedError,
+    AssignRefusal.PAYOUTS_DISABLED: ProPayoutsDisabledError,
+    AssignRefusal.CATEGORY_MISMATCH: ProCategoryMismatchError,
+    AssignRefusal.OUT_OF_AREA: ProOutOfAreaError,
+}
+
+
+def status_changes(status: RequestStatus) -> tuple[RequestStatus, ...]:
+    """The statuses staff may move a request in `status` to by hand: the state machine's staff
+    edges, but never into finding_pro nor out of accepted (the card's allowed_status_changes)."""
+    if status in _MONEY_OWNED:
+        return ()
+    return tuple(to for to in staff_moves(status) if to not in _DISPATCH_OWNED)
+
+
+def _iso(value: datetime | None) -> str | None:
+    return None if value is None else value.isoformat()
 
 
 def utc_now() -> datetime:
@@ -108,6 +174,11 @@ class ActionsConfig:
     time_zone: str
     list_default_limit: int
     list_max_limit: int
+    # The most pros the eligible list names, and the seconds a push may take to queue.
+    eligible_pros_limit: int
+    enqueue_timeout_seconds: float
+    # REVIEW_PUBLISH_AFTER_DAYS: a manual assignment ranks pros by their published ratings (#78).
+    review_publish_after: timedelta
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "ActionsConfig":
@@ -116,6 +187,9 @@ class ActionsConfig:
             time_zone=settings.business_time_zone,
             list_default_limit=settings.request_list_default_limit,
             list_max_limit=settings.request_list_max_limit,
+            eligible_pros_limit=settings.ops_eligible_pros_limit,
+            enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
+            review_publish_after=ReviewConfig.from_settings(settings).publish_after,
         )
 
 
@@ -164,12 +238,15 @@ class OpsActions:
         self._config = config
         self._clock = clock
         self._requests = RequestQueueReader(session)
+        self._machine = RequestStateMachine(session)
         self._notes = NoteRepository(session)
         self._followups = FollowupRepository(session)
         self._categories = CategoryService(session)
         self._users = UserService(session)
         self._audit = AuditService(session)
         self._records = OpsRecords(session)
+        self._dispatch = DispatchService(session, config.review_publish_after)
+        self._pros = ProService(session)
 
     async def add_note(self, staff: UserAccount, request_id: uuid.UUID, body: str) -> NoteOut:
         locked, _ = await self._acting(staff, request_id)
@@ -232,6 +309,135 @@ class OpsActions:
         else:
             await self._session.commit()  # the same category again: nothing written
         return ClassifyOut(id=locked.id, category=category)
+
+    async def request_more_info(
+        self, staff: UserAccount, request_id: uuid.UUID, question: str
+    ) -> MoreInfoOut:
+        locked, _ = await self._acting(staff, request_id)
+        moving = locked.status is not RequestStatus.REVIEWING
+        if moving and RequestStatus.REVIEWING not in staff_moves(locked.status):
+            await self._session.rollback()
+            raise InvalidTransitionError
+        now = self._clock()
+        note = await self._note(staff, locked, question)
+        await self._requests.hold(locked, now)
+        if moving:
+            await self._machine.transition(locked.id, RequestStatus.REVIEWING, staff)
+        await self._audited(
+            staff,
+            AuditAction.REQUEST_ASK_INFO,
+            locked.id,
+            {"status": locked.status.value, "info_requested_at": _iso(locked.info_requested_at)},
+            {
+                "status": RequestStatus.REVIEWING.value,
+                "info_requested_at": now.isoformat(),
+                "note_id": str(note.id),
+                "customer_notified": False,
+            },
+        )
+        return MoreInfoOut(
+            id=locked.id,
+            status=RequestStatus.REVIEWING,
+            info_requested_at=now,
+            note=note,
+            customer_notified=False,
+        )
+
+    async def resume(self, staff: UserAccount, request_id: uuid.UUID) -> ResumeOut:
+        locked, _ = await self._acting(staff, request_id)
+        if locked.info_requested_at is None:
+            await self._session.commit()  # not on hold: nothing written; the row lock goes
+            return ResumeOut(id=locked.id, status=locked.status)
+        await self._requests.hold(locked, None)
+        await self._audited(
+            staff,
+            AuditAction.REQUEST_RESUME,
+            locked.id,
+            {"info_requested_at": _iso(locked.info_requested_at)},
+            {"info_requested_at": None},
+        )
+        return ResumeOut(id=locked.id, status=locked.status)
+
+    async def change_status(
+        self, staff: UserAccount, request_id: uuid.UUID, to: RequestStatus, reason: str
+    ) -> StatusChangeOut:
+        locked, _ = await self._acting(staff, request_id)
+        if to not in status_changes(locked.status):
+            await self._session.rollback()
+            raise InvalidTransitionError
+        note = await self._note(staff, locked, reason)
+        if locked.info_requested_at is not None:
+            await self._requests.hold(locked, None)
+        await self._machine.transition(locked.id, to, staff)
+        await self._audited(
+            staff,
+            AuditAction.REQUEST_CHANGE_STATUS,
+            locked.id,
+            {"status": locked.status.value, "info_requested_at": _iso(locked.info_requested_at)},
+            {"status": to.value, "info_requested_at": None, "note_id": str(note.id)},
+        )
+        return StatusChangeOut(id=locked.id, status=to, note=note)
+
+    async def assign_pro(
+        self, staff: UserAccount, request_id: uuid.UUID, pro_id: uuid.UUID, queue: JobQueue
+    ) -> AssignOut:
+        locked, _ = await self._acting(staff, request_id)
+        made = await self._dispatch.assign(locked.id, pro_id, staff)
+        if isinstance(made, AssignRefusal):
+            await self._session.rollback()
+            raise _ASSIGN_REFUSALS[made]
+        if locked.info_requested_at is not None:
+            await self._requests.hold(locked, None)
+        await self._audited(
+            staff,
+            AuditAction.REQUEST_ASSIGN_PRO,
+            locked.id,
+            {"status": locked.status.value, "info_requested_at": _iso(locked.info_requested_at)},
+            {
+                "status": made.status.value,
+                "info_requested_at": None,
+                "pro_id": str(pro_id),
+                "dispatch_id": str(made.dispatch.id),
+            },
+        )
+        # Committed: the pro hears about it as from the automatic dispatch (#55).
+        await push_new_request(
+            queue,
+            pro_user_id=made.dispatch.pro_user_id,
+            dispatch_id=made.dispatch.id,
+            public_code=made.dispatch.public_code,
+            timeout_seconds=self._config.enqueue_timeout_seconds,
+        )
+        return AssignOut(id=locked.id, status=made.status, pro_id=pro_id)
+
+    async def eligible_pros(self, request_id: uuid.UUID) -> EligiblePros:
+        """Who a manual assignment of this request may name. Ends its transaction."""
+        scope = await self._requests.scope(request_id)
+        if scope is None:
+            await self._session.rollback()
+            raise QueueRequestNotFoundError
+        if scope.category_id is None or scope.status not in ASSIGNABLE:
+            await self._session.rollback()
+            return EligiblePros(items=[], more=False)
+        found = await self._dispatch.assignable(request_id, scope.category_id, scope.address_id)
+        listed = found[: self._config.eligible_pros_limit]
+        pro_ids = [pro.pro_id for pro in listed]
+        cards = await self._pros.cards(pro_ids)
+        categories = await self._pros.categories_of(pro_ids)
+        await self._session.rollback()
+        return EligiblePros(
+            items=[
+                EligibleProOut(
+                    id=pro.pro_id,
+                    name=cards[pro.pro_id].name if pro.pro_id in cards else None,
+                    categories=categories.get(pro.pro_id, []),
+                    payouts_enabled=pro.payouts_enabled,
+                    already_offered=pro.already_offered,
+                )
+                for pro in listed
+            ],
+            more=len(found) > len(listed),
+        )
 
     async def schedule_followup(
         self, staff: UserAccount, request_id: uuid.UUID, data: FollowupIn
@@ -382,6 +588,18 @@ class OpsActions:
             await self._session.rollback()
             raise RequestHeldError
         return locked, actor
+
+    async def _note(self, staff: UserAccount, locked: LockedRequest, body: str) -> NoteOut:
+        """An internal note by the actor on the locked request, in its transaction."""
+        note = await self._notes.add(
+            RequestNote(request_id=locked.id, author_id=staff.id, body=body)
+        )
+        return NoteOut(
+            id=note.id,
+            author=await self._agent(staff.id),
+            body=note.body,
+            created_at=note.created_at,
+        )
 
     async def _current(self, staff: UserAccount) -> UserAccount:
         """The caller's account as last committed, an active agent or admin, share-locked

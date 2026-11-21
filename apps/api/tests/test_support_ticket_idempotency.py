@@ -496,6 +496,7 @@ async def writer(app: FastAPI, committed: Committed) -> AsyncIterator[CommittedW
     token = security.create_access_token(
         user_id=user.id,
         role=UserRole.CUSTOMER,
+        session_id=None,
         secret=TEST_JWT_SECRET,
         ttl_seconds=900,
         now=datetime.now(UTC),
