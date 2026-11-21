@@ -2,8 +2,10 @@ import { useTranslation } from "react-i18next";
 import { Pressable, Text, View } from "react-native";
 
 import { ControlIcon } from "@/components/icons";
-import { Avatar, useFlag, VerifiedBadge } from "@/components/ui";
+import { Avatar, Button, useFlag, VerifiedBadge } from "@/components/ui";
 import { formatMoneyExact, formatRating, joinFacts } from "@/features/quotes/format";
+import { useGuardedPush } from "@/features/quotes/navigation";
+import { receiptHref } from "@/features/receipts/href";
 import { displayName } from "@/features/quotes/quoteText";
 import { pressedTransform, tokens, withOpacity } from "@/theme";
 
@@ -90,32 +92,47 @@ export function ProRow({ pro, onPress }: ProRowProps) {
 }
 
 /** What the customer paid: the total, and the tax inside it when there is any. */
-export function PaidRow({ job }: { job: CustomerJob }) {
+/**
+ * What was paid, then the way to the receipt (#62): it exists from the payment on, so every phase
+ * of a paid job offers it. The link sits outside the row's one accessible label, reachable on its
+ * own.
+ */
+export function PaidRow({ job, requestId }: { job: CustomerJob; requestId: string }) {
   const { t } = useTranslation();
+  const push = useGuardedPush();
   const total = formatMoneyExact(job.customer_total_cents);
 
   return (
-    <View
-      accessible
-      accessibilityLabel={
-        job.tax_cents > 0
-          ? t("jobs.paid.labelWithTax", { total, tax: formatMoneyExact(job.tax_cents) })
-          : t("jobs.paid.label", { total })
-      }
-      // When the label and the amount no longer fit side by side (large text), the amount moves
-      // under the label instead of squeezing it mid-word.
-      className="flex-row flex-wrap items-baseline justify-between gap-x-3 border-t border-gray-500/15 pt-4"
-      testID="job-paid"
-    >
-      <View className="grow gap-0.5">
-        <Text className="text-headline text-navy-900">{t("jobs.paid.title")}</Text>
-        {job.tax_cents > 0 ? (
-          <Text className="text-footnote text-gray-500">
-            {t("jobs.paid.tax", { tax: formatMoneyExact(job.tax_cents) })}
-          </Text>
-        ) : null}
+    <View className="gap-2">
+      <View
+        accessible
+        accessibilityLabel={
+          job.tax_cents > 0
+            ? t("jobs.paid.labelWithTax", { total, tax: formatMoneyExact(job.tax_cents) })
+            : t("jobs.paid.label", { total })
+        }
+        // When the label and the amount no longer fit side by side (large text), the amount moves
+        // under the label instead of squeezing it mid-word.
+        className="flex-row flex-wrap items-baseline justify-between gap-x-3 border-t border-gray-500/15 pt-4"
+        testID="job-paid"
+      >
+        <View className="grow gap-0.5">
+          <Text className="text-headline text-navy-900">{t("jobs.paid.title")}</Text>
+          {job.tax_cents > 0 ? (
+            <Text className="text-footnote text-gray-500">
+              {t("jobs.paid.tax", { tax: formatMoneyExact(job.tax_cents) })}
+            </Text>
+          ) : null}
+        </View>
+        <Text className="text-title-2 text-navy-900">{total}</Text>
       </View>
-      <Text className="text-title-2 text-navy-900">{total}</Text>
+      <Button
+        label={t("receipt.see")}
+        variant="ghost"
+        onPress={() => push(receiptHref(requestId))}
+        className="-ml-5 self-start"
+        testID="job-receipt"
+      />
     </View>
   );
 }

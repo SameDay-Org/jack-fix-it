@@ -384,7 +384,7 @@ function JobContent({ job, requestId, updatedAt, refetch, text, now }: JobConten
         </View>
         {job.cancellation ? <CancellationStatus cancellation={job.cancellation} /> : null}
         {hasReport(job) ? <ReportStatus job={job} /> : null}
-        <PaidRow job={job} />
+        <PaidRow job={job} requestId={requestId} />
         <JobPhotos photos={job.photos} updatedAt={updatedAt} refetch={refetch} />
         <JobTimeline items={timelineOf(t, job, now)} />
       </Sheet>
