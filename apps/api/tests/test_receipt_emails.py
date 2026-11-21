@@ -425,7 +425,7 @@ def test_money_is_written_in_dollars() -> None:
     ]
 
 
-async def test_a_tip_that_succeeds_queues_its_receipt_once(
+async def test_a_tip_that_succeeds_queues_its_receipt_transfer_and_push_once(
     db_session: AsyncSession, world: JobWorld
 ) -> None:
     at = datetime.now(UTC) - timedelta(hours=1)
@@ -453,6 +453,16 @@ async def test_a_tip_that_succeeds_queues_its_receipt_once(
 
     receipts = [job for job in queue.jobs.values() if job[0] == "send_tip_receipt"]
     assert receipts == [("send_tip_receipt", (str(tip.id),))]
+    # #273 PR A2: its transfer to the pro and the pro's push, once each.
+    assert sorted(function for function, _ in queue.jobs.values()) == [
+        "release_tip_transfer",
+        "send_push",
+        "send_tip_receipt",
+    ]
+    assert ("release_tip_transfer", (str(tip.id),)) in queue.jobs.values()
+    assert [key for key, job in queue.jobs.items() if job[0] == "send_push"] == [
+        key for key in queue.jobs if f"tip_received:{tip.id}" in key
+    ]
 
 
 HOSTILE = "<script>alert(\"x\")</script> & 'quoted'"

@@ -96,6 +96,8 @@ KIND_GROUP: Final[Mapping[str, PreferenceGroup]] = MappingProxyType(
         # A new chat message (#73), to either side: its own group, so a user can mute the chat
         # and keep the job's steps (Foreman 2026-11-20).
         "chat_message": PreferenceGroup.MESSAGES,
+        # A tip the customer paid on a confirmed job (#273): about the job.
+        "tip_received": PreferenceGroup.JOB_UPDATES,  # to a pro
     }
 )
 

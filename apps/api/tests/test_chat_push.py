@@ -127,7 +127,7 @@ def assert_no_leak(caplog: pytest.LogCaptureFixture, *texts: str) -> None:
 
 
 @pytest.mark.parametrize("direction", ["customer_to_pro", "pro_to_customer"])
-async def test_a_message_pushes_once_to_the_other_side_opening_its_job_screen(
+async def test_a_message_pushes_once_to_the_other_side_opening_its_chat(
     db_client: httpx.AsyncClient,
     db_session: AsyncSession,
     world: JobWorld,
@@ -141,7 +141,8 @@ async def test_a_message_pushes_once_to_the_other_side_opening_its_job_screen(
 
     message_id = await send(db_client, job, sender)
 
-    link = f"/jobs/{job.id}" if to_pro else f"/requests/{job.request_id}/job"
+    # #73 P3: each side's own chat screen (the customer's needs the request id).
+    link = f"/jobs/{job.id}/chat" if to_pro else f"/requests/{job.request_id}/job/chat"
     assert pushes(queue) == [
         (
             str(recipient.id),

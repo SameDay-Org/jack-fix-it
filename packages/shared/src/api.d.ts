@@ -3536,9 +3536,14 @@ export interface components {
             category: components["schemas"]["EarningCategory"] | null;
             /**
              * Amount Cents
-             * @description What the pro receives, in integer cents.
+             * @description What the pro receives for the job, in integer cents (never the tip).
              */
             amount_cents: number;
+            /**
+             * Tip Cents
+             * @description The customer's tip on the job, all of it the pro's, in integer cents; 0 when none. Its own transfer: the summary counts it by that transfer's state. Always sent; optional in the schema so clients built before #273 keep compiling.
+             */
+            tip_cents?: number | null;
             status: components["schemas"]["EarningStatus"];
             /**
              * Completed At
@@ -3585,7 +3590,7 @@ export interface components {
             awaiting_confirmation_cents: number;
             /**
              * Pending Cents
-             * @description Confirmed, the transfer still to be made.
+             * @description Confirmed, the transfer still to be made; a tip whose own transfer is.
              */
             pending_cents: number;
             /** On Hold Cents */
