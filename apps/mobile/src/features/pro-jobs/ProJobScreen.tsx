@@ -159,9 +159,8 @@ export function ProJobScreen() {
   // The kind whose Save button a blocked Job's done pointed at: ringed until nothing waits.
   const [nudged, setNudged] = useState<JobPhotoKind | null>(null);
   const pending = before.pending || after.pending;
-  useEffect(() => {
-    if (!pending) setNudged(null);
-  }, [pending]);
+  // Nothing waits any more: the ring goes (adjusted while rendering, not in an effect).
+  if (!pending && nudged !== null) setNudged(null);
   const beforeSave = useRef<ComponentRef<typeof View>>(null);
   const afterSave = useRef<ComponentRef<typeof View>>(null);
   // Job's done is closed while photos wait to be saved: a tap on it says so and brings the Save
