@@ -53,6 +53,7 @@ from app.modules.audit.types import (
 )
 from app.modules.jobs.service import JobPartiesReader
 from app.modules.pros.service import ProService
+from app.modules.requests.service import CustomerRequestReader
 from app.modules.support.errors import (
     IdempotencyKeyReusedError,
     InvalidTicketInputError,
@@ -65,7 +66,7 @@ from app.modules.support.models import (
     TicketRole,
     TicketStatus,
 )
-from app.modules.support.repository import Before, SupportTicketRepository
+from app.modules.support.repository import Before, JobRequest, SupportTicketRepository
 from app.modules.support.schemas import (
     MySupportTicketOut,
     MySupportTicketPage,
@@ -242,8 +243,12 @@ class SupportTicketService:
         rows = await self._tickets.page(status=status, limit=size + 1, before=before)
         page, more = rows[:size], len(rows) > size
         names = await self._users.first_names({ticket.user_id for ticket in page})
+        requests = await self._job_requests(page)
         return StaffSupportTicketPage(
-            items=[_item(ticket, names.get(ticket.user_id)) for ticket in page],
+            items=[
+                _item(ticket, names.get(ticket.user_id), _request_of(ticket, requests))
+                for ticket in page
+            ],
             next_cursor=_encode_cursor(page[-1]) if more and page else None,
         )
 
@@ -297,8 +302,9 @@ class SupportTicketService:
 
     async def _detail(self, ticket: SupportTicket) -> StaffSupportTicketOut:
         names = await self._users.first_names({ticket.user_id})
+        request = _request_of(ticket, await self._job_requests([ticket]))
         return StaffSupportTicketOut(
-            **_item(ticket, names.get(ticket.user_id)).model_dump(),
+            **_item(ticket, names.get(ticket.user_id), request).model_dump(),
             message=ticket.message,
             closed_at=ticket.closed_at,
             app_version=ticket.app_version,
@@ -306,12 +312,26 @@ class SupportTicketService:
             updated_at=ticket.updated_at,
         )
 
+    async def _job_requests(self, tickets: list[SupportTicket]) -> dict[uuid.UUID, JobRequest]:
+        """The request of each ticket's job, in one statement whatever the page's size."""
+        return await self._tickets.job_requests(
+            {ticket.job_id for ticket in tickets if ticket.job_id is not None},
+            JobPartiesReader.request_ids(),
+            CustomerRequestReader.codes(),
+        )
+
     def _size(self, limit: int | None) -> int:
         """`limit` above the maximum is capped, not refused."""
         return min(limit or self._config.list_default_limit, self._config.list_max_limit)
 
 
-def _item(ticket: SupportTicket, first_name: str | None) -> StaffSupportTicketItem:
+def _request_of(ticket: SupportTicket, requests: dict[uuid.UUID, JobRequest]) -> JobRequest | None:
+    return None if ticket.job_id is None else requests.get(ticket.job_id)
+
+
+def _item(
+    ticket: SupportTicket, first_name: str | None, request: JobRequest | None
+) -> StaffSupportTicketItem:
     return StaffSupportTicketItem(
         id=ticket.id,
         user_id=ticket.user_id,
@@ -319,6 +339,8 @@ def _item(ticket: SupportTicket, first_name: str | None) -> StaffSupportTicketIt
         role=ticket.role,
         topic=ticket.topic,
         job_id=ticket.job_id,
+        job_request_id=None if request is None else request.request_id,
+        job_request_code=None if request is None else request.public_code,
         status=ticket.status,
         created_at=ticket.created_at,
     )
