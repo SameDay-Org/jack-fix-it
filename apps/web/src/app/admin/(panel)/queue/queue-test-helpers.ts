@@ -90,6 +90,8 @@ export function card(extra: Partial<RequestCard> = {}): RequestCard {
     notes: [],
     followups: [],
     actions_allowed: true,
+    info_requested_at: null,
+    allowed_status_changes: ["reviewing", "cancelled"],
     ...extra,
   };
 }
