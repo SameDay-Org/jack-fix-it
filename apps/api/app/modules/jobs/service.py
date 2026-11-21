@@ -376,6 +376,13 @@ class JobTipReader:
             return None
         return tip_facts(job)
 
+    async def locked(self, job_id: uuid.UUID) -> JobTipFacts | None:
+        """The job, its row locked FOR UPDATE until the caller's transaction ends (the lock
+        every status change, a dispute and a refund take), read as last committed; None for an
+        unknown job. For a tip's transfer (#273 PR A2)."""
+        job = await self._jobs.get_for_update(job_id)
+        return None if job is None else tip_facts(job)
+
 
 @dataclass(frozen=True)
 class JobReceiptFacts:
@@ -515,6 +522,12 @@ class JobPartiesReader:
     def __init__(self, session: AsyncSession, pros: ProService) -> None:
         self._jobs = JobRepository(session)
         self._pros = pros
+
+    @staticmethod
+    def request_ids() -> Subquery:
+        """Each job's id (`job_id`) and its request (`request_id`), as a subquery: a staff
+        support ticket names its job's request in the tickets' own query (#503)."""
+        return JobRepository.request_ids()
 
     @staticmethod
     def confirmations() -> Subquery:

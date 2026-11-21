@@ -672,6 +672,17 @@
       },
       "error": {
         "title": "No pudimos cargar este perfil"
+      },
+      "reviews": {
+        "title": "Reseñas",
+        "empty": "Todavía no hay reseñas.",
+        "more": "Ver más",
+        "moreLabel": "Ver más reseñas",
+        "failed": "No pudimos cargar las reseñas.",
+        "moreFailed": "No pudimos cargar más reseñas.",
+        "anonymous": "Un cliente",
+        "label": "{{reviewer}}, {{rating}} de 5, {{day}}",
+        "loading": "Cargando reseñas"
       }
     },
     "notAcceptable": "Este presupuesto ya no se puede aceptar.",
@@ -1354,6 +1365,7 @@
       "done": "Trabajo confirmado",
       "attention": "Este trabajo necesita atención",
       "cancelled": "Este trabajo se canceló",
+      "cancelledByPro": "{{name}} canceló este trabajo",
       "refunded": "Tu reporte se resolvió",
       "finished": "{{name}} marcó el trabajo como terminado",
       "thanks": "¡Gracias! Trabajo confirmado"
@@ -1368,6 +1380,7 @@
       "done": "Este trabajo se completó.",
       "attention": "Se reportó un problema en este trabajo.",
       "cancelled": "No necesitas hacer nada más.",
+      "cancelledByPro": "Esto no te cuesta nada. Puedes empezar una nueva solicitud para encontrar otro profesional.",
       "refunded": "Tu pago de este trabajo volvió a tu método de pago."
     },
     "eta": {
@@ -2042,7 +2055,27 @@
         "title": "No se pudo completar",
         "body": "Algo salió mal de nuestro lado. Inténtalo de nuevo en un momento."
       }
-    }
+    },
+    "pro": {
+      "intro": "Cuéntanos por qué. Le avisaremos a {{name}}.",
+      "reason": {
+        "cannot_make_it": "No puedo ir",
+        "customer_unreachable": "El cliente no responde",
+        "scope_changed": "El trabajo es distinto de lo que se pidió",
+        "other": "Otra cosa"
+      },
+      "costTitle": "Qué pasa",
+      "cost": "Cancelar no le cuesta nada a {{name}}: todo su pago vuelve a su método de pago. No recibirás pago por este trabajo.",
+      "byYou": {
+        "title": "Cancelaste este trabajo",
+        "body": "Le avisamos a {{name}}. No se le cobrará nada."
+      },
+      "byCustomer": {
+        "title": "Este trabajo se canceló",
+        "body": "Lo canceló {{name}}. No necesitas hacer nada más."
+      }
+    },
+    "newRequest": "Nueva solicitud"
   },
   "disputes": {
     "entry": "Reportar un problema",

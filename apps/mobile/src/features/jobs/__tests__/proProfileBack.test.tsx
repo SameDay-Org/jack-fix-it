@@ -24,6 +24,8 @@ jest.mock("@/api", () => ({
 }));
 jest.mock("expo-router", () => jest.requireActual("../../quotes/__tests__/helpers").routerMock);
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
+// The reviews section reads its own pages (`quotes/__tests__/ProReviews.test.tsx`): not this test's.
+jest.mock("../../quotes/ProReviews", () => ({ ProReviews: () => null }));
 jest.mock(
   "react-native-safe-area-context",
   () => jest.requireActual("react-native-safe-area-context/jest/mock").default,

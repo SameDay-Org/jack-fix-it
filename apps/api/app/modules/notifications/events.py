@@ -468,7 +468,7 @@ async def push_chat_message_to_customer(
         message_id=f"chat_message:{chat_message_id}",
         kind="chat_message",
         params={"public_code": public_code},
-        deep_link=f"/requests/{request_id}/job",
+        deep_link=f"/requests/{request_id}/job/chat",
         timeout_seconds=timeout_seconds,
     )
 
@@ -490,6 +490,29 @@ async def push_chat_message_to_pro(
         pro_user_id,
         message_id=f"chat_message:{chat_message_id}",
         kind="chat_message",
+        params={"public_code": public_code},
+        deep_link=f"/jobs/{job_id}/chat",
+        timeout_seconds=timeout_seconds,
+    )
+
+
+async def push_tip_received(
+    queue: JobQueue,
+    *,
+    pro_user_id: uuid.UUID,
+    tip_id: uuid.UUID,
+    job_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the pro, once the customer's tip on the job succeeded (#273): a tip succeeds once, so
+    one message id per tip. Neither the customer's name nor the amount (a lock screen shows the
+    push). Opens the job."""
+    await _push(
+        queue,
+        pro_user_id,
+        message_id=f"tip_received:{tip_id}",
+        kind="tip_received",
         params={"public_code": public_code},
         deep_link=f"/jobs/{job_id}",
         timeout_seconds=timeout_seconds,

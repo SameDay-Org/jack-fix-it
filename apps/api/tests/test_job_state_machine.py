@@ -5,6 +5,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -171,8 +172,55 @@ def machine(session: AsyncSession) -> JobStateMachine:
 
 
 async def events_of(session: AsyncSession, job_id: uuid.UUID) -> list[JobEvent]:
+    """The job's events in the order they happened. A test runs in one transaction, so every
+    event has its now() and created_at ties: ordering on it returned ties in any order under
+    load (#448). The events are put in chain order instead, each one starting from the status
+    the previous one ended in. (In the app each transition commits on its own: no tie.)"""
     statement = select(JobEvent).where(JobEvent.job_id == job_id).order_by(JobEvent.created_at)
-    return list((await session.scalars(statement)).all())
+    return in_chain_order(list((await session.scalars(statement)).all()))
+
+
+def in_chain_order(events: list[JobEvent]) -> list[JobEvent]:
+    """`events` from the one no other event leads to, each next one starting where the last
+    ended. Fails on a set that is not one chain, rather than guess an order."""
+    remaining = list(events)
+    ends = {event.to_status for event in events}
+    starts = [event for event in remaining if event.from_status not in ends]
+    if len(remaining) > 1 and len(starts) != 1:
+        raise AssertionError(f"not one chain of transitions: {len(starts)} starts")
+    ordered: list[JobEvent] = []
+    while remaining:
+        nexts = (
+            starts
+            if not ordered
+            else [e for e in remaining if e.from_status == ordered[-1].to_status]
+        )
+        if len(nexts) != 1:
+            raise AssertionError(f"not one chain of transitions: {len(nexts)} next events")
+        ordered.append(nexts[0])
+        remaining.remove(nexts[0])
+    return ordered
+
+
+def test_events_are_read_in_chain_order_whatever_the_ties() -> None:
+    """#448: the events of one test tie on created_at; whatever order the database returns
+    them in, the chain comes back as it happened."""
+    path = [
+        JobStatus.SCHEDULED,
+        JobStatus.ON_THE_WAY,
+        JobStatus.IN_PROGRESS,
+        JobStatus.COMPLETED,
+        JobStatus.CONFIRMED,
+        JobStatus.PAID_OUT,
+    ]
+    chain = [
+        JobEvent(type="status_changed", from_status=src, to_status=dst)
+        for src, dst in pairwise(path)
+    ]
+    for shift in range(len(chain)):
+        shuffled = chain[shift:] + chain[:shift]
+        assert in_chain_order(list(reversed(shuffled))) == chain
+        assert in_chain_order(shuffled) == chain
 
 
 async def reload(session: AsyncSession, job: Job) -> Job:
