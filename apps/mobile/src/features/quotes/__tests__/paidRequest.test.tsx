@@ -520,15 +520,26 @@ describe("the accepted card's summary says where its payment stands (#373)", () 
     async (status) => {
       api.job = () => Promise.resolve({ ...JOB, status });
       await renderWithQuery(<App />);
-      // The job is in: the panel is past its first look, and shows neither Pay nor Paid.
-      await waitFor(() =>
-        expect(screen.queryByTestId(`${payTestId(ACCEPTED)}-loading`)).toBeNull(),
-      );
+      // The job is in: the card is there, its panel past its first look, showing neither Pay nor
+      // Paid.
+      await waitFor(() => {
+        expect(screen.getByTestId(`quote-${ACCEPTED.id}`)).toBeTruthy();
+        expect(screen.queryByTestId(`${payTestId(ACCEPTED)}-loading`)).toBeNull();
+      });
       expect(screen.queryByRole("button", { name: PAY_NAME })).toBeNull();
       expect(paidState()).toHaveLength(0);
       claimsNothing();
     },
   );
+
+  it("a request with no accepted quote never asks for a job from its cards", async () => {
+    api.quotes = () => Promise.resolve(list([OTHER]));
+    await renderWithQuery(<App />);
+    await screen.findByTestId(`quote-${OTHER.id}-summary`);
+    await act(async () => undefined);
+
+    expect(callsTo(apiGet, JOB_PATH)).toHaveLength(0);
+  });
 
   it("while the job is first looked up it claims nothing", async () => {
     api.job = () => new Promise<CustomerJob>(() => undefined);
