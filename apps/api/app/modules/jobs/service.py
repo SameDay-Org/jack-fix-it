@@ -375,6 +375,58 @@ class JobTipReader:
         return tip_facts(job)
 
 
+@dataclass(frozen=True)
+class JobReceiptFacts:
+    """What a job's receipt reads of it (#62): ids, its status, when it was paid (the job is
+    created when its payment succeeds, #61) and done, and its tip facts."""
+
+    job_id: uuid.UUID
+    request_id: uuid.UUID
+    quote_id: uuid.UUID
+    customer_id: uuid.UUID
+    pro_id: uuid.UUID
+    status: JobStatus
+    paid_at: datetime
+    completed_at: datetime | None
+    tip: JobTipFacts
+
+
+def _receipt_facts(job: Job) -> JobReceiptFacts:
+    return JobReceiptFacts(
+        job_id=job.id,
+        request_id=job.request_id,
+        quote_id=job.quote_id,
+        customer_id=job.customer_id,
+        pro_id=job.pro_id,
+        status=job.status,
+        paid_at=job.created_at,
+        completed_at=job.completed_at,
+        tip=tip_facts(job),
+    )
+
+
+class JobReceiptReader:
+    """A job as its receipt needs it, for the receipts module (#62). Reads only."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._jobs = JobRepository(session)
+
+    async def of_customer_request(
+        self, customer_id: uuid.UUID, request_id: uuid.UUID
+    ) -> JobReceiptFacts | None:
+        """The request's job when `customer_id` is its customer; None otherwise, and while the
+        request has no job (its payment has not succeeded)."""
+        job = await self._jobs.get_of_request(request_id)
+        if job is None or job.customer_id != customer_id:
+            return None
+        return _receipt_facts(job)
+
+    async def of_request(self, request_id: uuid.UUID) -> JobReceiptFacts | None:
+        """The request's job, for the worker's receipt email; None while it has none."""
+        job = await self._jobs.get_of_request(request_id)
+        return None if job is None else _receipt_facts(job)
+
+
 class JobTimeline:
     """Lines other modules add to a job's history without changing its status."""
 

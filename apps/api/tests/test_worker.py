@@ -100,6 +100,9 @@ def test_registration_keeps_names_tries_and_timeouts() -> None:
         "geocode_address": (1, None),
         # One run per queued confirmation (#68): the sweep is its retry.
         "release_transfer": (1, None),
+        # Tried again while Resend or Stripe is unavailable (#62).
+        "send_payment_receipt": (get_settings().receipt_email_max_attempts, None),
+        "send_tip_receipt": (get_settings().receipt_email_max_attempts, None),
         # One run per cancel (#69): the sweep is its retry.
         "refund_cancellation": (1, None),
     }
