@@ -5,6 +5,7 @@ never commits)."""
 
 import logging
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -12,8 +13,10 @@ import pytest
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
+from app.integrations import stripe_payments
 from app.integrations.stripe_errors import StripeUnavailableError
-from app.integrations.stripe_payments import TipIntentFacts
+from app.integrations.stripe_payments import TipIntentFacts, worker_stripe_payments
 from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.payments.webhook_handlers import PAYMENT_INTENT_HANDLERS
 from app.modules.tips.errors import TipEventMismatchError
@@ -22,6 +25,7 @@ from app.modules.tips.webhooks import TipsStripeNotConfiguredError, tip_event_ha
 from app.modules.users.models import User
 from app.modules.webhooks.events import AfterCommit, StripeEvent
 from app.modules.webhooks.handlers import handler_for
+from tests.conftest import make_settings
 from tests.job_world import JobWorld, build_world, make_job
 from tests.test_payments_api import FakeStripePayments
 
@@ -32,6 +36,21 @@ SUCCEEDED = "payment_intent.succeeded"
 PROCESSING = "payment_intent.processing"
 FAILED = "payment_intent.payment_failed"
 CANCELED = "payment_intent.canceled"
+
+
+@pytest.fixture(autouse=True)
+def no_worker_stripe_key(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """The worker's Stripe client (the registry's tip handler reads with it) is built from
+    get_settings(), which reads apps/api/.env and the shell: a developer's STRIPE_SECRET_KEY
+    made the routing tests call Stripe for real (#579). Here it is built from the test
+    settings without a key, and a client cached before is dropped, before and after."""
+    # The key is passed as None: make_settings skips .env, but not the shell.
+    monkeypatch.setattr(
+        stripe_payments, "get_settings", lambda: make_settings(stripe_secret_key=None)
+    )
+    worker_stripe_payments.cache_clear()
+    yield
+    worker_stripe_payments.cache_clear()
 
 
 @pytest.fixture
@@ -440,6 +459,20 @@ async def test_an_intent_naming_no_tip_of_ours_is_logged_and_ignored(
 
 
 # --- Routing ----------------------------------------------------------------------------------
+
+
+def test_a_developer_stripe_key_never_reaches_this_modules_handlers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#579: the registry's tip handler reads Stripe with the worker's client, built from the
+    settings in apps/api/.env and the shell. A STRIPE_SECRET_KEY there would make the routing
+    tests below call Stripe for real: here the worker's client is never built."""
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_not_a_real_key")
+    get_settings.cache_clear()
+    try:
+        assert worker_stripe_payments() is None
+    finally:
+        get_settings.cache_clear()
 
 
 async def test_the_registry_routes_a_tips_event_to_the_tips_handler(
