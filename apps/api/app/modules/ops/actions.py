@@ -123,6 +123,7 @@ from app.modules.pros.service import ProService
 from app.modules.requests.errors import InvalidTransitionError
 from app.modules.requests.queue import LockedRequest, RequestQueueReader, RequestStatus
 from app.modules.requests.state_machine import RequestStateMachine, staff_moves
+from app.modules.reviews.service import ReviewConfig
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount, UserRole
 from app.queue import JobQueue
@@ -178,6 +179,8 @@ class ActionsConfig:
     # The most pros the eligible list names, and the seconds a push may take to queue.
     eligible_pros_limit: int
     enqueue_timeout_seconds: float
+    # REVIEW_PUBLISH_AFTER_DAYS: a manual assignment ranks pros by their published ratings (#78).
+    review_publish_after: timedelta
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "ActionsConfig":
@@ -188,6 +191,7 @@ class ActionsConfig:
             list_max_limit=settings.request_list_max_limit,
             eligible_pros_limit=settings.ops_eligible_pros_limit,
             enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
+            review_publish_after=ReviewConfig.from_settings(settings).publish_after,
         )
 
 
@@ -243,7 +247,7 @@ class OpsActions:
         self._users = UserService(session)
         self._audit = AuditService(session)
         self._records = OpsRecords(session)
-        self._dispatch = DispatchService(session)
+        self._dispatch = DispatchService(session, config.review_publish_after)
         self._pros = ProService(session)
 
     async def add_note(self, staff: UserAccount, request_id: uuid.UUID, body: str) -> NoteOut:

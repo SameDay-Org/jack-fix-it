@@ -25,6 +25,7 @@ from app.modules.auth.security import hash_password
 from app.modules.dispatch.service import AssignRefusal, DispatchOutcome, DispatchService
 from app.modules.requests.models import RequestOrigin, RequestStatus, ServiceRequest
 from app.modules.requests.service import undispatched_requests
+from app.modules.reviews.service import ReviewConfig
 from app.modules.service_areas.models import ServiceArea
 from app.modules.users.models import User
 from app.modules.users.types import UserRole, UserStatus
@@ -318,13 +319,13 @@ async def test_staff_read_the_contact_origin_and_utm_and_nobody_else_does(
 
 
 async def test_a_guest_s_request_is_never_dispatched_or_assigned(
-    db_client: httpx.AsyncClient, db_session: AsyncSession, served: None
+    db_client: httpx.AsyncClient, db_session: AsyncSession, served: None, settings: Settings
 ) -> None:
     category = await make_category(db_session)
     assert (await send(db_client, body(category_id=str(category)))).status_code == 201
     [request] = await web_requests(db_session)
     request_id = request.id
-    dispatch = DispatchService(db_session)
+    dispatch = DispatchService(db_session, ReviewConfig.from_settings(settings).publish_after)
     admin = await make_caller(db_session, UserRole.ADMIN)
 
     outcome = await dispatch.dispatch(request_id)

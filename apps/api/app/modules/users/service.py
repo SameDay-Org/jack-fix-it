@@ -91,6 +91,12 @@ class UserService:
         raise PublicCodeExhaustedError
 
     @staticmethod
+    def active_ids_of_role(role: UserRole) -> Select[uuid.UUID]:
+        """The ids of the active (not suspended) accounts with `role`, as a statement for
+        another module's query: one statement then decides who may be shown (#78)."""
+        return UserRepository.active_ids_of_role(role)
+
+    @staticmethod
     def photo_keys_among(keys: Collection[str]) -> Select[str | None]:
         """The upload keys among `keys` that a user holds as their ID photo (#250), as a
         statement (the uploads sweep of unreferenced uploads, #191)."""

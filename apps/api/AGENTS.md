@@ -284,6 +284,15 @@ them idempotent: they can run twice.
   attempt are committed before Stripe; a retry looks the refund up first. One
   `dispute.resolve` audit row per resolution (`AuditService.record`); staff reads in
   `disputes/staff.py` (the detail is audited, `dispute.read`).
+- **Ratings (#78).** A pro's rating (the average of the published reviews' `overall`, one
+  decimal, half up, `reviews/ratings.py::rounded_average`; None and 0 with none, never 0.0) and
+  jobs completed (confirmed, paid out after a confirmation) are computed by query wherever a pro
+  is shown: the public profile, quote cards, the job's pro card, dispatch's ranking, always
+  through `reviews.ratings.ProRatings` (two grouped queries per list). Nothing is stored: the
+  publication window passes without a write. `pro_profiles.rating_avg` and `jobs_count` stay in
+  the table unread; never read or write them. The public profile (`GET /v1/pros/{id}` and its
+  `/reviews`) shows only an approved pro with an active account, the same 404 for every other
+  case, and never the photo (#53).
 - **The web service (#409).** Routes the web app's server calls on a visitor's behalf
   (`POST /v1/interest`, `POST /v1/web/requests`) take `app.web_service.WebService`: `X-JFI-Web-Key` =
   `WEB_SERVICE_KEY` (constant-time compare, else 401 `invalid_service_key`), and only then the
