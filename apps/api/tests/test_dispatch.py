@@ -34,7 +34,8 @@ from app.modules.users.types import UserRole, UserStatus
 from app.observability import JsonFormatter
 from app.worker import WorkerSettings
 from tests.conftest import backend_pid, make_settings, wait_until_blocked
-from tests.helpers import as_status_writer
+from tests.helpers import REVIEW_PUBLISH_AFTER, as_status_writer
+from tests.ratings_seed import rate
 from tests.test_requests_api import ENQUEUE_TIMEOUT, EVENTS, RecordingQueue
 
 NOW = datetime.now(UTC)
@@ -111,7 +112,6 @@ async def make_pro(
     status: UserStatus = UserStatus.ACTIVE,
     category: str = "category",
     area: str = "area",
-    rating: str | None = None,
 ) -> uuid.UUID:
     user = User(
         email=f"p-{uuid.uuid4().hex[:8]}@x.com", password_hash="x", role=role, status=status
@@ -122,7 +122,6 @@ async def make_pro(
         user_id=user.id,
         verification_status=verification,
         payouts_enabled=payouts,
-        rating_avg=Decimal(rating) if rating is not None else None,
     )
     session.add(profile)
     await session.flush()
@@ -205,7 +204,7 @@ async def test_eligible_requires_approved_payouts_active_category_and_active_zip
     await set_max_pros(db_session, 50)
     request_id = await make_request(db_session, world)
 
-    outcome = (await DispatchService(db_session).dispatch(request_id)).outcome
+    outcome = (await DispatchService(db_session, REVIEW_PUBLISH_AFTER).dispatch(request_id)).outcome
 
     assert outcome is DispatchOutcome.SENT
     assert await dispatched_to(db_session, request_id) == {eligible}
@@ -227,7 +226,7 @@ async def test_a_request_in_an_inactive_area_goes_to_nobody(
     await db_session.flush()
     request_id = await make_request(db_session, replace(world, address_id=address.id))
 
-    outcome = (await DispatchService(db_session).dispatch(request_id)).outcome
+    outcome = (await DispatchService(db_session, REVIEW_PUBLISH_AFTER).dispatch(request_id)).outcome
 
     assert outcome is DispatchOutcome.NO_ELIGIBLE_PROS
     assert await dispatched_to(db_session, request_id) == set()
@@ -273,9 +272,9 @@ def test_ranked_by_rating_then_response_time_then_tiebreak() -> None:
 
 async def test_ranking_reads_the_dispatch_history(db_session: AsyncSession, world: World) -> None:
     fast, slow, recent, fresh, rated = [await make_pro(db_session, world) for _ in range(5)]
-    await db_session.execute(
-        update(ProProfile).where(ProProfile.id == rated).values(rating_avg=Decimal("4.00"))
-    )
+    # A published review of 4 (#78: the rating is computed from the reviews), so rated is not
+    # among the unrated, who come after it.
+    await rate(db_session, rated, 4)
     # Past requests, answered fast and slow, and one sent yesterday with no answer yet.
     for pro_id, answered_after in ((fast, 60), (slow, 6_000), (recent, None)):
         past = await make_request(db_session, world, status=RequestStatus.FINDING_PRO)
@@ -294,22 +293,40 @@ async def test_ranking_reads_the_dispatch_history(db_session: AsyncSession, worl
     await set_max_pros(db_session, 4)
     request_id = await make_request(db_session, world)
 
-    await DispatchService(db_session).dispatch(request_id)
+    await DispatchService(db_session, REVIEW_PUBLISH_AFTER).dispatch(request_id)
 
     # Rated first, then the fast and the slow answerers, then the one never sent a request.
     assert await dispatched_to(db_session, request_id) == {rated, fast, slow, fresh}
 
 
 async def test_caps_at_n_from_settings(db_session: AsyncSession, world: World) -> None:
-    best, second, _ = [
-        await make_pro(db_session, world, rating=rating) for rating in ("4.90", "4.80", "4.70")
-    ]
+    best, second, third = [await make_pro(db_session, world) for _ in range(3)]
+    # Published reviews (#78): 5.0, 4.5 and 4.0.
+    await rate(db_session, best, 5)
+    await rate(db_session, second, 5, 4)
+    await rate(db_session, third, 4)
     await set_max_pros(db_session, 2)
     request_id = await make_request(db_session, world)
 
-    await DispatchService(db_session).dispatch(request_id)
+    await DispatchService(db_session, REVIEW_PUBLISH_AFTER).dispatch(request_id)
 
     assert await dispatched_to(db_session, request_id) == {best, second}
+
+
+async def test_ranking_counts_published_reviews_only(
+    db_session: AsyncSession, world: World
+) -> None:
+    """#78: the ranking reads the rating every surface shows. A 5 not published yet (its job
+    confirmed now, the pro has not answered) does not lift its pro over a published 4."""
+    hidden_five, published_four = [await make_pro(db_session, world) for _ in range(2)]
+    await rate(db_session, hidden_five, 5, published=False)
+    await rate(db_session, published_four, 4)
+    await set_max_pros(db_session, 1)
+    request_id = await make_request(db_session, world)
+
+    await DispatchService(db_session, REVIEW_PUBLISH_AFTER).dispatch(request_id)
+
+    assert await dispatched_to(db_session, request_id) == {published_four}
 
 
 # The move to finding_pro
@@ -322,7 +339,9 @@ async def test_moves_to_finding_pro_in_same_transaction_as_rows(
     request_id = await make_request(db_session, world, status=RequestStatus.REVIEWING)
 
     savepoint = await db_session.begin_nested()
-    assert (await DispatchService(db_session).dispatch(request_id)).outcome is DispatchOutcome.SENT
+    assert (
+        await DispatchService(db_session, REVIEW_PUBLISH_AFTER).dispatch(request_id)
+    ).outcome is DispatchOutcome.SENT
     assert await dispatched_to(db_session, request_id) == {pro}
     assert await status_of(db_session, request_id) is RequestStatus.FINDING_PRO
     await savepoint.rollback()  # the caller's transaction fails: both go
@@ -338,7 +357,7 @@ async def test_moves_to_finding_pro_in_same_transaction_as_rows(
     monkeypatch.setattr(RequestStateMachine, "transition", refuse)
     savepoint = await db_session.begin_nested()
     with pytest.raises(RuntimeError):
-        await DispatchService(db_session).dispatch(request_id)
+        await DispatchService(db_session, REVIEW_PUBLISH_AFTER).dispatch(request_id)
     await savepoint.rollback()
     assert await dispatched_to(db_session, request_id) == set()
 
@@ -349,14 +368,14 @@ async def test_uncategorized_goes_to_reviewing_without_dispatch(
     await make_pro(db_session, world)
     request_id = await make_request(db_session, world, categorized=False)
 
-    outcome = (await DispatchService(db_session).dispatch(request_id)).outcome
+    outcome = (await DispatchService(db_session, REVIEW_PUBLISH_AFTER).dispatch(request_id)).outcome
 
     assert outcome is DispatchOutcome.TO_REVIEW
     assert await status_of(db_session, request_id) is RequestStatus.REVIEWING
     assert await dispatched_to(db_session, request_id) == set()
     # Still uncategorized in reviewing: the BDC classifies it first, nothing happens.
     assert (
-        await DispatchService(db_session).dispatch(request_id)
+        await DispatchService(db_session, REVIEW_PUBLISH_AFTER).dispatch(request_id)
     ).outcome is DispatchOutcome.NOT_DISPATCHABLE
 
 
@@ -367,7 +386,9 @@ async def test_no_eligible_pros_leaves_status_and_logs(
     request_id = await make_request(db_session, world)
 
     with caplog.at_level(logging.INFO):
-        outcome = (await DispatchService(db_session).dispatch(request_id)).outcome
+        outcome = (
+            await DispatchService(db_session, REVIEW_PUBLISH_AFTER).dispatch(request_id)
+        ).outcome
 
     assert outcome is DispatchOutcome.NO_ELIGIBLE_PROS
     assert await status_of(db_session, request_id) is RequestStatus.RECEIVED
@@ -393,7 +414,7 @@ async def test_non_dispatchable_status_is_noop(
     await make_pro(db_session, world)
     request_id = await make_request(db_session, world, status=status)
 
-    outcome = (await DispatchService(db_session).dispatch(request_id)).outcome
+    outcome = (await DispatchService(db_session, REVIEW_PUBLISH_AFTER).dispatch(request_id)).outcome
 
     assert outcome is DispatchOutcome.NOT_DISPATCHABLE
     assert await status_of(db_session, request_id) is status
@@ -401,7 +422,9 @@ async def test_non_dispatchable_status_is_noop(
 
 
 async def test_unknown_request_is_noop(db_session: AsyncSession) -> None:
-    outcome = (await DispatchService(db_session).dispatch(uuid.uuid4())).outcome
+    outcome = (
+        await DispatchService(db_session, REVIEW_PUBLISH_AFTER).dispatch(uuid.uuid4())
+    ).outcome
 
     assert outcome is DispatchOutcome.UNKNOWN_REQUEST
 
@@ -413,7 +436,7 @@ async def test_logs_carry_ids_only(
     request_id = await make_request(db_session, world)
 
     with caplog.at_level(logging.DEBUG):
-        await DispatchService(db_session).dispatch(request_id)
+        await DispatchService(db_session, REVIEW_PUBLISH_AFTER).dispatch(request_id)
 
     output = "\n".join(JsonFormatter().format(r) for r in caplog.records)
     for secret in ("probe-description", "1 Main St", world.zip_code, "@x.com"):
@@ -430,9 +453,9 @@ async def test_rerun_is_noop(db_session: AsyncSession, world: World) -> None:
     pro = await make_pro(db_session, world)
     request_id = await make_request(db_session, world)
 
-    first = (await DispatchService(db_session).dispatch(request_id)).outcome
+    first = (await DispatchService(db_session, REVIEW_PUBLISH_AFTER).dispatch(request_id)).outcome
     await make_pro(db_session, world)  # a new eligible pro appears
-    second = (await DispatchService(db_session).dispatch(request_id)).outcome
+    second = (await DispatchService(db_session, REVIEW_PUBLISH_AFTER).dispatch(request_id)).outcome
 
     assert (first, second) == (DispatchOutcome.SENT, DispatchOutcome.ALREADY_DISPATCHED)
     assert await dispatched_to(db_session, request_id) == {pro}
@@ -488,10 +511,12 @@ async def test_concurrent_runs_insert_once(committed: Committed) -> None:
 
         # The first run locks the request and holds its transaction open...
         assert (
-            await DispatchService(first).dispatch(committed.request_id)
+            await DispatchService(first, REVIEW_PUBLISH_AFTER).dispatch(committed.request_id)
         ).outcome is DispatchOutcome.SENT
         # ...while the second waits on that lock, as Postgres reports; then the first commits.
-        rerun = asyncio.create_task(DispatchService(second).dispatch(committed.request_id))
+        rerun = asyncio.create_task(
+            DispatchService(second, REVIEW_PUBLISH_AFTER).dispatch(committed.request_id)
+        )
         await wait_until_blocked(sessions, waiter=second_pid, holder=first_pid)
         await first.commit()
 

@@ -17,9 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.modules.addresses.models import Address
 from app.modules.audit.service import AuditService
-from app.modules.cancellations.models import JobCancellation
+from app.modules.cancellations.models import CancelParty, JobCancellation
 from app.modules.cancellations.repository import CancellationRepository
-from app.modules.cancellations.schemas import CustomerCancelIn, CustomerCancelReason
+from app.modules.cancellations.schemas import (
+    CustomerCancelIn,
+    CustomerCancelReason,
+    ProCancelIn,
+    ProCancelReason,
+)
 from app.modules.cancellations.service import CancelConfig, CancellationService
 from app.modules.jobs.location import NoJobLocationStore
 from app.modules.jobs.models import Job, JobEvent, JobStatus
@@ -43,6 +48,7 @@ class CommittedBooking:
     job_id: uuid.UUID
     customer: UserAccount
     audited: list[tuple[uuid.UUID, str]]
+    pro: UserAccount
 
 
 @pytest.fixture
@@ -123,17 +129,10 @@ async def booking(
         )
         session.add(payment)
         await session.commit()
-        account = UserAccount(
-            id=customer.id,
-            email=customer.email,
-            role=customer.role,
-            locale=customer.locale,
-            status=customer.status,
-            public_code=customer.public_code,
-            created_at=customer.created_at,
-        )
     try:
-        yield CommittedBooking(sessions, job.id, account, audited)
+        yield CommittedBooking(
+            sessions, job.id, _account(customer), audited, pro=_account(pro_user)
+        )
     finally:
         async with sessions() as session:
             await session.execute(delete(Refund).where(Refund.job_id == job.id))
@@ -148,6 +147,18 @@ async def booking(
             await session.execute(delete(User).where(User.id.in_([customer.id, pro_user.id])))
             await session.commit()
         await engine.dispose()
+
+
+def _account(user: User) -> UserAccount:
+    return UserAccount(
+        id=user.id,
+        email=user.email,
+        role=user.role,
+        locale=user.locale,
+        status=user.status,
+        public_code=user.public_code,
+        created_at=user.created_at,
+    )
 
 
 def service(session: AsyncSession) -> CancellationService:
@@ -211,3 +222,73 @@ async def test_two_cancels_at_once_make_one_cancellation_and_one_refund(
         status = await check.scalar(select(Job.status).where(Job.id == booking.job_id))
     assert (rows, refunds, status) == (1, 1, JobStatus.CANCELLED)
     assert booking.audited == [(booking.customer.id, "job.cancel")]
+
+
+@pytest.mark.parametrize("first_party", [CancelParty.CUSTOMER, CancelParty.PRO])
+async def test_the_customer_and_the_pro_cancelling_at_once_make_one_cancellation(
+    booking: CommittedBooking, monkeypatch: pytest.MonkeyPatch, first_party: CancelParty
+) -> None:
+    """#69 part 2: the customer and the pro cancel at once. The first holds the job's lock;
+    the other waits on it (as Postgres reports), then returns the first's cancellation: one
+    row, one refund, one audit row, by the side that came first."""
+    sessions = booking.sessions
+    inside = asyncio.Event()
+    go_on = asyncio.Event()
+    original = CancellationRepository.of_job
+    paused: list[bool] = []
+
+    async def pausing(self: CancellationRepository, job_id: uuid.UUID) -> JobCancellation | None:
+        if not paused:
+            paused.append(True)
+            inside.set()
+            await go_on.wait()
+        return await original(self, job_id)
+
+    def by(party: CancelParty, session: AsyncSession) -> Any:
+        if party is CancelParty.CUSTOMER:
+            return service(session).cancel_as_customer(
+                booking.customer,
+                booking.job_id,
+                CustomerCancelIn(reason_code=CustomerCancelReason.CHANGED_MY_MIND),
+                RecordingQueue(),
+                uuid.uuid4(),
+            )
+        return service(session).cancel_as_pro(
+            booking.pro,
+            booking.job_id,
+            ProCancelIn(reason_code=ProCancelReason.CANNOT_MAKE_IT),
+            RecordingQueue(),
+            uuid.uuid4(),
+        )
+
+    second_party = CancelParty.PRO if first_party is CancelParty.CUSTOMER else CancelParty.CUSTOMER
+    monkeypatch.setattr(CancellationRepository, "of_job", pausing)
+    async with sessions() as first, sessions() as second:
+        first_pid, second_pid = await backend_pid(first), await backend_pid(second)
+        one = asyncio.create_task(by(first_party, first))
+        other: asyncio.Task[Any] | None = None
+        try:
+            async with asyncio.timeout(5):
+                await inside.wait()
+            other = asyncio.create_task(by(second_party, second))
+            await wait_until_blocked(sessions, waiter=second_pid, holder=first_pid)
+        finally:
+            go_on.set()
+            results = await asyncio.gather(one, *([other] if other else []))
+
+    [(first_out, first_created), (second_out, second_created)] = results
+    assert (first_created, second_created) == (True, False)
+    assert first_out.cancelled_by is second_out.cancelled_by is first_party
+    async with sessions() as check:
+        parties = (
+            await check.scalars(
+                select(JobCancellation.party).where(JobCancellation.job_id == booking.job_id)
+            )
+        ).all()
+        refunds = await check.scalar(
+            select(func.count()).select_from(Refund).where(Refund.job_id == booking.job_id)
+        )
+        status = await check.scalar(select(Job.status).where(Job.id == booking.job_id))
+    assert (list(parties), refunds, status) == ([first_party], 1, JobStatus.CANCELLED)
+    actor = booking.customer if first_party is CancelParty.CUSTOMER else booking.pro
+    assert booking.audited == [(actor.id, "job.cancel")]
