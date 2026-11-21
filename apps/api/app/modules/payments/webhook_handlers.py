@@ -8,6 +8,11 @@ the payment status the event stands for, and the metadata payment_id it may adop
 the quotes pushes the customer. An event whose object is not a PaymentIntent with an id, an
 integer amount and a currency is malformed: logged (the event id and type) and raised, so it
 ends failed for staff.
+
+A PaymentIntent whose metadata names a kind (`kind`, #273: a tip's) is not a job payment's: the
+registry routes its events to that kind's handler (webhooks/handlers.py), and these handlers
+skip one that reaches them anyway, at debug level, before reading any payment: it is neither an
+unknown intent nor a payment's.
 """
 
 import logging
@@ -18,6 +23,7 @@ from typing import Final
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.integrations.stripe_payments import INTENT_KIND_KEY
 from app.modules.notifications.events import (
     push_booking_not_completed,
     push_job_booked,
@@ -79,6 +85,16 @@ def intent_event(event: StripeEvent) -> IntentEvent:
     )
 
 
+def intent_kind(event: StripeEvent) -> str | None:
+    """The `kind` the event's PaymentIntent names in its metadata (#273); None for a job
+    payment's, and for an object too malformed to tell (its handler then refuses it)."""
+    data = event.payload.get("data")
+    intent = data.get("object") if isinstance(data, Mapping) else None
+    metadata = intent.get("metadata") if isinstance(intent, Mapping) else None
+    kind = metadata.get(INTENT_KIND_KEY) if isinstance(metadata, Mapping) else None
+    return kind if isinstance(kind, str) else None
+
+
 def _malformed(event: StripeEvent) -> PaymentEventMalformedError:
     logger.error(
         "payment_event_malformed",
@@ -118,6 +134,13 @@ async def announce(outcome: Reconciled, queue: JobQueue, timeout_seconds: float)
 
 def _moving_to(status: PaymentStatus) -> StripeEventHandler:
     async def handle(session: AsyncSession, event: StripeEvent, after_commit: AfterCommit) -> None:
+        if intent_kind(event) is not None:
+            # Another kind's PaymentIntent (a tip's): never a payment's to read or change.
+            logger.debug(
+                "payment_event_other_kind",
+                extra={"stripe_event_id": event.stripe_event_id, "event_type": event.event_type},
+            )
+            return
         outcome = await PaymentReconciler(session).apply(intent_event(event), status)
         if outcome is not None:
             after_commit.add(partial(announce, outcome))
