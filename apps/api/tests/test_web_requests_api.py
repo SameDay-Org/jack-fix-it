@@ -351,6 +351,30 @@ async def test_a_guest_s_request_is_never_dispatched_or_assigned(
     assert (await web_requests(db_session))[0].status is RequestStatus.RECEIVED
 
 
+async def test_a_guest_is_never_notified(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, served: None, queue: RecordingQueue
+) -> None:
+    """A customer's pushes come from quotes, jobs and payments, which a request never
+    dispatched never reaches; what the BDC can do to it (here, cancel it) queues nothing for
+    the guest, who has no device and no email anyone receives."""
+    assert (await send(db_client)).status_code == 201
+    [request] = await web_requests(db_session)
+    [guest] = await guests(db_session)
+    request_id, guest_id = request.id, guest.id
+    admin = await make_caller(db_session, UserRole.ADMIN)
+    before = dict(queue.jobs)
+
+    moved = await db_client.post(
+        f"/v1/admin/requests/{request_id}/status",
+        json={"to": "cancelled", "reason": "Called: they found someone else."},
+        headers=admin.headers,
+    )
+
+    assert moved.status_code == 200, moved.text
+    queued = [job for key, job in queue.jobs.items() if key not in before]
+    assert all(str(guest_id) not in str(job) for job in queued), queued
+
+
 async def test_a_guest_never_signs_in(
     db_client: httpx.AsyncClient, db_session: AsyncSession, served: None
 ) -> None:

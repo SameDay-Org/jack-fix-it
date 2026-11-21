@@ -115,6 +115,14 @@ rules apply.
   reason (each its own 409 in `ops/errors.py`), and never sends a request to a pro twice. No
   other module inserts a `request_dispatches` row. The eligible list (`eligible-pros`) names
   pros by first name and last initial only.
+- **Web requests and guests (#86).** A request made on the web without an account belongs to a
+  guest customer: `users.status = guest`, no name or phone, an `@guest.invalid` email, a
+  hash nothing verifies; the sign-in refuses it by status too. Its contact (first name,
+  email, phone, consent) lives only in `web_request_contacts`, which only the BDC card reads
+  (`customer.has_account` false). A guest's request is never dispatched in the MVP: the
+  automatic dispatch returns `no_account`, the sweep leaves it out (`UserService.guest_ids`),
+  and a manual assignment refuses with 409 `request_without_account`. Code that lists,
+  counts, notifies or charges customers must leave guests out.
 - **Offers read the pro under locks (#511).** The request's row lock does not cover a pro's
   eligibility, so every offer (by hand or automatic) reads the pro again in the writing
   transaction, FOR SHARE until the commit, in this order: the request (FOR UPDATE), the ZIP's
@@ -277,10 +285,14 @@ them idempotent: they can run twice.
   `dispute.resolve` audit row per resolution (`AuditService.record`); staff reads in
   `disputes/staff.py` (the detail is audited, `dispute.read`).
 - **The web service (#409).** Routes the web app's server calls on a visitor's behalf
-  (`POST /v1/interest`, and #86's to come) take `app.web_service.WebService`: `X-JFI-Web-Key` =
+  (`POST /v1/interest`, `POST /v1/web/requests`) take `app.web_service.WebService`: `X-JFI-Web-Key` =
   `WEB_SERVICE_KEY` (constant-time compare, else 401 `invalid_service_key`), and only then the
   visitor's address from `X-JFI-Client-IP` for per-address limits. Never read a client's
   `X-Forwarded-For`; both headers are scrubbed from Sentry (`observability._CREDENTIAL_HEADERS`).
+  Public routes the app and the web both call (the ZIP check, the waitlist join) count
+  `visitor_address`: the forwarded address behind a valid key, else the socket's, never a 401.
+  `POST /v1/web/requests` checks the key and caps the body (`Content-Length`,
+  `WEB_REQUEST_MAX_BODY_BYTES`) before FastAPI reads it (`WebServiceBodyRoute`).
 
 ## Stripe webhooks (#40, #280)
 
