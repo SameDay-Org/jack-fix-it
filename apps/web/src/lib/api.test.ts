@@ -169,4 +169,29 @@ describe("apiPost", () => {
       expect(answer, String(status)).toBeUndefined();
     }
   });
+
+  it("keeps a refusal's Retry-After in whole seconds, and no wait for anything else", async () => {
+    const cases = [
+      ["30", 30],
+      [" 3600 ", 3600],
+      ["0", null],
+      ["-5", null],
+      ["1.5", null],
+      ["soon", null],
+      ["Wed, 21 Oct 2026 07:28:00 GMT", null],
+      [null, null],
+    ] as const;
+    for (const [header, seconds] of cases) {
+      const headers = header === null ? undefined : { "Retry-After": header };
+      fetchMock.mockResolvedValueOnce(
+        Response.json({ error: { code: "rate_limited", message: "m" } }, { status: 429, headers }),
+      );
+      const refusal = await apiPost("/v1/auth/refresh", { refresh_token: "rt" }).catch(
+        (error: unknown) => error,
+      );
+      expect(refusal, String(header)).toBeInstanceOf(ApiError);
+      expect((refusal as ApiError).code).toBe("rate_limited");
+      expect((refusal as ApiError).retryAfterSeconds, String(header)).toBe(seconds);
+    }
+  });
 });
