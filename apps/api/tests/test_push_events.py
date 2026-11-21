@@ -120,6 +120,8 @@ CALLERS = (
         "/jobs/{job_id}/chat",
         kind="chat_message",
     ),
+    # A tip succeeds once (#273 PR A2): one message per tip, opening the pro's job.
+    Caller("push_tip_received", "pro_user_id", "tip_received:{tip_id}", "/jobs/{job_id}"),
 )
 
 
