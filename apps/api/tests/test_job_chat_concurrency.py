@@ -26,7 +26,7 @@ from app.modules.quotes.models import Quote
 from app.modules.requests.models import RequestOrigin, ServiceRequest
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
-from tests.conftest import backend_pid, wait_until_blocked
+from tests.conftest import backend_pid, quiet_chat_notifier, wait_until_blocked
 from tests.helpers import as_status_writer
 
 NOW = datetime(2026, 11, 7, 12, 0, tzinfo=UTC)
@@ -167,7 +167,9 @@ async def test_a_message_waiting_on_a_closing_job_is_refused(
         holder = await backend_pid(closing)
         waiter = await backend_pid(chatting)
         send = asyncio.create_task(
-            ChatService(chatting, CONFIG).send(world.pro, world.job_id, "on my way back")
+            ChatService(chatting, CONFIG, quiet_chat_notifier()).send(
+                world.pro, world.job_id, "on my way back"
+            )
         )
         await wait_until_blocked(world.sessions, waiter=waiter, holder=holder)
         await closing.commit()
@@ -223,7 +225,9 @@ async def test_concurrent_messages_commit_in_created_at_order(
         holder = await backend_pid(first)
         waiter = await backend_pid(second)
         send = asyncio.create_task(
-            ChatService(second, CONFIG).send(world.customer, world.job_id, "second")
+            ChatService(second, CONFIG, quiet_chat_notifier()).send(
+                world.customer, world.job_id, "second"
+            )
         )
         await wait_until_blocked(world.sessions, waiter=waiter, holder=holder)
         # The first was taken (its transaction began) before the second, and commits first.

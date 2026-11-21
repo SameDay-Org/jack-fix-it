@@ -37,6 +37,7 @@ from app.modules.pros.router import router as pros_router
 from app.modules.pros.router import staff_router as staff_pros_router
 from app.modules.quotes.router import customer_router as customer_quotes_router
 from app.modules.quotes.router import router as quotes_router
+from app.modules.receipts.router import router as receipts_router
 from app.modules.requests.router import router as requests_router
 from app.modules.reviews.router import public_pro_router
 from app.modules.reviews.router import rating_router as my_rating_router
@@ -44,6 +45,7 @@ from app.modules.reviews.router import router as reviews_router
 from app.modules.service_areas.router import router as service_areas_router
 from app.modules.support.router import router as support_router
 from app.modules.support.router import staff_router as staff_support_router
+from app.modules.tips.router import router as tips_router
 from app.modules.uploads.router import router as uploads_router
 from app.modules.waitlist.router import router as waitlist_router
 from app.modules.web_requests.router import router as web_requests_router
@@ -98,5 +100,7 @@ v1_router.include_router(earnings_router)
 v1_router.include_router(staff_disputes_router)
 v1_router.include_router(staff_metrics_router)
 v1_router.include_router(my_rating_router)
+v1_router.include_router(tips_router)
+v1_router.include_router(receipts_router)
 # After pros_router: /v1/pros/me is matched before /v1/pros/{pro_id} (#78).
 v1_router.include_router(public_pro_router)

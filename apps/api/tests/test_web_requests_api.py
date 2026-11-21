@@ -5,17 +5,18 @@ the honeypot, the body cap, the limits, the BDC card, and the guest's exclusions
 rolled-back test session, but the race (real commits, at the end)."""
 
 import asyncio
+import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Final
 
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
@@ -149,6 +150,28 @@ async def test_a_served_zip_makes_one_received_request_for_a_guest_with_its_cont
     assert all("dispatch" not in str(job) for job in queue.jobs.values())
 
 
+@pytest.mark.parametrize("utm", [None, {}, {"source": None}])
+async def test_a_request_without_a_campaign_stores_sql_null(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, served: None, utm: object
+) -> None:
+    """No UTM, an empty one, or one whose keys are all null: the column is SQL NULL, never a
+    JSON null (#86 review)."""
+    data = body()
+    if utm is None:
+        del data["utm"]
+    else:
+        data["utm"] = utm
+
+    assert (await send(db_client, data)).status_code == 201
+
+    [request] = await web_requests(db_session)
+    stored = await db_session.execute(
+        text("SELECT utm IS NULL, jsonb_typeof(utm) FROM service_requests WHERE id = :id"),
+        {"id": request.id},
+    )
+    assert stored.one() == (True, None)
+
+
 async def test_a_replay_answers_the_same_code_and_another_body_is_refused(
     db_client: httpx.AsyncClient, db_session: AsyncSession, served: None
 ) -> None:
@@ -267,18 +290,57 @@ async def test_a_refused_limit_writes_nothing(
 # --- The contact: the BDC's only -----------------------------------------------------------
 
 
+def rendered_logs(caplog: pytest.LogCaptureFixture) -> str:
+    """Every captured record as a line would carry it: its message, and every attribute, the
+    `extra` fields included (a JSON formatter writes those too)."""
+    return caplog.text + "\n".join(
+        json.dumps(record.__dict__, default=str) for record in caplog.records
+    )
+
+
 async def test_the_contact_never_reaches_the_logs(
     db_client: httpx.AsyncClient, served: None, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """Neither in a message nor in a record's extra fields (#569 r1 B1: a contact put in a log
+    record's `extra` must fail this)."""
     key = str(uuid.uuid4())
     with caplog.at_level(logging.DEBUG):
         await send(db_client, key=key)
         await send(db_client, key=key)
         await send(db_client, body(address=UNSERVED))
 
-    assert "web_request_created" in caplog.text
+    logged = rendered_logs(caplog)
+    assert "web_request_created" in logged
     for leak in (FIRST, EMAIL, PHONE, key, VISITOR):
-        assert leak not in caplog.text
+        assert leak not in logged
+
+
+@pytest.mark.parametrize("zip_served", [True, False])
+async def test_a_phone_outside_the_allowed_country_codes_is_refused(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, served: None, zip_served: bool
+) -> None:
+    """#569 r1 B2: PHONE_ALLOWED_COUNTRY_CODES (+1 in the tests), checked before anything is
+    written or the waitlist is joined: a 422, no guest, no request, no waitlist entry."""
+    contact = {"first_name": FIRST, "email": EMAIL, "phone": "+447911123456"}
+    data = body(contact=contact) if zip_served else body(contact=contact, address=UNSERVED)
+
+    answer = await send(db_client, data)
+
+    assert (answer.status_code, answer.json()["error"]["code"]) == (422, "validation_error")
+    assert (await web_requests(db_session), await guests(db_session)) == ([], [])
+    assert await count(db_session, WaitlistEntry) == 0
+
+
+async def test_a_preferred_date_in_the_past_is_refused(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, served: None
+) -> None:
+    """As the app's create refuses it: a 422, and nothing stored (#569 r1, non-blocking)."""
+    yesterday = (datetime.now(UTC) - timedelta(days=1)).date().isoformat()
+
+    answer = await send(db_client, body(preferred_date=yesterday))
+
+    assert answer.status_code == 422, answer.text
+    assert (await web_requests(db_session), await guests(db_session)) == ([], [])
 
 
 async def test_staff_read_the_contact_origin_and_utm_and_nobody_else_does(
