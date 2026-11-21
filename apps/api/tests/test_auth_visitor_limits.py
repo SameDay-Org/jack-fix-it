@@ -7,9 +7,10 @@ anonymous script could lock every staff member out of the panel (logins) and sig
 (X-JFI-Client-IP) is the one counted. Without the key, the header is never read.
 """
 
+import json
 import logging
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Final
 
 import httpx
@@ -58,7 +59,9 @@ def from_web(visitor: str | None, key: str | None = KEY) -> dict[str, str]:
     return headers
 
 
-async def login(client: httpx.AsyncClient, n: int, headers: dict[str, str]) -> int:
+async def login(
+    client: httpx.AsyncClient, n: int, headers: dict[str, str] | list[tuple[str, str]]
+) -> int:
     body = {"email": f"nobody-{n}@example.com", "password": "not-the-password"}
     return (await client.post("/v1/auth/login", json=body, headers=headers)).status_code
 
@@ -171,13 +174,44 @@ async def test_without_the_key_the_visitor_header_is_ignored(
     assert statuses[-1] == 429
 
 
-async def test_the_key_without_a_visitor_counts_the_web_service_and_says_so(
-    db_client: httpx.AsyncClient, caplog: pytest.LogCaptureFixture
-) -> None:
-    with caplog.at_level(logging.WARNING):
-        statuses = [await login(db_client, n, from_web(None)) for n in range(LIMIT + 1)]
+def rendered_logs(caplog: pytest.LogCaptureFixture) -> str:
+    """Every captured record as a log line could carry it: the formatted message and every
+    attribute, `extra` fields included (the app's JSON formatter writes those too)."""
+    return caplog.text + "\n".join(
+        json.dumps(record.__dict__, default=str) for record in caplog.records
+    )
 
-    assert statuses[-1] == 429  # the web service's own address, as before
-    assert "web_service_visitor_ip_missing" in [record.getMessage() for record in caplog.records]
-    assert ATTACKER not in caplog.text
-    assert KEY not in caplog.text
+
+# X-JFI-Client-IP values per request n that name no one visitor (handoffs/530-web.md): no
+# header, a value that is not an address, two headers. A new value each request, so a value
+# taken as the bucket would never reach the limit.
+NO_ONE_VISITOR: Final[dict[str, Callable[[int], tuple[str, ...]]]] = {
+    "no_header": lambda n: (),
+    "not_an_address": lambda n: (f"not-an-address-{n}",),
+    "two_headers": lambda n: (f"192.0.2.{n + 1}", f"198.51.100.{n + 1}"),
+}
+
+
+@pytest.mark.parametrize("visitors", NO_ONE_VISITOR.values(), ids=NO_ONE_VISITOR.keys())
+async def test_the_key_without_one_valid_visitor_counts_the_web_service_and_says_so(
+    db_client: httpx.AsyncClient,
+    caplog: pytest.LogCaptureFixture,
+    visitors: Callable[[int], tuple[str, ...]],
+) -> None:
+    sent = [visitors(n) for n in range(LIMIT + 1)]
+    with caplog.at_level(logging.DEBUG):
+        statuses = [
+            await login(
+                db_client,
+                n,
+                [("x-jfi-web-key", KEY), *(("x-jfi-client-ip", value) for value in values)],
+            )
+            for n, values in enumerate(sent)
+        ]
+
+    assert statuses == [401] * LIMIT + [429]  # the web service's own address, as before
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages.count("web_service_visitor_ip_missing") == LIMIT + 1
+    logged = rendered_logs(caplog)
+    for leak in (KEY, *(value for values in sent for value in values)):
+        assert leak not in logged
