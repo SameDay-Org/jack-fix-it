@@ -62,7 +62,7 @@ const RATEABLE: readonly ProJob["status"][] = ["confirmed", "paid_out"];
 const BEFORE_PHOTO_STEPS: readonly JobStep[] = ["onTheWay", "arrived", "working"];
 /** The dock's padding under its last control, above the bottom safe area (Tailwind 4, 16 dp). */
 const DOCK_PADDING = 16;
-/** Space kept above a Save button brought into view by a blocked Job's done (Tailwind 6, 24 dp). */
+/** Space kept under a Save button brought into view by a blocked Job's done (Tailwind 6, 24 dp). */
 const SAVE_REVEAL_MARGIN = 24;
 
 /** The customer's first name, or "the customer" in the middle of a sentence. */
@@ -154,6 +154,8 @@ export function ProJobScreen() {
   useAnnounceStep(data);
   const pull = usePullToRefresh(id, data?.status === "disputed", refetch);
   const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
+  // The page's visible height, above the dock: where a Save button brought into view ends.
+  const viewport = useRef(0);
   const beforeSave = useRef<ComponentRef<typeof View>>(null);
   const afterSave = useRef<ComponentRef<typeof View>>(null);
   // Job's done is closed while photos wait to be saved: a tap on it says so and brings the Save
@@ -166,8 +168,10 @@ export function ProJobScreen() {
     if (!target || !scroll || !content) return;
     target.measureLayout(
       content,
-      (_x, y) => {
-        scroll.scrollTo({ y: Math.max(0, y - SAVE_REVEAL_MARGIN), animated: true });
+      (_x, y, _width, height) => {
+        // Its bottom right above the dock, so the photos it saves stay in view above it.
+        const to = Math.max(0, y + height + SAVE_REVEAL_MARGIN - viewport.current);
+        scroll.scrollTo({ y: to, animated: true });
         moveAccessibilityFocus(target);
       },
       () => undefined,
@@ -183,6 +187,9 @@ export function ProJobScreen() {
     <Screen bar="light" edges={docked ? [] : undefined} testID="pro-job-screen">
       <ScrollView
         ref={scrollRef}
+        onLayout={(event) => {
+          viewport.current = event.nativeEvent.layout.height;
+        }}
         contentContainerClassName="flex-grow px-4 pb-6"
         refreshControl={
           <RefreshControl
