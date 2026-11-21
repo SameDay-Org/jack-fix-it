@@ -122,8 +122,8 @@ export interface paths {
          * Log out
          * @description Revokes the session the refresh token belongs to. No bearer token is needed.
          *
-         *     Always 204, so the endpoint cannot be used to test tokens. The access token is not revoked
-         *     on the server: it stops working when it expires (`expires_in`).
+         *     Always 204, so the endpoint cannot be used to test tokens. The session's access tokens stop
+         *     working at once too: every bearer route refuses them with 401 invalid_token (#161).
          */
         post: operations["logout_v1_auth_logout_post"];
         delete?: never;
@@ -2056,6 +2056,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pros/me/jobs/{job_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a job I can no longer do (pro)
+         * @description The pro cancels their scheduled or on-the-way job. The customer is never charged: their
+         *     whole payment, tax included, goes back to the original payment method through Stripe. The
+         *     job and its request are cancelled (the request is not reopened: the customer starts a new
+         *     one), and the customer is notified. A job is cancelled once: sending again, or after the
+         *     customer cancelled, returns that cancellation (200).
+         */
+        post: operations["pro_cancel_job_v1_pros_me_jobs__job_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pros/me/jobs/{job_id}/dispute": {
         parameters: {
             query?: never;
@@ -2237,6 +2261,53 @@ export interface paths {
          *     side's score of a job before writing their own.
          */
         get: operations["read_my_rating_v1_users_me_rating_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/{pro_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a pro's public profile
+         * @description An approved pro's public profile: their first name and last initial, the verified flag,
+         *     the average of their published reviews to one decimal (null with none) and how many, the
+         *     jobs they completed, their years of experience, their bio with contact details masked,
+         *     their categories and the month they joined. No photo, contact, address or document.
+         */
+        get: operations["read_public_pro_v1_pros__pro_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pros/{pro_id}/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a pro's published reviews
+         * @description An approved pro's published reviews, newest first: each one's overall rating, its
+         *     comment (contact details masked when written), the reviewer's first name and last initial
+         *     and the day. A review counts once the pro reviewed the job too, or 14 days
+         *     (REVIEW_PUBLISH_AFTER_DAYS) after the job's confirmation. Up to REQUEST_LIST_MAX_LIMIT per
+         *     page.
+         */
+        get: operations["read_public_pro_reviews_v1_pros__pro_id__reviews_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4532,6 +4603,43 @@ export interface components {
          * @enum {string}
          */
         PreferredPeriod: "morning" | "afternoon" | "evening" | "flexible";
+        /** ProCancelIn */
+        ProCancelIn: {
+            reason_code: components["schemas"]["ProCancelReason"];
+            /**
+             * Note
+             * @description Optional, plain text. Contact details are masked before it is stored; only the masked text is kept, for staff.
+             */
+            note?: string | null;
+        };
+        /**
+         * ProCancelReason
+         * @description Why the pro cancels: the reasons their app offers.
+         * @enum {string}
+         */
+        ProCancelReason: "cannot_make_it" | "customer_unreachable" | "scope_changed" | "other";
+        /**
+         * ProCancellationOut
+         * @description The cancel's answer to the pro: their job view's cancellation (who, why and when; never
+         *     the money or the note) with the job. cancelled_by is customer when the customer cancelled
+         *     first.
+         */
+        ProCancellationOut: {
+            cancelled_by: components["schemas"]["CancelParty"];
+            reason_code: components["schemas"]["CancelReason"];
+            /**
+             * Cancelled At
+             * Format: date-time
+             */
+            cancelled_at: string;
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /** @description cancelled. */
+            job_status: components["schemas"]["JobStatus"];
+        };
         /**
          * ProDisputeOut
          * @description The report on the pro's job: the photos' safe copies only, once ready.
@@ -4795,6 +4903,65 @@ export interface components {
             service_areas: components["schemas"]["ServiceAreaOut"][];
         };
         /**
+         * ProProfilePublicOut
+         * @description A pro's public profile (#78), for any signed-in user: an approved pro only. The fields of
+         *     the profile behind a quote (#53), the rating counting published reviews only. Never the
+         *     photo, a contact, an address, a document or license, the account's id or payouts.
+         */
+        ProProfilePublicOut: {
+            /**
+             * Id
+             * Format: uuid
+             * @description The pro's profile id.
+             */
+            id: string;
+            /**
+             * Name
+             * @description The first name and the last name's initial, e.g. "María P."; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked.
+             */
+            name: string | null;
+            /**
+             * Rating Avg
+             * @description The average of the overall ratings of the pro's published reviews, to one decimal, rounded half up, as a string; null before the first one (never 0.0).
+             * @example 4.7
+             */
+            rating_avg: string | null;
+            /**
+             * Rating Count
+             * @description How many published reviews the average is of.
+             */
+            rating_count?: number;
+            /**
+             * Jobs Count
+             * @description Jobs completed on the platform (confirmed).
+             */
+            jobs_count: number;
+            /** Years Of Experience */
+            years_of_experience: number | null;
+            /**
+             * Verified
+             * @description The platform approved the pro's verification.
+             */
+            verified: boolean;
+            /**
+             * Bio
+             * @description What the pro wrote about their work, with contact details masked (app.redaction), as in a quote's scope: the pro's own email and phone, then every contact pattern; null when the pro wrote none.
+             */
+            bio: string | null;
+            /**
+             * Categories
+             * @description The active categories the pro works in, by slug.
+             */
+            categories: components["schemas"]["CategorySummary"][];
+            /**
+             * Member Since
+             * Format: date
+             * @description The first day of the month the pro joined: month precision only.
+             * @example 2026-10-01
+             */
+            member_since: string;
+        };
+        /**
          * ProProfileUpdate
          * @description Only the fields sent change. Verification, payouts, rating and job count are set by the
          *     platform: sending them is a 422 (extra="forbid").
@@ -4844,13 +5011,18 @@ export interface components {
             name: string | null;
             /**
              * Rating Avg
-             * @description The average rating as a decimal string; null before the first review.
-             * @example 4.80
+             * @description The average of the overall ratings of the pro's published reviews, to one decimal, rounded half up, as a string; null before the first one (never 0.0).
+             * @example 4.7
              */
             rating_avg: string | null;
             /**
+             * Rating Count
+             * @description How many published reviews the average is of.
+             */
+            rating_count?: number;
+            /**
              * Jobs Count
-             * @description Jobs completed on the platform.
+             * @description Jobs completed on the platform (confirmed).
              */
             jobs_count: number;
             /** Years Of Experience */
@@ -4895,6 +5067,46 @@ export interface components {
          * @enum {string}
          */
         ProVerificationStatus: "pending" | "approved" | "rejected";
+        /**
+         * PublicReviewOut
+         * @description A published review of a pro, as anyone signed in may read it. Never its id or a user's.
+         */
+        PublicReviewOut: {
+            /**
+             * Rating
+             * @description The overall rating.
+             */
+            rating: number;
+            /**
+             * Comment
+             * @description The reviewer's comment as stored: contact details were masked when it was written (app.redaction); null without one.
+             */
+            comment: string | null;
+            /**
+             * Reviewer
+             * @description The reviewer's first name and last initial, e.g. "María P."; null when a name is missing or shows a contact detail.
+             */
+            reviewer: string | null;
+            /**
+             * Created On
+             * Format: date
+             * @description The day the review was written (UTC).
+             */
+            created_on: string;
+        };
+        /** PublicReviewPage */
+        PublicReviewPage: {
+            /**
+             * Items
+             * @description Newest first.
+             */
+            items: components["schemas"]["PublicReviewOut"][];
+            /**
+             * Next Cursor
+             * @description Pass as `cursor` for the next page; null on the last one.
+             */
+            next_cursor: string | null;
+        };
         /** QueueAgent */
         QueueAgent: {
             /**
@@ -5118,13 +5330,18 @@ export interface components {
             name: string | null;
             /**
              * Rating Avg
-             * @description The average rating as a decimal string; null before the first review.
-             * @example 4.80
+             * @description The average of the overall ratings of the pro's published reviews, to one decimal, rounded half up, as a string; null before the first one (never 0.0).
+             * @example 4.7
              */
             rating_avg: string | null;
             /**
+             * Rating Count
+             * @description How many published reviews the average is of.
+             */
+            rating_count?: number;
+            /**
              * Jobs Count
-             * @description Jobs completed on the platform.
+             * @description Jobs completed on the platform (confirmed).
              */
             jobs_count: number;
             /** Years Of Experience */
@@ -7191,7 +7408,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserOut"];
                 };
             };
-            /** @description invalid_token: missing, invalid or expired access token. */
+            /** @description invalid_token: missing, invalid or expired access token, or its session ended (logout, password reset). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -7233,7 +7450,7 @@ export interface operations {
                     "application/json": components["schemas"]["UserOut"];
                 };
             };
-            /** @description invalid_token: missing, invalid or expired access token. */
+            /** @description invalid_token: missing, invalid or expired access token, or its session ended (logout, password reset). */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -13163,6 +13380,89 @@ export interface operations {
             };
         };
     };
+    pro_cancel_job_v1_pros_me_jobs__job_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description A UUID the app makes once per cancel and sends again with every retry of it. A retry answers 200 with the cancellation as it is now and writes nothing; the same key with another body, or on another job, answers 409 idempotency_key_reused. With or without it, a job is cancelled once. */
+                "Idempotency-Key"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProCancelIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProCancellationOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only pros cancel here (a customer's cancel is separate). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description cancel_not_allowed: the work started, or the job is done, confirmed, paid out, disputed or refunded (the message names its status); cancel_needs_review: the job's payment needs a look by staff first; idempotency_key_reused: the caller already used this Idempotency-Key with a different body or on another job. Nothing was changed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an unknown or a customer's reason_code; a note longer than 500 characters, holding a NUL, or empty once invisible characters are dropped; an unknown field; a job_id or an Idempotency-Key that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many cancels by this pro in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     read_reported_problem_v1_pros_me_jobs__job_id__dispute_get: {
         parameters: {
             query?: never;
@@ -13652,6 +13952,143 @@ export interface operations {
             };
             /** @description The request is invalid. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_public_pro_v1_pros__pro_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pro_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProProfilePublicOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no approved pro with an active account has this id (none, pending, rejected, suspended or no longer a pro: the same answer). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a pro_id that is not a UUID. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many profile reads by this user in the window. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    read_public_pro_reviews_v1_pros__pro_id__reviews_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number | null;
+            };
+            header?: never;
+            path: {
+                pro_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicReviewPage"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no approved pro with an active account has this id (none, pending, rejected, suspended or no longer a pro: the same answer). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a pro_id that is not a UUID, a cursor this API did not write, or a limit out of range. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many profile reads by this user in the window. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

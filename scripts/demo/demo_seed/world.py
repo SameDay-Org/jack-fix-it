@@ -190,13 +190,16 @@ class World:
 
     def actor(self, user_id: uuid.UUID, role: UserRole, email: str) -> Actor:
         """An account as the seed calls the API for it: its own access token, signed with the
-        local JWT secret, so a long run never meets an expired one."""
+        local JWT secret, so a long run never meets an expired one. It names no session (no
+        `sid`, #161): a rerun reads the accounts back without logging in. Such a token is
+        accepted until `sid` is required (#161's contract step), which gives the seed sessions."""
         secret = self.settings.jwt_secret
         if secret is None:
             raise SeedError("JWT_SECRET is not set: the API could not sign a session either")
         token = security.create_access_token(
             user_id=user_id,
             role=role,
+            session_id=None,
             secret=secret.get_secret_value(),
             ttl_seconds=TOKEN_TTL_SECONDS,
             now=datetime.now(UTC),
