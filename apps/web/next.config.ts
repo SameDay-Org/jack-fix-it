@@ -1,11 +1,28 @@
 import type { NextConfig } from "next";
 
-/** Sent with every page and file (pre-QA sweep, 2026-11-19). */
+/**
+ * Sent with every page and file (pre-QA sweep, 2026-11-19; web QA pass 2, 2026-11-20).
+ * - CSP: never framed; no plugin content; no <base> elsewhere; forms post to this site only
+ *   (server actions and their redirects are same-origin). Scripts are not restricted here: that
+ *   needs per-request nonces, a separate decision.
+ * - Permissions-Policy: the site uses none of these features, so no page or embed can ask.
+ * - HSTS: browsers keep to HTTPS for a year. They ignore it over plain HTTP, so local runs are
+ *   unaffected. No includeSubDomains: the domain-wide choice belongs to the domain's owner.
+ */
 export const SECURITY_HEADERS = [
   { key: "X-Frame-Options", value: "DENY" },
-  { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+  {
+    key: "Content-Security-Policy",
+    value: "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'",
+  },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  {
+    key: "Permissions-Policy",
+    value:
+      "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), browsing-topics=()",
+  },
+  { key: "Strict-Transport-Security", value: "max-age=31536000" },
 ];
 
 const nextConfig: NextConfig = {
