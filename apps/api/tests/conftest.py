@@ -49,6 +49,11 @@ TEST_TWILIO_SETTINGS: dict[str, object] = {
 TEST_RATE_LIMIT_SETTINGS: dict[str, object] = {
     "rate_limit_key_secret": "test-rate-limit-key-secret-not-real-0123",
 }
+# Fixture value only, never a real key. make_settings leaves it unset, so the web service's
+# routes refuse every call unless a test sets it; deployed settings must have one (#409).
+TEST_WEB_SERVICE_SETTINGS: dict[str, object] = {
+    "web_service_key": "test-web-service-key-not-real-0123456789",
+}
 # Fixture value only. make_settings leaves it unset, so tests use the development rotation key
 # unless a test sets it; deployed settings must have one (#152).
 TEST_REFRESH_SETTINGS: dict[str, object] = {

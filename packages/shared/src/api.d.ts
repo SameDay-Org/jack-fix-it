@@ -1330,6 +1330,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/interest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join the app-launch interest list (the web service only)
+         * @description Puts the email on the list of people who want to hear when the app is in the stores,
+         *     with the version of the consent words the visitor saw and the time. Called by the web app's
+         *     server with its key (`X-JFI-Web-Key`) and the visitor's address (`X-JFI-Client-IP`): the
+         *     browser never calls it. Nothing is sent to the email.
+         */
+        post: operations["join_interest_v1_interest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/webhooks/stripe": {
         parameters: {
             query?: never;
@@ -3768,6 +3791,37 @@ export interface components {
             /** Max */
             max: number;
         };
+        /** InterestJoin */
+        InterestJoin: {
+            /**
+             * Email
+             * Format: email
+             * @description Trimmed and lowercased before it is checked and stored.
+             */
+            email: string;
+            /**
+             * Locale
+             * @description The page's language.
+             * @default en
+             * @enum {string}
+             */
+            locale: "en" | "es";
+            /**
+             * @description Where the form was: showcase only.
+             * @default showcase
+             */
+            source: components["schemas"]["InterestSource"];
+            /**
+             * Consent Version
+             * @description The id of the consent words the visitor saw, stored with the time of the join (e.g. "interest-2026-11-19"): letters, digits, ".", "-" and "_", 1 to 64 characters.
+             */
+            consent_version: string;
+        };
+        /**
+         * InterestSource
+         * @enum {string}
+         */
+        InterestSource: "showcase";
         /**
          * JobAddress
          * @description Where the job is: the pro of a paid job sees the whole address, to get there.
@@ -11286,6 +11340,55 @@ export interface operations {
                 headers: {
                     /** @description Seconds until the current limit window ends. */
                     "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    join_interest_v1_interest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InterestJoin"];
+            };
+        };
+        responses: {
+            /** @description On the list: the same answer whether the email already was. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_service_key: no X-JFI-Web-Key, or not the web service's. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a bad email, locale, source or consent_version, or an unknown field. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many joins from this visitor's address or for this email in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {

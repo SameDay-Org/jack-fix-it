@@ -285,6 +285,11 @@ them idempotent: they can run twice.
   the table unread; never read or write them. The public profile (`GET /v1/pros/{id}` and its
   `/reviews`) shows only an approved pro with an active account, the same 404 for every other
   case, and never the photo (#53).
+- **The web service (#409).** Routes the web app's server calls on a visitor's behalf
+  (`POST /v1/interest`, and #86's to come) take `app.web_service.WebService`: `X-JFI-Web-Key` =
+  `WEB_SERVICE_KEY` (constant-time compare, else 401 `invalid_service_key`), and only then the
+  visitor's address from `X-JFI-Client-IP` for per-address limits. Never read a client's
+  `X-Forwarded-For`; both headers are scrubbed from Sentry (`observability._CREDENTIAL_HEADERS`).
 
 ## Stripe webhooks (#40, #280)
 
