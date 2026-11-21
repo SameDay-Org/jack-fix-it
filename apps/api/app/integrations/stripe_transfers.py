@@ -12,7 +12,8 @@ it is not eventually consistent like Search) and reading each transfer's metadat
 Once a transfer is stored, it is read again by id: whether it was reversed before then.
 
 What leaves this module is typed and minimal: a charge's id, and a transfer's id, amount,
-currency, destination, metadata job_id and whether it was reversed. Stripe's errors become
+currency, destination, metadata job_id (a job's transfer) or kind and tip_id (a tip's, #273
+PR A2) and whether it was reversed. Stripe's errors become
 `StripeUnavailableError` (network, timeout, 409, 429, 5xx) or `StripeRejectedError` (any other
 4xx), each carrying only Stripe's request id and error code (stripe_errors.py): an SDK error's
 text can name the account or the transfer, so it is never chained or logged. Calls go through
@@ -36,8 +37,9 @@ TRANSFER_LIST_LIMIT = 100
 
 @dataclass(frozen=True)
 class TransferFacts:
-    """A transfer as the release compares it with its row. `destination` and `job_id`
-    (metadata) are None when the transfer has none; `reversed`: any part of it was reversed."""
+    """A transfer as the release compares it with its row. `destination` and the metadata
+    (`job_id` for a job's transfer; `kind` "tip" and `tip_id` for a tip's, #273 PR A2) are None
+    when the transfer has none; `reversed`: any part of it was reversed."""
 
     transfer_id: str
     amount_cents: int
@@ -46,6 +48,8 @@ class TransferFacts:
     job_id: str | None
     reversed: bool
     request_id: str | None
+    kind: str | None = None
+    tip_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -174,6 +178,11 @@ def _facts(transfer: stripe.Transfer) -> TransferFacts:
     destination = transfer.destination
     metadata = transfer.metadata
     response = transfer.last_response
+
+    def named(key: str) -> str | None:
+        value = metadata[key] if metadata is not None and key in metadata else None
+        return value if isinstance(value, str) else None
+
     return TransferFacts(
         transfer_id=transfer.id,
         amount_cents=transfer.amount,
@@ -181,8 +190,10 @@ def _facts(transfer: stripe.Transfer) -> TransferFacts:
         destination=(
             destination if isinstance(destination, str) or destination is None else destination.id
         ),
-        job_id=metadata["job_id"] if metadata is not None and "job_id" in metadata else None,
+        job_id=named("job_id"),
         # A partial reversal leaves `reversed` false with an amount reversed.
         reversed=bool(transfer.reversed) or transfer.amount_reversed > 0,
         request_id=response.request_id if response else None,
+        kind=named("kind"),
+        tip_id=named("tip_id"),
     )
