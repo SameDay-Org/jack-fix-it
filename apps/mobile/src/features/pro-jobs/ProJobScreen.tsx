@@ -47,7 +47,7 @@ import { isJobGone, startJob, stepFailure, useProJob, useSingleFlight } from "./
 import { reportStepFailure } from "./failure";
 import { addressLines, addressText, customerName, dayLabel, mapsUrl, whenLabel } from "./format";
 import { JobPhotoSection } from "./JobPhotoSection";
-import { jobChip, jobStep, type JobStep, type ProJob } from "./phase";
+import { jobChip, jobStep, type JobPhotoKind, type JobStep, type ProJob } from "./phase";
 import { followJob, isSharedStep, sharingConfig, SharingNote } from "./sharing";
 import { useJobDone, type DoneState } from "./useJobDone";
 import { useJobPhotos, type JobPhotos as KindPhotos } from "./useJobPhotos";
@@ -156,13 +156,21 @@ export function ProJobScreen() {
   const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
   // The page's visible height, above the dock: where a Save button brought into view ends.
   const viewport = useRef(0);
+  // The kind whose Save button a blocked Job's done pointed at: ringed until nothing waits.
+  const [nudged, setNudged] = useState<JobPhotoKind | null>(null);
+  const pending = before.pending || after.pending;
+  useEffect(() => {
+    if (!pending) setNudged(null);
+  }, [pending]);
   const beforeSave = useRef<ComponentRef<typeof View>>(null);
   const afterSave = useRef<ComponentRef<typeof View>>(null);
   // Job's done is closed while photos wait to be saved: a tap on it says so and brings the Save
   // button of those photos into view, with the reader's focus on it (#567).
   const showPendingSave = () => {
     announce(t("proJobs.done.savePending"));
-    const target = (after.ready > 0 ? afterSave : beforeSave).current;
+    const kind: JobPhotoKind = after.ready > 0 ? "after" : "before";
+    if ((kind === "after" ? after : before).ready > 0) setNudged(kind);
+    const target = (kind === "after" ? afterSave : beforeSave).current;
     const scroll = scrollRef.current;
     const content = scroll?.getInnerViewRef();
     if (!target || !scroll || !content) return;
@@ -260,6 +268,7 @@ export function ProJobScreen() {
               now={now}
               held={jobDone.busy}
               saveRefs={{ before: beforeSave, after: afterSave }}
+              nudged={nudged}
             />
             {photosFirst(data) ? <JobAddress job={data} /> : null}
             {photosFirst(data) ? <JobAbout job={data} /> : null}
@@ -270,7 +279,7 @@ export function ProJobScreen() {
         <JobActions
           job={data}
           jobDone={jobDone}
-          photosPending={before.pending || after.pending}
+          photosPending={pending}
           onBlockedDone={showPendingSave}
         />
       ) : null}
@@ -294,6 +303,8 @@ type JobPhotosProps = {
   now: number;
   /** Job's done is under way. */
   held: boolean;
+  /** The kind whose Save button a blocked Job's done pointed at (#567). */
+  nudged: JobPhotoKind | null;
   /** Where each kind's Save button sits (#567). */
   saveRefs: {
     before: RefObject<ComponentRef<typeof View> | null>;
@@ -302,7 +313,7 @@ type JobPhotosProps = {
 };
 
 /** Before, then after: each editable while the job takes it, else its saved photos (if any). */
-function JobPhotos({ job, before, after, now, held, saveRefs }: JobPhotosProps) {
+function JobPhotos({ job, before, after, now, held, saveRefs, nudged }: JobPhotosProps) {
   const step = jobStep(job);
   return (
     <View className="gap-8">
@@ -313,6 +324,7 @@ function JobPhotos({ job, before, after, now, held, saveRefs }: JobPhotosProps) 
         editable={BEFORE_PHOTO_STEPS.includes(step)}
         held={held}
         saveRef={saveRefs.before}
+        highlightSave={nudged === "before"}
       />
       <JobPhotoSection
         job={job}
@@ -321,6 +333,7 @@ function JobPhotos({ job, before, after, now, held, saveRefs }: JobPhotosProps) 
         editable={step === "working"}
         held={held}
         saveRef={saveRefs.after}
+        highlightSave={nudged === "after"}
       />
     </View>
   );

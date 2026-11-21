@@ -641,6 +641,10 @@ describe("JobPhotoSection on the pro's job screen", () => {
         { queue: true },
       );
       expect(apiPost).not.toHaveBeenCalled();
+      // The Save button it points at is ringed until nothing waits (#567).
+      expect(screen.getByTestId("pro-job-photos-after-save-highlight")).toBeTruthy();
+      await act(async () => fireEvent.press(screen.getByLabelText("Remove After photo 2")));
+      expect(screen.queryByTestId("pro-job-photos-after-save-highlight")).toBeNull();
     });
 
     it("while Job's done is out, adding and saving photos wait for its answer", async () => {

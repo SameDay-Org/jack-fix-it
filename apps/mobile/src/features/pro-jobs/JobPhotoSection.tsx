@@ -27,6 +27,8 @@ export type JobPhotoSectionProps = {
   held: boolean;
   /** Where the Save button sits, so a blocked Job's done can bring it into view (#567). */
   saveRef?: RefObject<ComponentRef<typeof View> | null>;
+  /** A blocked Job's done pointed here: the Save button is ringed until the photos are saved. */
+  highlightSave?: boolean;
 };
 
 /**
@@ -42,9 +44,17 @@ export function JobPhotoSection({
   editable,
   held,
   saveRef,
+  highlightSave,
 }: JobPhotoSectionProps) {
   return editable ? (
-    <EditablePhotos job={job} photos={photos} now={now} held={held} saveRef={saveRef} />
+    <EditablePhotos
+      job={job}
+      photos={photos}
+      now={now}
+      held={held}
+      saveRef={saveRef}
+      highlightSave={highlightSave}
+    />
   ) : (
     <SavedPhotos photos={photos.saved} kind={photos.kind} now={now} />
   );
@@ -78,7 +88,7 @@ function SavedPhotos({
 
 type EditablePhotosProps = Omit<JobPhotoSectionProps, "editable">;
 
-function EditablePhotos({ job, photos, now, held, saveRef }: EditablePhotosProps) {
+function EditablePhotos({ job, photos, now, held, saveRef, highlightSave }: EditablePhotosProps) {
   const { t } = useTranslation();
   const { kind, saved, upload, max, failed, room, attaching, ready, uploading, saving } = photos;
   const { turnedAway } = photos;
@@ -154,7 +164,16 @@ function EditablePhotos({ job, photos, now, held, saveRef }: EditablePhotosProps
       <View className="items-start gap-2">
         {ready > 0 ? (
           // A plain host view: measured and focused when a blocked Job's done points here.
-          <View ref={saveRef} collapsable={false}>
+          // The ring sits outside the button (its padding and border offset by a negative
+          // margin), so nothing moves when it appears.
+          <View
+            ref={saveRef}
+            collapsable={false}
+            className={
+              highlightSave ? "-m-1.5 rounded-pill border-2 border-green-500 p-1" : undefined
+            }
+            testID={highlightSave ? `${testID}-save-highlight` : undefined}
+          >
             <Button
               label={t("proJobs.photos.save", { count: ready })}
               accessibilityLabel={t(`proJobs.photos.${kind}.saveLabel`, { count: ready })}
