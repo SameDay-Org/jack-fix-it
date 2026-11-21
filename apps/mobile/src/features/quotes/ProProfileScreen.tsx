@@ -14,6 +14,7 @@ import { continuousCorners } from "@/theme";
 import { useExpiryClock } from "./expiry";
 import { formatMoney, formatMonth, formatRating } from "./format";
 import { acceptHref, isUuid, useGuardedPush } from "./navigation";
+import { ProReviews } from "./ProReviews";
 import { displayName, quoteStateOf } from "./quoteText";
 import {
   forgetProProfile,
@@ -30,7 +31,8 @@ import { quotesQueryOptions, useSettledError, type CustomerQuote } from "./useRe
  * page rather than a card. The name leads with the verified seal beside it and the month the pro
  * joined under it; then the figures (rating, jobs done, years) as numerals over small labels,
  * or, for a pro with no job done here yet, a plain-spoken note instead; the bio as body text;
- * the categories with their icons; and one line on what verified means. The bar at the bottom
+ * the categories with their icons; the reviews customers left (#78); and one line on what
+ * verified means. The bar at the bottom
  * holds Accept for the price while the quote is still open in the cached list, and the way back
  * to the quotes. A 404 means the quote left the comparison (expired, withdrawn): the list under
  * this screen is invalidated so its card goes too. A 404 or 403 also drops the profile an earlier
@@ -219,6 +221,8 @@ function Profile({ profile }: ProfileProps) {
           </View>
         </Section>
       ) : null}
+      {/* What customers said, newest first (#78): read by the pro's id. */}
+      <ProReviews proId={profile.id} />
       {profile.verified ? (
         <Text className="text-footnote text-gray-500" testID="pro-profile-trust">
           {t("quotes.profile.trust")}
