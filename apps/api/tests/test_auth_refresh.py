@@ -422,7 +422,8 @@ async def test_logout_revokes_family_and_returns_204(
 ) -> None:
     registered = (await register(db_client)).json()
     token_b = (await refresh(db_client, registered["refresh_token"])).json()["refresh_token"]
-    other_session = (await login(db_client)).json()["refresh_token"]
+    other = (await login(db_client)).json()
+    other_session = other["refresh_token"]
 
     response = await logout(db_client, token_b)
 
@@ -432,8 +433,9 @@ async def test_logout_revokes_family_and_returns_204(
     assert all(row.revoked_at is not None for row in await family_rows(db_session, family_id))
     assert_invalid_refresh_token(await refresh(db_client, token_b))
     assert (await get_row(db_session, other_session)).revoked_at is None
-    # The access token is not revoked on the server; it runs until it expires.
-    assert (await me(db_client, registered["access_token"])).status_code == 200
+    # The session's access token ends with it (#161); the other session's goes on.
+    assert (await me(db_client, registered["access_token"])).status_code == 401
+    assert (await me(db_client, other["access_token"])).status_code == 200
 
 
 @pytest.mark.parametrize(
