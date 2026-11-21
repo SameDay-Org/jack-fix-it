@@ -57,6 +57,11 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "push.job_cancelled_by_customer.body": (
                     "Job {public_code} was cancelled. It is no longer on your schedule."
                 ),
+                "push.job_cancelled_by_pro.title": "Your pro cancelled",
+                "push.job_cancelled_by_pro.body": (
+                    "Your pro cancelled job {public_code}. Your full payment goes back to your "
+                    "original payment method. You can start a new request in the app anytime."
+                ),
                 "push.job_cancelled.title": "Your job was cancelled",
                 "push.job_cancelled.body": (
                     "Job {public_code} is cancelled. Any refund due goes back to your "
@@ -144,6 +149,12 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 "push.job_cancelled_by_customer.title": "El cliente canceló",
                 "push.job_cancelled_by_customer.body": (
                     "El trabajo {public_code} fue cancelado. Ya no está en tu agenda."
+                ),
+                "push.job_cancelled_by_pro.title": "Tu profesional canceló",
+                "push.job_cancelled_by_pro.body": (
+                    "Tu profesional canceló el trabajo {public_code}. El pago completo vuelve a "
+                    "tu método de pago original. Puedes hacer una nueva solicitud en la app "
+                    "cuando quieras."
                 ),
                 "push.job_cancelled.title": "Tu trabajo fue cancelado",
                 "push.job_cancelled.body": (

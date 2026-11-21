@@ -79,6 +79,7 @@ KIND_GROUP: Final[Mapping[str, PreferenceGroup]] = MappingProxyType(
         # A job cancelled by its customer (#69).
         "job_cancelled_by_customer": PreferenceGroup.JOB_UPDATES,  # to a pro
         "job_cancelled": PreferenceGroup.JOB_UPDATES,  # to a customer
+        "job_cancelled_by_pro": PreferenceGroup.JOB_UPDATES,  # to a customer (#69)
         # A dispute's resolution (#76): one kind per decision and side.
         "dispute_refunded": PreferenceGroup.JOB_UPDATES,  # to a customer
         "dispute_partly_refunded": PreferenceGroup.JOB_UPDATES,  # to a customer

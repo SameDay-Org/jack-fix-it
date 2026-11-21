@@ -136,8 +136,8 @@ async def logout(
 ) -> None:
     """Revokes the session the refresh token belongs to. No bearer token is needed.
 
-    Always 204, so the endpoint cannot be used to test tokens. The access token is not revoked
-    on the server: it stops working when it expires (`expires_in`).
+    Always 204, so the endpoint cannot be used to test tokens. The session's access tokens stop
+    working at once too: every bearer route refuses them with 401 invalid_token (#161).
     """
     await auth.logout(data.refresh_token)
 
@@ -148,7 +148,8 @@ async def logout(
     summary="Current user",
     responses={
         status.HTTP_401_UNAUTHORIZED: _error(
-            "invalid_token: missing, invalid or expired access token."
+            "invalid_token: missing, invalid or expired access token, or its session ended "
+            "(logout, password reset)."
         ),
     },
 )
@@ -164,7 +165,8 @@ async def me(user: CurrentUser, auth: Annotated[AuthService, Depends(get_auth_se
     summary="Update the current user",
     responses={
         status.HTTP_401_UNAUTHORIZED: _error(
-            "invalid_token: missing, invalid or expired access token."
+            "invalid_token: missing, invalid or expired access token, or its session ended "
+            "(logout, password reset)."
         ),
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
             "validation_error: an invalid or null name, an unsupported or null locale (only en "
