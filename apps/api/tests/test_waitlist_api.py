@@ -24,6 +24,8 @@ from app.modules.waitlist.service import WaitlistService
 from app.observability import JsonFormatter
 from app.rate_limit import DEVELOPMENT_HMAC_KEY, get_rate_limiter, hashed_identifier
 from tests.conftest import TEST_JWT_SECRET, InMemoryRateLimiter, make_settings
+from tests.test_auth_api import login, register
+from tests.test_auth_refresh import logout
 
 # Fixture values only: no real ZIP, region or contact.
 UNSERVED = "00009"
@@ -145,6 +147,7 @@ async def test_signed_in_links_user_id(
     access = security.create_access_token(
         user_id=user.id,
         role=user.role,
+        session_id=None,
         secret=TEST_JWT_SECRET,
         ttl_seconds=900,
         now=datetime.now(UTC),
@@ -159,6 +162,29 @@ async def test_signed_in_links_user_id(
     rows = {row.email: row for row in await entries(db_session)}
     assert rows[EMAIL].user_id == user.id
     assert rows["other@example.com"].user_id is None
+
+
+async def test_a_revoked_session_joins_as_a_visitor(
+    db_client: httpx.AsyncClient, db_session: AsyncSession
+) -> None:
+    # An optional caller whose session was revoked is anonymous, never a 401 (#161).
+    revoked = (await register(db_client, email="revoked-wait@example.com")).json()
+    live = (await login(db_client, email="revoked-wait@example.com")).json()
+    assert (await logout(db_client, revoked["refresh_token"])).status_code == 204
+
+    as_revoked = await join(db_client, headers=bearer(revoked["access_token"]))
+    as_live = await join(
+        db_client, headers=bearer(live["access_token"]), email="live-wait@example.com"
+    )
+
+    assert as_revoked.status_code == as_live.status_code == 202
+    rows = {row.email: row for row in await entries(db_session)}
+    assert rows[EMAIL].user_id is None
+    assert str(rows["live-wait@example.com"].user_id) == live["user"]["id"]
+
+
+def bearer(access_token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {access_token}"}
 
 
 @pytest.mark.parametrize(

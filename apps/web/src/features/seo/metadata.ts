@@ -7,35 +7,53 @@ import { localizedMetadata } from "@/features/site/metadata";
 import type { Locale } from "@/i18n/config";
 import { getT } from "@/i18n/server";
 
-import { findService, loadCatalog, localized, servedPlace, servicePaths } from "./catalog";
-import { serviceTitle } from "./service-page";
+import {
+  cityLabel,
+  cityServicePaths,
+  loadCatalog,
+  localized,
+  servedPlace,
+  servicePaths,
+} from "./catalog";
+import { cityServiceTitle, pageSubject, serviceTitle } from "./service-page";
 
-/** The service and its place, or a 404 (the same rule as the page). */
-async function serviceOf(slug: string) {
+/** The page's service, its city (on a city's page) and the served region, or a 404. */
+async function subjectOf(slug: string, city?: string) {
   const catalog = await loadCatalog();
-  const category = findService(catalog, slug);
-  if (!category) notFound();
-  return { category, place: servedPlace(catalog) };
+  const subject = pageSubject(catalog, slug, city);
+  if (!subject) notFound();
+  return { ...subject, place: servedPlace(catalog) };
 }
 
 /**
  * A service page's metadata in one language: "House Cleaning in South Florida | Jack Fix It",
- * a description of what the reader can do, the canonical and its `/es` twin (features/site).
+ * or "Handyman in Fort Lauderdale, FL | Jack Fix It" for one city, a description of what the
+ * reader can do, the canonical and its `/es` twin (features/site).
  */
-export async function serviceMetadata(locale: Locale, slug: string): Promise<Metadata> {
-  const { category, place } = await serviceOf(slug);
+export async function serviceMetadata(
+  locale: Locale,
+  slug: string,
+  citySlug?: string,
+): Promise<Metadata> {
+  const { category, city, place } = await subjectOf(slug, citySlug);
   const t = await getT(locale);
   const name = localized(category.names, locale, category.slug);
-  const title = place
-    ? t("seo.service.meta.title", { name, place })
-    : t("seo.service.meta.titleAnywhere", { name });
-  const description = place
-    ? t("seo.service.meta.description", { name, place })
-    : t("seo.service.meta.descriptionAnywhere", { name });
+  let title: string;
+  let description: string;
+  if (city) {
+    title = t("seo.city.meta.title", { name, city: cityLabel(city) });
+    description = t("seo.city.meta.description", { name, city: cityLabel(city) });
+  } else if (place) {
+    title = t("seo.service.meta.title", { name, place });
+    description = t("seo.service.meta.description", { name, place });
+  } else {
+    title = t("seo.service.meta.titleAnywhere", { name });
+    description = t("seo.service.meta.descriptionAnywhere", { name });
+  }
   return {
     ...localizedMetadata({
       locale,
-      paths: servicePaths(category.slug),
+      paths: city ? cityServicePaths(city.slug, category.slug) : servicePaths(category.slug),
       title,
       description,
       siteName: t("brand.name"),
@@ -46,11 +64,16 @@ export async function serviceMetadata(locale: Locale, slug: string): Promise<Met
 }
 
 /** A service page's Open Graph card: the landing's card with the page's headline. */
-export async function serviceOgImage(locale: Locale, slug: string): Promise<ImageResponse> {
-  const { category, place } = await serviceOf(slug);
+export async function serviceOgImage(
+  locale: Locale,
+  slug: string,
+  citySlug?: string,
+): Promise<ImageResponse> {
+  const { category, city, place } = await subjectOf(slug, citySlug);
   const t = await getT(locale);
+  const name = localized(category.names, locale, category.slug);
   return landingOgImage(
     locale,
-    serviceTitle(t, localized(category.names, locale, category.slug), place),
+    city ? cityServiceTitle(t, name, city) : serviceTitle(t, name, place),
   );
 }

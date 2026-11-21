@@ -25,7 +25,7 @@ from app.modules.settings.models import Setting
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
 from tests.conftest import backend_pid, wait_until_blocked
-from tests.helpers import as_status_writer
+from tests.helpers import REVIEW_PUBLISH_AFTER, as_status_writer
 from tests.test_quotes_api import TTL_HOURS, body, quotes_of, status_of
 from tests.test_requests_api import ENQUEUE_TIMEOUT, RecordingQueue
 
@@ -146,8 +146,12 @@ async def test_concurrent_first_quotes_from_two_pros_transition_once(
 
         with caplog.at_level(logging.INFO):
             results = await asyncio.gather(
-                QuoteService(first, queue, ENQUEUE_TIMEOUT).submit(pro_a, dispatch_a, data),
-                QuoteService(second, queue, ENQUEUE_TIMEOUT).submit(pro_b, dispatch_b, data),
+                QuoteService(first, queue, ENQUEUE_TIMEOUT, REVIEW_PUBLISH_AFTER).submit(
+                    pro_a, dispatch_a, data
+                ),
+                QuoteService(second, queue, ENQUEUE_TIMEOUT, REVIEW_PUBLISH_AFTER).submit(
+                    pro_b, dispatch_b, data
+                ),
             )
 
     assert [result.status for result in results] == [QuoteStatus.PENDING, QuoteStatus.PENDING]

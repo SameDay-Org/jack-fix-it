@@ -16,7 +16,7 @@ each review the other, once.
   kept anywhere. `comment_redacted` tells the author that something was masked.
 - Reading: an author reads back their own review only (`mine`), never the other side's. A
   user's rating is the average of `overall` over the published reviews of them, with the
-  count, computed by a query.
+  count, computed by a query and rounded by ratings.rounded_average, as everywhere (#78).
 - Publication (Foreman 2026-11-13, for Cesar's veto): a review counts for its target only once
   it is published: the target reviewed the same job too, or REVIEW_PUBLISH_AFTER_DAYS passed
   since the job's confirmation (repository.published). No cron and no column: the rating's
@@ -53,6 +53,7 @@ from app.modules.reviews.models import (
     Review,
     ReviewAuthorRole,
 )
+from app.modules.reviews.ratings import rounded_average
 from app.modules.reviews.repository import ReviewRepository
 from app.modules.reviews.schemas import (
     MyReviewOut,
@@ -172,9 +173,11 @@ class ReviewService:
         them, to one decimal, and how many there are. A review the caller did not answer yet
         is left out until its job's confirmation is the publication window old."""
         confirmed_by = self._clock() - self._config.publish_after
-        average, count = await self._reviews.rating_of(
-            user.id, JobPartiesReader.confirmations(), confirmed_by
+        sums = await self._reviews.ratings_of(
+            [user.id], JobPartiesReader.confirmations(), confirmed_by
         )
+        total, count = sums.get(user.id, (0, 0))
+        average = rounded_average(total, count)
         return RatingOut(average=None if average is None else float(average), count=count)
 
     async def _parties(self, user: UserAccount, job_id: uuid.UUID) -> JobParties:

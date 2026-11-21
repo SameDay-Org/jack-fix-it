@@ -40,7 +40,8 @@ EXPECTED_ALLOWED: dict[tuple[str, str], set[str]] = {
     # Approved by Cesar on 2026-10-22 (#160 follow-up).
     ("quote_ready", "finding_pro"): {"system"},
     ("accepted", "quote_ready"): {"system"},
-    ("accepted", "cancelled"): {"customer", "staff"},
+    # #69: the system closes it once the pro cancelled its paid job (pros never move a request).
+    ("accepted", "cancelled"): {"customer", "staff", "system"},
     ("finding_pro", "reviewing"): {"staff"},
 }
 EXPECTED_TERMINAL = {"expired", "cancelled"}

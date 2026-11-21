@@ -36,7 +36,7 @@ from app.modules.users.types import UserAccount, UserRole
 from app.observability import JsonFormatter
 from app.queue import get_job_queue
 from tests.conftest import LOCK_WAIT_DEADLINE_SECONDS, TEST_JWT_SECRET, backend_pid
-from tests.helpers import as_status_writer
+from tests.helpers import REVIEW_PUBLISH_AFTER, as_status_writer
 from tests.test_opportunities_api import EMAIL, LINE1, PHONE, Pro, World, build_world, make_request
 from tests.test_quotes_api import TTL_HOURS, body, quotes_of, status_of
 from tests.test_requests_api import ENQUEUE_TIMEOUT, FakeStorage, RecordingQueue
@@ -143,6 +143,7 @@ def customer_headers(world: World) -> dict[str, str]:
     token = security.create_access_token(
         user_id=world.customer_id,
         role=UserRole.CUSTOMER,
+        session_id=None,
         secret=TEST_JWT_SECRET,
         ttl_seconds=900,
         now=datetime.now(UTC),
@@ -627,7 +628,7 @@ async def test_quote_submitted_during_the_run_is_not_lost(
 
     async def submit() -> None:
         async with committed.sessions() as session:
-            service = QuoteService(session, RecordingQueue(), ENQUEUE_TIMEOUT)
+            service = QuoteService(session, RecordingQueue(), ENQUEUE_TIMEOUT, REVIEW_PUBLISH_AFTER)
             await service.submit(committed.pro, committed.dispatch_id, data)
 
     async def run() -> None:

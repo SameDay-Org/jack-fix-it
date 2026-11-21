@@ -300,6 +300,24 @@
         "body": "Obtén la app y dile a Jack qué necesitas.",
         "getApp": "Obtén la app"
       }
+    },
+    "city": {
+      "meta": {
+        "title": "{{name}} en {{city}} | Jack Fix It",
+        "description": "{{name}} en {{city}}: cuéntale a Jack el trabajo, compara presupuestos de precio fijo y síguelo en la app."
+      },
+      "hero": {
+        "title": "{{name}} en {{city}}"
+      },
+      "areas": {
+        "title": "Dónde trabaja Jack en {{city}}",
+        "body": "Jack atiende estos códigos postales en {{city}}. La app revisa el tuyo cuando pides un trabajo.",
+        "zipsLabel": "Códigos postales atendidos",
+        "others": "{{name}} en otras ciudades"
+      },
+      "more": {
+        "title": "Más de Jack en {{city}}"
+      }
     }
   },
   "showcase": {
@@ -486,7 +504,9 @@
       "queue": "Cola",
       "pros": "Profesionales",
       "disputes": "Disputas",
-      "kpis": "Indicadores"
+      "kpis": "Indicadores",
+      "followups": "Seguimientos",
+      "followupsDue": "{{count}} para hoy"
     },
     "roles": {
       "agent": "Agente",
@@ -1265,6 +1285,39 @@
           "unavailable": "Algo salió mal. Revisa la disputa antes de volver a intentarlo."
         }
       }
+    },
+    "followups": {
+      "title": "Seguimientos",
+      "subtitle": "Lo que el equipo dijo que haría, primero lo más atrasado.",
+      "views": {
+        "label": "Mostrar",
+        "today": "Para hoy",
+        "all": "Todos los abiertos"
+      },
+      "assignee": {
+        "label": "De quién",
+        "mine": "Míos",
+        "show": "Mostrar"
+      },
+      "columns": {
+        "request": "Solicitud",
+        "status": "Estado",
+        "note": "Qué hacer",
+        "due": "Para",
+        "assignee": "Asignado a"
+      },
+      "empty": {
+        "today": "Nada para hoy.",
+        "all": "No hay seguimientos abiertos."
+      },
+      "loading": "Cargando los seguimientos…",
+      "loadError": "No pudimos cargar los seguimientos.",
+      "retry": "Intentar de nuevo",
+      "older": "Anteriores",
+      "first": "Primera página",
+      "moved": "La lista cambió desde esta página: vuelve a la primera página.",
+      "forbidden": "Tu cuenta no puede ver esta lista ahora.",
+      "own": "Ver mis seguimientos"
     },
     "error": {
       "title": "El panel no puede conectarse con el servidor ahora",
