@@ -52,6 +52,15 @@ class ServiceRequestRepository:
         return {row.id: row.category_id for row in await self._session.execute(statement)}
 
     @staticmethod
+    def codes() -> Subquery:
+        """Every request's id (`request_id`) and public code (`public_code`) only, as a
+        subquery for another module's query (#503). No customer detail."""
+        return select(
+            ServiceRequest.id.label("request_id"),
+            ServiceRequest.public_code.label("public_code"),
+        ).subquery()
+
+    @staticmethod
     def metric_facts() -> Subquery:
         """Every request's id (`request_id`), creation (`created_at`) and first contact by the
         BDC (`first_contact_at`, #81), for the staff metrics (#84). No customer detail."""
