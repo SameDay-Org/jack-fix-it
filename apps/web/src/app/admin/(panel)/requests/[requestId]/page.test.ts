@@ -157,6 +157,7 @@ describe("request card page", () => {
             phone: "305-555-0181",
             email: "not-an-email",
             language: "en",
+            has_account: true,
           },
           media: [],
           media_pending: 0,

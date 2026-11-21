@@ -28,6 +28,8 @@ from app.modules.users.models import User
 from app.modules.users.names import safe_first_name, safe_public_name
 from app.modules.users.repository import UserRepository
 from app.modules.users.types import (
+    GUEST_EMAIL_DOMAIN,
+    GUEST_PASSWORD_HASH,
     KEEP,
     ContactPoints,
     Keep,
@@ -51,6 +53,42 @@ class UserService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._users = UserRepository(session)
+
+    @staticmethod
+    def guest_ids() -> Select[uuid.UUID]:
+        """The ids of the guests, the customers of web requests (#86), as a statement: the
+        dispatch sweep leaves their requests out."""
+        return UserRepository.guest_ids()
+
+    async def is_guest(self, user_id: uuid.UUID) -> bool:
+        """Whether the user is a guest (#86): a web request's customer, never dispatched."""
+        return await self._users.is_guest(user_id)
+
+    async def create_guest(self, locale: Locale) -> UserAccount:
+        """Inserts a guest customer for one web request (#86), in the caller's transaction:
+        no name, no phone, an email no one receives, a hash no password verifies (types). It
+        can never sign in; the request's web contact holds who to call."""
+        for attempt in range(1, public_codes.MAX_TRIES + 1):
+            user = User(
+                email=f"guest-{uuid.uuid4().hex}@{GUEST_EMAIL_DOMAIN}",
+                password_hash=GUEST_PASSWORD_HASH,
+                role=UserRole.CUSTOMER,
+                locale=locale,
+                status=UserStatus.GUEST,
+                public_code=public_codes.generate_public_code(),
+            )
+            savepoint = await self._session.begin_nested()
+            try:
+                await self._users.add(user)
+            except IntegrityError as exc:
+                await savepoint.rollback()
+                if violated_constraint(exc) == _PUBLIC_CODE_UNIQUE_CONSTRAINT:
+                    logger.warning("public_code_collision", extra={"attempt": attempt})
+                    continue
+                raise
+            await savepoint.commit()
+            return _to_account(user)
+        raise PublicCodeExhaustedError
 
     @staticmethod
     def active_ids_of_role(role: UserRole) -> Select[uuid.UUID]:
