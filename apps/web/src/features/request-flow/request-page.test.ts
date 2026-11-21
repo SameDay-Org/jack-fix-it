@@ -1,3 +1,7 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -29,6 +33,8 @@ beforeEach(() => {
   vi.stubEnv("API_TIMEOUT_MS", "1000");
   vi.stubEnv("CONTACT_EMAIL", "");
   vi.stubEnv("REQUEST_FLOW_ENABLED", "true");
+  vi.stubEnv("REQUEST_FORM_SECRET", "form-secret-for-tests-0123456789abcdef");
+  vi.stubEnv("WEB_SERVICE_KEY", "web-service-key-for-tests-0123456789");
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockImplementation(routeFetch({ "/v1/categories": () => Response.json([HANDYMAN]) }));
 });
@@ -87,6 +93,16 @@ describe("the request page (#86)", () => {
       revalidate: 3600,
     });
   });
+
+  it.each(["REQUEST_FORM_SECRET", "WEB_SERVICE_KEY"])(
+    "fails without %s: a form that cannot be sent is never shown",
+    async (name) => {
+      for (const value of ["", "too-short"]) {
+        vi.stubEnv(name, value);
+        await expect(RequestPage({ locale: "en", search: {} }), value).rejects.toThrow(name);
+      }
+    },
+  );
 
   it("still opens when the services cannot be read", async () => {
     fetchMock.mockRejectedValue(new TypeError("fetch failed"));
@@ -147,4 +163,38 @@ describe("requestFlowText", () => {
       }
     },
   );
+});
+
+describe("the browser's side of the flow", () => {
+  // The secrets and the API client stay on the server: a client component imports none of the
+  // server modules (a type import is erased and allowed).
+  const here = dirname(fileURLToPath(import.meta.url));
+  const SERVER_ONLY = [
+    "./actions",
+    "./api-client",
+    "./config",
+    "./send-body",
+    "./server",
+    "@/lib/public-form/form-token",
+    "@/lib/public-form/settings",
+    "@/lib/public-form/visitor",
+  ];
+
+  it("never imports a server module", () => {
+    const clientFiles = readdirSync(here).filter(
+      (file) =>
+        /\.tsx?$/.test(file) &&
+        !file.endsWith(".test.ts") &&
+        readFileSync(join(here, file), "utf8").startsWith('"use client";'),
+    );
+    expect(clientFiles.length).toBeGreaterThan(5);
+    for (const file of clientFiles) {
+      const source = readFileSync(join(here, file), "utf8");
+      const imports = [...source.matchAll(/^import (?!type )[^;]*? from "([^"]+)";/gm)].map(
+        (match) => match[1],
+      );
+      for (const name of imports)
+        expect(SERVER_ONLY, `${file} imports ${name}`).not.toContain(name);
+    }
+  });
 });

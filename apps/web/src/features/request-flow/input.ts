@@ -58,3 +58,69 @@ export function descriptionFits(text: string): boolean {
   const trimmed = text.trim();
   return trimmed.length > 0 && trimmed.length <= DESCRIPTION_MAX_LENGTH;
 }
+
+/** The longest first or last name the API stores (users.names NAME_MAX_LENGTH). */
+export const NAME_MAX_LENGTH = 60;
+
+// Letters (with their accents), spaces, hyphens, apostrophes and periods: the API's PersonName.
+const NAME = /^[\p{L}\p{M} '\u2019.-]+$/u;
+const LETTER = /\p{L}/u;
+
+/** The name with its spaces collapsed, or null when the API would refuse it. */
+export function nameInput(text: unknown): string | null {
+  if (typeof text !== "string") return null;
+  const name = text.split(/\s+/).filter(Boolean).join(" ");
+  return name.length <= NAME_MAX_LENGTH && NAME.test(name) && LETTER.test(name) ? name : null;
+}
+
+/** The API's address limits (addresses/schemas.py). */
+export const LINE_MAX_LENGTH = 255;
+export const CITY_MAX_LENGTH = 128;
+
+// Control characters never belong in an address; the API refuses NUL.
+const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/** An address line or a city, trimmed, when it has something and fits; else null. */
+export function lineInput(text: unknown, max: number): string | null {
+  if (typeof text !== "string") return null;
+  const line = text.trim();
+  return line.length > 0 && line.length <= max && !CONTROL.test(line) ? line : null;
+}
+
+/** A state as the API takes it: two letters, upper case (`fl` becomes `FL`). */
+export function stateInput(text: unknown): string | null {
+  if (typeof text !== "string") return null;
+  const state = text.trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(state) ? state : null;
+}
+
+// Days as the API takes them: YYYY-MM-DD. It refuses one before today in UTC, and a day already
+// over on the visitor's calendar makes no sense either (apps/mobile request/dates.ts).
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Today as the API counts it (UTC). */
+export function utcToday(now: Date): string {
+  return now.toISOString().slice(0, 10);
+}
+
+/** Today on the visitor's own calendar. */
+export function localToday(now: Date): string {
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+/** The first day the visitor can pick: the later of the two todays. ISO days compare as text. */
+export function firstDay(now: Date): string {
+  const utc = utcToday(now);
+  const local = localToday(now);
+  return local > utc ? local : utc;
+}
+
+/** The day when it is a real one, `from` or later; else null. */
+export function dayInput(text: unknown, from: string): string | null {
+  if (typeof text !== "string" || !DAY.test(text)) return null;
+  const date = new Date(`${text}T00:00:00Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== text) return null;
+  return text >= from ? text : null;
+}
