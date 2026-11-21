@@ -38,6 +38,7 @@ def channel(name: str, enabled: bool, locked: bool = False) -> dict[str, Any]:
 DEFAULTS = {
     "groups": [
         {"group": "job_updates", "channels": [channel("push", True)]},
+        {"group": "messages", "channels": [channel("push", True)]},
         {"group": "quotes_and_opportunities", "channels": [channel("push", True)]},
         {"group": "reminders", "channels": [channel("push", True)]},
         {"group": "marketing", "channels": [channel("push", False), channel("email", False)]},

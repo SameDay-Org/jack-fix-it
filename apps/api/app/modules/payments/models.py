@@ -3,7 +3,17 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Final
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, false, text
+from sqlalchemy import (
+    CHAR,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    false,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, IdTimestampsMixin, str_enum
@@ -65,6 +75,7 @@ class Payment(IdTimestampsMixin, Base):
             f"take_rate_bps >= 0 AND take_rate_bps <= {BPS_DENOMINATOR}",
             name="take_rate_bps_range",
         ),
+        CheckConstraint("card_last4 ~ '^[0-9]{4}$'", name="card_last4_four_digits"),
         # One live payment per quote; canceled ones stay as history beside it.
         Index(
             "uq_payments_quote_id_live",
@@ -98,6 +109,14 @@ class Payment(IdTimestampsMixin, Base):
     # searches for the intent instead of creating again. NULL before any attempt, or after
     # staff allowed a new one (scripts/resolve_payment_intent.py).
     payment_intent_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # For the receipt (#62): the card that paid, as Stripe's charge describes it, never more
+    # than its brand, its last 4 digits and the wallet that carried it. Read once after the
+    # payment succeeded (receipts.tasks); NULL until then, and for a row that has none.
+    card_brand: Mapped[str | None] = mapped_column(String(32))
+    card_last4: Mapped[str | None] = mapped_column(CHAR(4))
+    wallet: Mapped[str | None] = mapped_column(String(32))
+    # When the payment's receipt email was accepted by the provider (#62): sent once.
+    receipt_emailed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class TransferStatus(StrEnum):

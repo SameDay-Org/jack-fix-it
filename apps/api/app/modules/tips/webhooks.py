@@ -29,13 +29,16 @@ The four event types are handled alike:
      canceled when it still can be, and staff get an ERROR (`tip_succeeded_on_stale_attempt`)
      with the ids. Never a second silent charge.
    An intent naming no tip of ours is a warning and changes nothing.
-Nothing here changes the job's status, its payment or its transfer. Logs carry ids, the event
-type, statuses and Stripe codes only: no amount, no PaymentIntent id, no customer data.
+Nothing here changes the job's status, its payment or its transfer. A tip that succeeded
+through an event queues its receipt email once that event commits (#62): once, since a repeat
+moves nothing (and a contained late success is staff's, never a receipt). Logs carry ids, the
+event type, statuses and Stripe codes only: no amount, no PaymentIntent id, no customer data.
 """
 
 import logging
 import uuid
 from collections.abc import Callable, Mapping
+from functools import partial
 from types import MappingProxyType
 from typing import Final
 
@@ -51,6 +54,7 @@ from app.integrations.stripe_payments import (
 )
 from app.modules.jobs.service import JobTimeline
 from app.modules.payments.webhook_handlers import intent_event
+from app.modules.receipts.queue import enqueue_tip_receipt
 from app.modules.tips.errors import TipEventMismatchError, TipRowMissingError
 from app.modules.tips.intents import (
     mismatches,
@@ -62,6 +66,7 @@ from app.modules.tips.models import UNPAID_STATUSES, Tip, TipStatus
 from app.modules.tips.repository import TipRepository
 from app.modules.users.service import UserService
 from app.modules.webhooks.events import AfterCommit, StripeEvent, StripeEventHandler
+from app.queue import JobQueue
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +231,10 @@ class TipReconciler:
         )
 
 
+async def _queue_receipt(tip_id: uuid.UUID, queue: JobQueue, timeout_seconds: float) -> None:
+    await enqueue_tip_receipt(queue, tip_id, timeout_seconds)
+
+
 def tip_event_handler(stripe: StripePaymentsProvider) -> StripeEventHandler:
     """The handler, reading PaymentIntents with the client `stripe` gives (the worker's own in
     production, a fake in tests)."""
@@ -240,13 +249,15 @@ def tip_event_handler(stripe: StripePaymentsProvider) -> StripeEventHandler:
             logger.warning("tips_stripe_not_configured", extra=ids)
             raise TipsStripeNotConfiguredError
         try:
-            await TipReconciler(session, client).apply(intent_id, ids)
+            succeeded = await TipReconciler(session, client).apply(intent_id, ids)
         except StripeCallError as error:
             logger.warning(
                 "tip_event_stripe_unavailable",
                 extra={**ids, "error": type(error).__name__, "stripe_code": error.code},
             )
             raise
+        if succeeded is not None:
+            after_commit.add(partial(_queue_receipt, succeeded))
 
     return tip_event
 
