@@ -15,6 +15,7 @@ import { dismissToast, toastStore } from "@/components/ui/toast";
 
 import { deferred } from "../../../api/__tests__/helpers";
 import { CATEGORIES, signedIn } from "../../home/__tests__/helpers";
+import { customerJobQueryKey } from "../../jobs/api";
 import { customerJob } from "../../jobs/__tests__/helpers";
 import type { CustomerJob } from "../../jobs/phase";
 import {
@@ -277,6 +278,61 @@ describe("HistoryScreen, customer: the requests (#47)", () => {
         params: { id: OLDEST.id },
       }),
     );
+    expect(router.push).toHaveBeenCalledTimes(1);
+  });
+
+  it("a cancelled request whose job the app already holds opens on it at once, with no read", async () => {
+    const client = newQueryClient();
+    client.setQueryData(customerJobQueryKey(OLDEST.id, 1), customerJob({ status: "cancelled" }));
+    await renderWithQuery(<HistoryScreen />, client);
+    await fireEvent.press(await findRow(OLDEST));
+    await waitFor(() =>
+      expect(router.push).toHaveBeenCalledWith({
+        pathname: "/requests/[id]/job",
+        params: { id: OLDEST.id },
+      }),
+    );
+    expect(jest.mocked(apiGet).mock.calls.filter(([path]) => path === JOB)).toHaveLength(0);
+  });
+
+  it("History left while the job was asked for: nothing opens over the other tab; a later tap opens", async () => {
+    const job = deferred<CustomerJob>();
+    answers.job = [job.promise];
+    await renderWithQuery(<HistoryScreen />);
+    const pressable = await findRow(OLDEST);
+    await fireEvent.press(pressable);
+    // The customer goes to another tab before the answer comes.
+    await act(async () => navigation.setFocused(false));
+    await act(async () => job.resolve(customerJob({ status: "cancelled" })));
+    expect(router.push).not.toHaveBeenCalled();
+    // Back on History, the row opens (the job is held now: at once).
+    await act(async () => navigation.setFocused(true));
+    await fireEvent.press(pressable);
+    await waitFor(() =>
+      expect(router.push).toHaveBeenCalledWith({
+        pathname: "/requests/[id]/job",
+        params: { id: OLDEST.id },
+      }),
+    );
+    expect(router.push).toHaveBeenCalledTimes(1);
+  });
+
+  it("a newer tap wins over a cancelled row still waiting for its job: the list never goes dead", async () => {
+    const job = deferred<CustomerJob>();
+    answers.job = [job.promise];
+    await renderWithQuery(<HistoryScreen />);
+    await fireEvent.press(await findRow(OLDEST));
+    // Another row, tapped while the first waits, opens at once.
+    await fireEvent.press(await findRow(NEWEST));
+    expect(router.push).toHaveBeenCalledTimes(1);
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/requests/[id]",
+      params: { id: NEWEST.id },
+    });
+    // Its push landed; the first answer comes after: it opens nothing.
+    await act(async () => navigation.setNavigating(true));
+    await act(async () => navigation.setNavigating(false));
+    await act(async () => job.resolve(customerJob({ status: "cancelled" })));
     expect(router.push).toHaveBeenCalledTimes(1);
   });
 

@@ -1,5 +1,5 @@
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { router, unstable_useIsNavigating, useScrollToTop } from "expo-router";
+import { router, unstable_useIsNavigating, useIsFocused, useScrollToTop } from "expo-router";
 import {
   useCallback,
   useEffect,
@@ -179,14 +179,26 @@ export function RequestList({ header, empty, testID = "request-list" }: RequestL
  *
  * A cancelled request whose job was booked opens on that job (#545): the cancel, where its money
  * stands and, after a pro's cancel, the way to a new request are there. Its quotes are not: the
- * API lists none once a request is cancelled. The job is asked first (the job screen's own query,
- * so it opens with it); with none (cancelled before anyone was hired) or no answer, the request
- * opens as any other.
+ * API lists none once a request is cancelled. The job the app already holds opens at once (the
+ * customer who just cancelled on the job screen); otherwise it is asked first, with the job
+ * screen's own query, so the screen opens with it. With none (cancelled before anyone was hired)
+ * or no answer, the request opens as any other. While that answer is on its way the list stays
+ * live: a newer tap wins over it, and it opens nothing once History is no longer in front (the
+ * customer went to another tab) or the session that asked is over.
  */
 function useOpenRequest() {
   const client = useQueryClient();
   const generation = useSessionGeneration();
+  // Read when the answer comes, not when the tap came in.
+  const focused = useIsFocused();
+  const inFront = useRef(focused);
+  useEffect(() => {
+    inFront.current = focused;
+  }, [focused]);
+  // A push is under way (the router queues it): no second one.
   const opening = useRef(false);
+  // The newest tap: one still waiting for its job opens nothing once another came in.
+  const latest = useRef(0);
   const navigating = unstable_useIsNavigating();
 
   useEffect(() => {
@@ -196,14 +208,16 @@ function useOpenRequest() {
   const open = useCallback(
     async (request: RequestSummary) => {
       if (opening.current) return;
-      opening.current = true;
+      const tap = ++latest.current;
       const booked =
         request.status === "cancelled" && (await hasJob(client, request.id, generation));
-      // The session that asked may be over by the answer: its screens went with it.
-      if (!isCurrentGeneration(generation)) {
-        opening.current = false;
-        return;
-      }
+      const wanted =
+        tap === latest.current &&
+        inFront.current &&
+        !opening.current &&
+        isCurrentGeneration(generation);
+      if (!wanted) return;
+      opening.current = true;
       router.push(
         booked ? jobHref(request.id) : { pathname: "/requests/[id]", params: { id: request.id } },
       );
@@ -213,10 +227,13 @@ function useOpenRequest() {
   return useCallback((request: RequestSummary) => void open(request), [open]);
 }
 
-/** Whether the request's job answers, from the cache or asked now; false on a 404 or no answer. */
+/**
+ * Whether the request's job answers: the one the app already holds (whatever its age: the job
+ * screen reads it again as it opens), else asked now; false on a 404 or no answer.
+ */
 async function hasJob(client: QueryClient, requestId: string, generation: number) {
   try {
-    await client.fetchQuery(customerJobQueryOptions(requestId, generation));
+    await client.ensureQueryData(customerJobQueryOptions(requestId, generation));
     return true;
   } catch {
     return false;
