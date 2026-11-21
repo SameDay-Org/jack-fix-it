@@ -33,6 +33,7 @@ from app.main import create_app
 from app.modules.audit.models import AuditLog
 from app.modules.audit.repository import AuditRepository
 from app.modules.chat.models import JobMessage
+from app.modules.chat.notify import get_chat_notifier
 from app.modules.chat.repository import ChatRepository
 from app.modules.chat.service import original_associated_data
 from app.modules.chat.tasks import purge_expired_originals
@@ -40,7 +41,7 @@ from app.observability import JsonFormatter
 from app.rate_limit import get_rate_limiter
 from app.redaction import MASK
 from tests.audit_helpers import audit_rows
-from tests.conftest import InMemoryRateLimiter, make_settings
+from tests.conftest import InMemoryRateLimiter, make_settings, quiet_chat_notifier
 from tests.job_world import JobWorld, build_world, make_job
 from tests.test_sentry_scrubbing import TEST_DSN, MemoryTransport, _payloads
 
@@ -711,6 +712,8 @@ def _app(settings: Settings, session: AsyncSession) -> FastAPI:
     app = create_app(settings)
     limiter = InMemoryRateLimiter()
     app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    notifier = quiet_chat_notifier()
+    app.dependency_overrides[get_chat_notifier] = lambda: notifier
 
     async def session_override() -> AsyncIterator[AsyncSession]:
         yield session

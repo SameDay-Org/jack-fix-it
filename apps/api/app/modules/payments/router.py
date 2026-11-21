@@ -13,6 +13,7 @@ from app.modules.auth.permissions import CustomerUser, PanelUser
 from app.modules.payments.schemas import JobTransferOut, PaymentCreate, PaymentSheetOut
 from app.modules.payments.service import PaymentsConfig, PaymentService
 from app.modules.payments.transfer_reader import TransferReader
+from app.rate_limit import RateLimiter, enforce_limit, get_rate_limiter
 
 # A customer's checkout (#61). Its answer carries a live CustomerSession credential (#253):
 # no HTTP cache may keep it, nor any error of the route.
@@ -35,11 +36,29 @@ def get_payment_service(
     return PaymentService(session, stripe, PaymentsConfig.from_settings(settings))
 
 
+async def limit_payment_sheets(
+    user: CustomerUser,
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> None:
+    """PAYMENT_SHEET_LIMIT sheets per customer per PAYMENT_SHEET_WINDOW_SECONDS (#525): each
+    one reads the PaymentIntent and creates a CustomerSession at Stripe."""
+    await enforce_limit(
+        limiter,
+        "payment_sheet",
+        str(user.id),
+        limit=settings.payment_sheet_limit,
+        window_seconds=settings.payment_sheet_window_seconds,
+        timeout_seconds=settings.rate_limit_timeout_seconds,
+    )
+
+
 @router.post(
     "/{request_id}/quotes/{quote_id}/payment",
     status_code=status.HTTP_200_OK,
     response_model=PaymentSheetOut,
     summary="Pay for the quote I accepted",
+    dependencies=[Depends(limit_payment_sheets)],
     responses={
         status.HTTP_401_UNAUTHORIZED: _error("invalid_token: missing, invalid or expired token."),
         status.HTTP_403_FORBIDDEN: _error("forbidden: only customers pay for quotes."),
@@ -58,6 +77,15 @@ def get_payment_service(
             "validation_error: a malformed id, or a field in the body: the amounts come from "
             "the accepted quote, never from the client."
         ),
+        status.HTTP_429_TOO_MANY_REQUESTS: {
+            **_error("rate_limited: too many payment sheets for this account; retry later."),
+            "headers": {
+                "Retry-After": {
+                    "description": "Seconds until the current limit window ends.",
+                    "schema": {"type": "integer"},
+                }
+            },
+        },
         status.HTTP_502_BAD_GATEWAY: _error(
             "payments_error: Stripe refused the call; nothing changed, the payment can be "
             "asked for again."

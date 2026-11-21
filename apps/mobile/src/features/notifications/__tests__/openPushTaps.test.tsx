@@ -75,6 +75,12 @@ function DraftStub() {
   return <Text>draft</Text>;
 }
 
+/** The chat route's stub: the job it is of, and the request a customer's link carries. */
+function ChatStub() {
+  const { id, request } = useLocalSearchParams<{ id: string; request?: string }>();
+  return <Text>{`chat ${id} ${request ?? "-"}`}</Text>;
+}
+
 function stub(name: string) {
   return function Stub() {
     const { id } = useLocalSearchParams<{ id: string }>();
@@ -100,6 +106,7 @@ const routes = {
   "(app)/requests/[id]/job": stub("customer job"),
   "(app)/jobs/[id]/_layout": { default: JobLayout, unstable_settings: jobSettings },
   "(app)/jobs/[id]/index": stub("pro job"),
+  "(app)/jobs/[id]/chat": ChatStub,
   "(app)/opportunities/[id]": stub("opportunity"),
   // A real route name (typed routes); the stub stands for any screen with a draft.
   "(app)/help": DraftStub,
@@ -196,6 +203,68 @@ describe("a tapped push while the app runs (warm)", () => {
     await tap(`/jobs/${ID}`);
     expect(screen.getByText(`pro job ${ID}`)).toBeTruthy();
   });
+});
+
+describe("a chat message's push opens that side's chat of the job (#73)", () => {
+  it("the pro's opens the job's chat once their job read answered", async () => {
+    const result = await signedInAtHome(PRO);
+    await tap(`/jobs/${ID}/chat`);
+    expect(mockApiGet).toHaveBeenCalledWith(PRO_JOB_PATH);
+    expect(screen.getByText(`chat ${ID} -`)).toBeTruthy();
+    expect(result.getPathname()).toBe(`/jobs/${ID}/chat`);
+  });
+
+  it("the customer's opens the chat of their request's job, with the request it reads the pro from", async () => {
+    mockAnswers.set(JOB_PATH, async () => ({ id: OTHER_ID, status: "scheduled" }));
+    const result = await signedInAtHome(CUSTOMER);
+    await tap(`/requests/${ID}/job/chat`);
+    expect(mockApiGet).toHaveBeenCalledWith(JOB_PATH);
+    expect(screen.getByText(`chat ${OTHER_ID} ${ID}`)).toBeTruthy();
+    expect(result.getPathname()).toBe(`/jobs/${OTHER_ID}/chat`);
+  });
+
+  it("the customer's opens the job screen when the job read had no answer: it shows its own error", async () => {
+    mockAnswers.set(JOB_PATH, () => Promise.reject(new NetworkError(false)));
+    await signedInAtHome(CUSTOMER);
+    await tap(`/requests/${ID}/job/chat`);
+    expect(screen.getByText(`customer job ${ID}`)).toBeTruthy();
+    expect(screen.queryByText(/^chat /)).toBeNull();
+  });
+
+  it("a second tap for the chat already on top leaves it as it is", async () => {
+    mockAnswers.set(JOB_PATH, async () => ({ id: OTHER_ID, status: "scheduled" }));
+    await signedInAtHome(CUSTOMER);
+    const push = jest.spyOn(router, "push");
+    await tap(`/requests/${ID}/job/chat`);
+    await tap(`/requests/${ID}/job/chat`);
+    // The chat is under the job's id, not the request's: the second tap pushes nothing.
+    expect(push).toHaveBeenCalledTimes(1);
+    push.mockRestore();
+    expect(screen.getAllByText(`chat ${OTHER_ID} ${ID}`)).toHaveLength(1);
+  });
+
+  it.each([
+    ["a customer", CUSTOMER, `/jobs/${ID}/chat`],
+    ["a pro", PRO, `/requests/${ID}/job/chat`],
+  ])("the other side's chat link opens nothing for %s", async (_, session, url) => {
+    const result = await signedInAtHome(session);
+    await tap(url);
+    expect(result.getPathname()).toBe("/");
+    expect(mockApiGet).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["pro", PRO, `/jobs/${ID}/chat`, PRO_JOB_PATH],
+    ["customer", CUSTOMER, `/requests/${ID}/job/chat`, JOB_PATH],
+  ])(
+    "another account's chat (the %s's read refused) opens nothing",
+    async (_, session, url, path) => {
+      mockAnswers.set(path, refuse(404));
+      const result = await signedInAtHome(session);
+      await tap(url);
+      expect(result.getPathname()).toBe("/");
+    },
+  );
 });
 
 describe("a push that opens nothing leaves the app where it is, silently", () => {
