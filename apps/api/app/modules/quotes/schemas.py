@@ -1,6 +1,6 @@
 import uuid
 from datetime import UTC, date, datetime
-from typing import Annotated, Final
+from typing import Annotated, Any, Final
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
@@ -100,6 +100,12 @@ class QuoteOut(_QuoteFields):
     )
 
 
+def _without_default(schema: dict[str, Any]) -> None:
+    """Leaves a field's default out of the published schema: openapi-typescript types a field
+    with a default as always present, one without as optional."""
+    schema.pop("default", None)
+
+
 class QuotePro(BaseModel):
     """The pro behind a quote, as the customer sees them before paying: never a contact, a
     document, the photo or an internal id (the account, Stripe)."""
@@ -113,10 +119,19 @@ class QuotePro(BaseModel):
         "phone, a domain...): withheld before payment, never partly masked."
     )
     rating_avg: str | None = Field(
-        examples=["4.80"],
-        description="The average rating as a decimal string; null before the first review.",
+        examples=["4.7"],
+        description="The average of the overall ratings of the pro's published reviews, to one "
+        "decimal, rounded half up, as a string; null before the first one (never 0.0).",
     )
-    jobs_count: int = Field(description="Jobs completed on the platform.")
+    # Always sent. Optional in the published schema (no `required`, no `default`, so the
+    # generated types say `rating_count?: number`): clients built before #78, the mobile app's
+    # test fixtures among them, keep compiling until they read it.
+    rating_count: int = Field(
+        default=0,
+        json_schema_extra=_without_default,
+        description="How many published reviews the average is of.",
+    )
+    jobs_count: int = Field(description="Jobs completed on the platform (confirmed).")
     years_of_experience: int | None
     verified: bool = Field(description="The platform approved the pro's verification.")
 
