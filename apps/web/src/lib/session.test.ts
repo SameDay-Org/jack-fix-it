@@ -12,11 +12,14 @@ import {
   user,
 } from "./test-helpers";
 
-const { jar } = vi.hoisted(() => ({ jar: { current: null as unknown } }));
+const { jar, incoming } = vi.hoisted(() => ({
+  jar: { current: null as unknown },
+  incoming: { current: new Headers() },
+}));
 
 vi.mock("next/headers", () => ({
   cookies: async () => jar.current,
-  headers: async () => new Headers(),
+  headers: async () => incoming.current,
 }));
 vi.mock("next/navigation", async () => {
   const { RedirectSignal: Signal } = await import("./test-helpers");
@@ -27,8 +30,11 @@ vi.mock("next/navigation", async () => {
   };
 });
 
+import { PATH_HEADER } from "./return-path";
 import {
   ACCESS_COOKIE,
+  BUSY_PATH,
+  busyPath,
   END_PATH,
   endSession,
   LOGIN_PATH,
@@ -51,6 +57,7 @@ const REFRESH_TTL = "604800"; // not the API default, so the test proves it come
 beforeEach(() => {
   cookies = new FakeCookieJar();
   jar.current = cookies;
+  incoming.current = new Headers();
   vi.stubEnv("API_INTERNAL_URL", "http://api.test.invalid:8000");
   vi.stubEnv("API_TIMEOUT_MS", "1000");
   vi.stubEnv("REFRESH_TOKEN_TTL_SECONDS", REFRESH_TTL);
@@ -407,5 +414,150 @@ describe("endSession", () => {
     expect(cookies.deletes.every((call) => call.path === "/admin")).toBe(true);
     const [, init] = fetchMock.mock.calls[0]!;
     expect(JSON.parse(String(init?.body))).toEqual({ refresh_token: "rt-1" });
+  });
+});
+
+describe("the visitor's address on the auth calls (#530)", () => {
+  const KEY = "web-service-key-for-tests-0123456789abcdef";
+
+  /** The headers the API got on `path`'s call. */
+  function sentTo(path: string): Headers {
+    const call = fetchMock.mock.calls.find(([input]) => new URL(String(input)).pathname === path);
+    return new Headers(call?.[1]?.headers);
+  }
+
+  async function refreshAndEnd(): Promise<void> {
+    cookies.reset({ [SESSION_COOKIE]: MARKER, [REFRESH_COOKIE]: bound("rt-old") });
+    fetchMock.mockImplementation(
+      routeFetch({
+        "/v1/auth/refresh": () => Response.json(auth("agent")),
+        "/v1/auth/logout": () => new Response(null, { status: 204 }),
+      }),
+    );
+    expect(await refreshStaffSession()).toBe(PANEL_PATH);
+    await endSession();
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("WEB_SERVICE_KEY", KEY);
+    vi.stubEnv("CLIENT_IP_HEADER", "x-forwarded-for");
+    // What a browser may send: a spoofed first hop, and our own headers, forged.
+    incoming.current = new Headers({
+      "x-forwarded-for": "6.6.6.6, 203.0.113.9",
+      "x-jfi-client-ip": "9.9.9.9",
+      "x-jfi-web-key": "a-key-the-browser-made-up",
+    });
+  });
+
+  it("the refresh and the sign-out carry the web key and the edge's last address", async () => {
+    await refreshAndEnd();
+
+    for (const path of ["/v1/auth/refresh", "/v1/auth/logout"]) {
+      expect(sentTo(path).get("x-jfi-web-key"), path).toBe(KEY);
+      expect(sentTo(path).get("x-jfi-client-ip"), path).toBe("203.0.113.9");
+    }
+  });
+
+  it.each([
+    ["no CLIENT_IP_HEADER", "", "6.6.6.6, 203.0.113.9"],
+    ["no valid address in it", "x-forwarded-for", "6.6.6.6, unknown"],
+    ["CLIENT_IP_HEADER naming our own header", "x-jfi-client-ip", "6.6.6.6, 203.0.113.9"],
+  ])("with %s, no address is sent; the key still is", async (_, header, forwarded) => {
+    vi.stubEnv("CLIENT_IP_HEADER", header);
+    incoming.current.set("x-forwarded-for", forwarded);
+
+    await refreshAndEnd();
+
+    for (const path of ["/v1/auth/refresh", "/v1/auth/logout"]) {
+      expect(sentTo(path).get("x-jfi-client-ip"), path).toBeNull();
+      expect(sentTo(path).get("x-jfi-web-key"), path).toBe(KEY);
+    }
+  });
+
+  it("never passes on a key the browser sent", async () => {
+    vi.stubEnv("WEB_SERVICE_KEY", "");
+
+    await refreshAndEnd();
+
+    for (const path of ["/v1/auth/refresh", "/v1/auth/logout"]) {
+      expect(sentTo(path).get("x-jfi-web-key"), path).toBeNull();
+    }
+  });
+});
+
+describe("a busy API on the refresh (#530)", () => {
+  const SESSION = {
+    [SESSION_COOKIE]: MARKER,
+    [ACCESS_COOKIE]: bound("at-old"),
+    [REFRESH_COOKIE]: bound("rt-old"),
+  };
+  const timeout = () =>
+    Promise.reject(new DOMException("The operation timed out.", "TimeoutError"));
+
+  it.each([
+    [
+      "a 429 with its wait",
+      () =>
+        Promise.resolve(
+          Response.json(
+            { error: { code: "rate_limited", message: "m" } },
+            { status: 429, headers: { "Retry-After": "3" } },
+          ),
+        ),
+      3,
+    ],
+    [
+      "a 503",
+      () => Promise.resolve(Response.json({ error: { code: "unavailable" } }, { status: 503 })),
+      null,
+    ],
+    ["no answer (down)", () => Promise.reject(new TypeError("fetch failed")), null],
+    ["no answer in time", timeout, null],
+  ])("keeps the session on %s", async (_, answer, retryAfterSeconds) => {
+    cookies.reset(SESSION);
+    fetchMock.mockImplementation(answer);
+
+    expect(await refreshStaffSession()).toEqual({ busy: true, retryAfterSeconds });
+
+    // Nothing cleared, nothing rotated, nothing revoked: the staff member is still signed in.
+    expect(cookies.deletes).toEqual([]);
+    expect(cookies.sets).toEqual([]);
+    expect(calledPaths()).toEqual(["/v1/auth/refresh"]);
+  });
+
+  it.each([401, 500])("a %s still ends the session", async (status) => {
+    cookies.reset(SESSION);
+    fetchMock.mockImplementation(async () =>
+      Response.json({ error: { code: "x" } }, { status, headers: { "Retry-After": "3" } }),
+    );
+
+    expect(await refreshStaffSession()).toBe(LOGIN_PATH);
+    expect(cookies.values.size).toBe(0);
+  });
+
+  it("a server action waits on the busy page, still signed in", async () => {
+    cookies.reset({ [SESSION_COOKIE]: MARKER, [REFRESH_COOKIE]: bound("rt-old") });
+    incoming.current = new Headers({ [PATH_HEADER]: "/admin/queue?tab=urgent" });
+    fetchMock.mockImplementation(
+      routeFetch({
+        "/v1/auth/refresh": () =>
+          Response.json(
+            { error: { code: "rate_limited" } },
+            { status: 429, headers: { "Retry-After": "2" } },
+          ),
+      }),
+    );
+
+    expect(await redirectOf(staffActionAuth)).toBe(
+      `${BUSY_PATH}?next=%2Fadmin%2Fqueue%3Ftab%3Durgent&wait=2`,
+    );
+    expect(calledPaths()).toEqual(["/v1/auth/refresh"]);
+    expect([...cookies.values.keys()].sort()).toEqual([REFRESH_COOKIE, SESSION_COOKIE].sort());
+  });
+
+  it("the busy page gets the wait only when it is 1 to 5 seconds", () => {
+    expect(busyPath("/admin/kpis", 5)).toBe(`${BUSY_PATH}?next=%2Fadmin%2Fkpis&wait=5`);
+    expect(busyPath(null, 1)).toBe(`${BUSY_PATH}?wait=1`);
+    for (const wait of [6, 60, 0, null]) expect(busyPath(null, wait), String(wait)).toBe(BUSY_PATH);
   });
 });
