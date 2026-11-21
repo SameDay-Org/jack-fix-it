@@ -305,9 +305,11 @@ class JobScheduler:
 class JobParties:
     """Who takes part in a job, for the chat (#71) and the reviews (#77): the customer's and
     the pro's user ids, whether the job still accepts messages (CHAT_OPEN) and whether its
-    two sides may review each other (is_reviewable)."""
+    two sides may review each other (is_reviewable). The request is the job's, for the chat's
+    push to the customer (#73), which opens the job of their request."""
 
     job_id: uuid.UUID
+    request_id: uuid.UUID
     customer_id: uuid.UUID
     pro_user_id: uuid.UUID
     chat_open: bool
@@ -323,6 +325,119 @@ def is_reviewable(job: Job) -> bool:
     if job.status is JobStatus.PAID_OUT:
         return job.confirmed_at is not None
     return job.status in REVIEWABLE
+
+
+# A tip the customer paid (#273): a line of the job's history, no status change.
+TIP_ADDED: Final = "tip_added"
+
+
+@dataclass(frozen=True)
+class JobTipFacts:
+    """What a tip reads of its job (#273): its ids, the price before tax a percent is taken of,
+    and when the job was confirmed, by its customer (#66) or by the auto-confirm (#67). None
+    for a job never confirmed: still under way, disputed, refunded, cancelled, or paid out by
+    an admin's release of a dispute (is_reviewable); such a job takes no tip."""
+
+    job_id: uuid.UUID
+    request_id: uuid.UUID
+    customer_id: uuid.UUID
+    pro_id: uuid.UUID
+    price_cents: int
+    confirmed_at: datetime | None
+
+
+def tip_facts(job: Job) -> JobTipFacts:
+    return JobTipFacts(
+        job_id=job.id,
+        request_id=job.request_id,
+        customer_id=job.customer_id,
+        pro_id=job.pro_id,
+        # The quote's price, before tax: the base of a tip's percent (#273, Q-T4).
+        price_cents=job.customer_price_cents,
+        confirmed_at=job.confirmed_at if is_reviewable(job) else None,
+    )
+
+
+class JobTipReader:
+    """A job as a tip needs it, for the tips module (#273). Reads only, unlocked: a confirmed
+    job only moves on to paid_out, and confirmed_at is never cleared, so what this says stays
+    true."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._jobs = JobRepository(session)
+
+    async def of_customer_request(
+        self, customer_id: uuid.UUID, request_id: uuid.UUID
+    ) -> JobTipFacts | None:
+        """The request's job when `customer_id` is its customer; None otherwise, and while the
+        request has no job."""
+        job = await self._jobs.get_of_request(request_id)
+        if job is None or job.customer_id != customer_id:
+            return None
+        return tip_facts(job)
+
+
+@dataclass(frozen=True)
+class JobReceiptFacts:
+    """What a job's receipt reads of it (#62): ids, its status, when it was paid (the job is
+    created when its payment succeeds, #61) and done, and its tip facts."""
+
+    job_id: uuid.UUID
+    request_id: uuid.UUID
+    quote_id: uuid.UUID
+    customer_id: uuid.UUID
+    pro_id: uuid.UUID
+    status: JobStatus
+    paid_at: datetime
+    completed_at: datetime | None
+    tip: JobTipFacts
+
+
+def _receipt_facts(job: Job) -> JobReceiptFacts:
+    return JobReceiptFacts(
+        job_id=job.id,
+        request_id=job.request_id,
+        quote_id=job.quote_id,
+        customer_id=job.customer_id,
+        pro_id=job.pro_id,
+        status=job.status,
+        paid_at=job.created_at,
+        completed_at=job.completed_at,
+        tip=tip_facts(job),
+    )
+
+
+class JobReceiptReader:
+    """A job as its receipt needs it, for the receipts module (#62). Reads only."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._jobs = JobRepository(session)
+
+    async def of_customer_request(
+        self, customer_id: uuid.UUID, request_id: uuid.UUID
+    ) -> JobReceiptFacts | None:
+        """The request's job when `customer_id` is its customer; None otherwise, and while the
+        request has no job (its payment has not succeeded)."""
+        job = await self._jobs.get_of_request(request_id)
+        if job is None or job.customer_id != customer_id:
+            return None
+        return _receipt_facts(job)
+
+    async def of_request(self, request_id: uuid.UUID) -> JobReceiptFacts | None:
+        """The request's job, for the worker's receipt email; None while it has none."""
+        job = await self._jobs.get_of_request(request_id)
+        return None if job is None else _receipt_facts(job)
+
+
+class JobTimeline:
+    """Lines other modules add to a job's history without changing its status."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._jobs = JobRepository(session)
+
+    async def tip_added(self, job_id: uuid.UUID, customer_id: uuid.UUID) -> None:
+        """The customer's tip succeeded (#273): its customer is the event's actor."""
+        await self._jobs.add_event(JobEvent(job_id=job_id, type=TIP_ADDED, actor_id=customer_id))
 
 
 @dataclass(frozen=True)
@@ -439,6 +554,7 @@ class JobPartiesReader:
         job, pro_user_id = found
         return JobParties(
             job_id=job.id,
+            request_id=job.request_id,
             customer_id=job.customer_id,
             pro_user_id=pro_user_id,
             chat_open=job.status in CHAT_OPEN,

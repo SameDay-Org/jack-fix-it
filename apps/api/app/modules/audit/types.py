@@ -20,6 +20,8 @@ REASON_MAX_LENGTH: Final = 500
 class AuditAction(StrEnum):
     PAYMENT_INTENT_ADOPT = "payment.adopt_intent"
     PAYMENT_INTENT_ALLOW_NEW = "payment.allow_new_intent"
+    # A tip's lost PaymentIntent create Stripe never made, cleared by staff (#273, #510).
+    TIP_INTENT_ALLOW_NEW = "tip.allow_new_intent"
     PAYOUT_ACCOUNT_ADOPT = "pro_profile.adopt_payout_account"
     PAYOUT_ACCOUNT_ALLOW_NEW = "pro_profile.allow_new_payout_account"
     # A staff read of a job's chat that returned at least one original (#72).
@@ -77,6 +79,7 @@ class AuditAction(StrEnum):
 
 class AuditEntityType(StrEnum):
     PAYMENT = "payment"
+    TIP = "tip"
     PRO_PROFILE = "pro_profile"
     PRO_DOCUMENT = "pro_document"
     JOB = "job"

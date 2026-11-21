@@ -449,6 +449,53 @@ async def push_payouts_enabled(
     )
 
 
+async def push_chat_message_to_customer(
+    queue: JobQueue,
+    *,
+    customer_id: uuid.UUID,
+    chat_message_id: uuid.UUID,
+    request_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the customer, for a new message of their job's pro they are not reading (#73 part 1,
+    chat.notify): the message's id, so announcing it twice pushes once. The job's code only,
+    never the text. Opens the job of their request (#64), where the chat shows its unread count.
+    """
+    await _push(
+        queue,
+        customer_id,
+        message_id=f"chat_message:{chat_message_id}",
+        kind="chat_message",
+        params={"public_code": public_code},
+        deep_link=f"/requests/{request_id}/job",
+        timeout_seconds=timeout_seconds,
+    )
+
+
+async def push_chat_message_to_pro(
+    queue: JobQueue,
+    *,
+    pro_user_id: uuid.UUID,
+    chat_message_id: uuid.UUID,
+    job_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the pro, for a new message of the job's customer they are not reading (#73 part 1),
+    as push_chat_message_to_customer. Opens the job (#63), where the chat shows its unread
+    count."""
+    await _push(
+        queue,
+        pro_user_id,
+        message_id=f"chat_message:{chat_message_id}",
+        kind="chat_message",
+        params={"public_code": public_code},
+        deep_link=f"/jobs/{job_id}",
+        timeout_seconds=timeout_seconds,
+    )
+
+
 async def _job_push(
     queue: JobQueue,
     customer_id: uuid.UUID,

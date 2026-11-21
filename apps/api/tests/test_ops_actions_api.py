@@ -8,7 +8,6 @@ import re
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from typing import Any, Final
 
 import httpx
@@ -39,6 +38,7 @@ from app.modules.pros.models import (
 )
 from app.modules.requests.models import RequestOrigin, RequestStatus, ServiceRequest
 from app.modules.requests.queue import RequestQueueReader
+from app.modules.reviews.models import Review, ReviewAuthorRole
 from app.modules.service_areas.models import ServiceArea
 from app.modules.users.models import User
 from app.modules.users.types import UserRole, UserStatus
@@ -55,6 +55,7 @@ from tests.job_world import (
     make_job,
     record_pushes,
 )
+from tests.ratings_seed import confirmed_job, rate
 from tests.test_dispatch import sessions_of
 from tests.test_ops_queue_api import (
     BASE,
@@ -1339,11 +1340,9 @@ async def test_the_eligible_list_names_who_may_be_assigned_best_ranked_first(
     record_pushes(app)
     await cover_with(db_session, world, world.pro)
     await cover_with(db_session, world, world.other_pro)
-    await db_session.execute(
-        update(ProProfile)
-        .where(ProProfile.id == world.pro.profile_id)
-        .values(rating_avg=Decimal("4.80"))
-    )
+    # A published review (#78: the rating is computed from the reviews, never read from the
+    # profile's rating_avg column), so world.pro ranks first.
+    await rate(db_session, world.pro.profile_id, 5)
     await db_session.execute(
         update(ProProfile)
         .where(ProProfile.id == world.other_pro.profile_id)
@@ -1420,6 +1419,78 @@ async def test_the_eligible_list_names_who_may_be_assigned_best_ranked_first(
     unknown = await db_client.get(path(uuid.uuid4(), "eligible-pros"), headers=world.agent.headers)
     assert unknown.status_code == 404
     assert unknown.json()["error"]["code"] == "request_not_found"
+
+
+# REVIEW_PUBLISH_AFTER_DAYS at 2, not its default (14): the ranking must read the setting.
+SHORT_WINDOW_DAYS: Final = 2
+
+
+async def review_of(
+    session: AsyncSession, pro: Pro, overall: int, confirmed_days_ago: float
+) -> None:
+    """A customer's review of `pro` on a job confirmed `confirmed_days_ago`; the pro has not
+    answered, so it counts once that job's publication window has passed."""
+    job_id, customer_id = await confirmed_job(
+        session, pro.profile_id, confirmed_at=datetime.now(UTC) - timedelta(days=confirmed_days_ago)
+    )
+    session.add(
+        Review(
+            job_id=job_id,
+            author_id=customer_id,
+            target_id=pro.id,
+            author_role=ReviewAuthorRole.CUSTOMER,
+            overall=overall,
+        )
+    )
+    await session.flush()
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        make_settings(
+            ops_followup_max_days=MAX_DAYS,
+            business_time_zone="America/New_York",
+            request_list_default_limit=2,
+            review_publish_after_days=SHORT_WINDOW_DAYS,
+        )
+    ],
+)
+async def test_the_eligible_list_ranks_by_the_reviews_published_in_the_set_window(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    """#556 (the Gatekeeper's follow-up): a manual assignment ranks pros by the reviews
+    published under REVIEW_PUBLISH_AFTER_DAYS, the setting's value. With no review the two pros
+    rank in some order; then the second gets a 4 published (its job confirmed 3 days ago, past
+    the 2-day window) and the first a 5 not yet published (1 day ago, inside it). Only that
+    window puts the second first: with a longer one (the default 14 days, or none at all) both
+    are unrated and the first stays first; with no window the first's 5 wins."""
+    for pro in (world.pro, world.other_pro):
+        await cover_with(db_session, world, pro)
+    await db_session.execute(
+        update(ProProfile)
+        .where(ProProfile.id.in_([world.pro.profile_id, world.other_pro.profile_id]))
+        .values(payouts_enabled=True)
+    )
+    request = await make_request(db_session, world)
+    request_id = request.id
+    await db_session.commit()
+    url = path(request_id, "eligible-pros")
+    pros = {str(pro.profile_id): pro for pro in (world.pro, world.other_pro)}
+
+    unrated = await db_client.get(url, headers=world.agent.headers)
+    assert unrated.status_code == 200, unrated.text
+    first, second = (pros[item["id"]] for item in unrated.json()["items"])
+    await review_of(db_session, second, 4, confirmed_days_ago=SHORT_WINDOW_DAYS + 1)
+    await review_of(db_session, first, 5, confirmed_days_ago=SHORT_WINDOW_DAYS - 1)
+    await db_session.commit()
+    rated = await db_client.get(url, headers=world.agent.headers)
+
+    assert rated.status_code == 200, rated.text
+    assert [item["id"] for item in rated.json()["items"]] == [
+        str(second.profile_id),
+        str(first.profile_id),
+    ]
 
 
 async def test_the_eligible_list_is_cut_at_the_setting_and_says_so(
