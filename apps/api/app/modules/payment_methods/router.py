@@ -67,6 +67,17 @@ _NOT_FOUND: dict[int | str, dict[str, Any]] = {
         "validation_error: the id is not a PaymentMethod id (pm_ and letters, digits or _)."
     ),
 }
+_READS_LIMITED: dict[int | str, dict[str, Any]] = {
+    status.HTTP_429_TOO_MANY_REQUESTS: {
+        **_error("rate_limited: too many wallet reads; retry later."),
+        "headers": {
+            "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {"type": "integer"},
+            }
+        },
+    },
+}
 _RATE_LIMITED: dict[int | str, dict[str, Any]] = {
     status.HTTP_429_TOO_MANY_REQUESTS: {
         **_error("rate_limited: too many payment-method changes; retry later."),
@@ -87,13 +98,30 @@ async def limit_payment_method_writes(
 ) -> None:
     """PAYMENT_METHOD_WRITE_LIMIT setup intents, default changes and deletes together, per
     customer, per PAYMENT_METHOD_WRITE_WINDOW_SECONDS: each one is a call to Stripe. The list
-    is not limited."""
+    has its own budget (limit_payment_method_reads)."""
     await enforce_limit(
         limiter,
         "payment_method_write",
         str(user.id),
         limit=settings.payment_method_write_limit,
         window_seconds=settings.payment_method_write_window_seconds,
+        timeout_seconds=settings.rate_limit_timeout_seconds,
+    )
+
+
+async def limit_payment_method_reads(
+    user: CustomerUser,
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> None:
+    """PAYMENT_METHOD_READ_LIMIT wallet lists per customer per
+    PAYMENT_METHOD_READ_WINDOW_SECONDS (#525): each one is two Stripe reads."""
+    await enforce_limit(
+        limiter,
+        "payment_method_read",
+        str(user.id),
+        limit=settings.payment_method_read_limit,
+        window_seconds=settings.payment_method_read_window_seconds,
         timeout_seconds=settings.rate_limit_timeout_seconds,
     )
 
@@ -122,7 +150,8 @@ async def create_setup_intent(
     "",
     response_model=list[PaymentMethodOut],
     summary="List my saved cards",
-    responses={**_ACCESS, **_UNAVAILABLE},
+    dependencies=[Depends(limit_payment_method_reads)],
+    responses={**_ACCESS, **_READS_LIMITED, **_UNAVAILABLE},
 )
 async def list_payment_methods(
     user: CustomerUser,
