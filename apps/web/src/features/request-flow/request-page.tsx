@@ -4,12 +4,21 @@ import { contactEmail, requestFlowEnabled } from "@/features/landing/config";
 import { LandingFooter } from "@/features/landing/landing-footer";
 import { LandingHeader } from "@/features/landing/landing-header";
 import { HtmlLang } from "@/features/site/html-lang";
-import { LANDING_PATHS, REQUEST_PATHS } from "@/features/site/routes";
+import {
+  LANDING_PATHS,
+  PRIVACY_PATHS,
+  REQUEST_PATHS,
+  SHOWCASE_PATHS,
+  TERMS_PATHS,
+} from "@/features/site/routes";
 import { FOCUS_ON_LIGHT } from "@/features/site/ui";
 import type { Locale } from "@/i18n/config";
 import { getT } from "@/i18n/server";
+import { mintFormToken } from "@/lib/public-form/form-token";
 
-import { checkZip, joinWaitlist } from "./actions";
+import { checkZip, joinWaitlist, sendRequest } from "./actions";
+import { utmFromSearch } from "./attribution";
+import { requestFlowSecrets, storeLinks } from "./config";
 import { requestFlowText } from "./copy";
 import { RequestFlow } from "./request-flow";
 import { loadRequestCategories, phoneCountryCode, type RequestCategory } from "./server";
@@ -17,8 +26,11 @@ import { loadRequestCategories, phoneCountryCode, type RequestCategory } from ".
 /** Where "Skip to content" lands. */
 const MAIN_ID = "content";
 
-/** The query a service page's link may carry: the service picked beforehand, by its slug. */
-export type RequestSearch = { service?: string | string[] };
+/**
+ * The query /request may carry: the service picked beforehand (`service`, a slug) and the
+ * campaign's `utm_*` keys (attribution.ts).
+ */
+export type RequestSearch = Record<string, string | string[] | undefined>;
 
 /** The service a link picked (`?service=<slug>`), when it is one of the active ones. */
 export function preselectedCategoryId(
@@ -36,6 +48,8 @@ export function preselectedCategoryId(
  */
 export async function RequestPage({ locale, search }: { locale: Locale; search: RequestSearch }) {
   if (!requestFlowEnabled()) notFound();
+  // Both secrets or no form (config.ts): one that could not be sent is never shown.
+  const { formSecret } = requestFlowSecrets();
   const t = await getT(locale);
   const categories = await loadRequestCategories(locale);
 
@@ -65,9 +79,16 @@ export async function RequestPage({ locale, search }: { locale: Locale; search: 
               categories={categories}
               initialCategoryId={preselectedCategoryId(categories, search)}
               countryCode={phoneCountryCode()}
+              formToken={mintFormToken(formSecret, "request")}
+              utm={utmFromSearch(search)}
+              storeLinks={storeLinks()}
+              appHref={SHOWCASE_PATHS[locale]}
               homeHref={LANDING_PATHS[locale]}
+              termsHref={TERMS_PATHS[locale]}
+              privacyHref={PRIVACY_PATHS[locale]}
               checkZip={checkZip}
               joinWaitlist={joinWaitlist}
+              sendRequest={sendRequest}
             />
           </div>
         </div>

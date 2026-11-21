@@ -1359,6 +1359,7 @@
     "optional": "{{label}} (opcional)",
     "counter": "{{length}} / {{max}}",
     "check": "Algunas respuestas necesitan revisión:",
+    "loading": "Cargando…",
     "zip": {
       "title": "¿Dónde es el trabajo?",
       "support": "Primero, veamos si Jack trabaja en tu zona.",
@@ -1383,6 +1384,7 @@
       "otherZip": "Probar otro código postal",
       "joinedTitle": "Ya estás en la lista",
       "joinedBody": "Te avisaremos cuando Jack llegue a {{zip}}.",
+      "outOfArea": "Jack no recibe solicitudes en {{zip}} por ahora, así que esta no se envió. Te avisaremos cuando Jack llegue a {{zip}}.",
       "home": "Volver a la página de inicio",
       "servedNow": "Buenas noticias: Jack ya trabaja en {{zip}}.",
       "errors": {
@@ -1410,6 +1412,106 @@
       "tooFew": "Elige al menos {{count}}.",
       "tooMany": "Elige hasta {{count}}.",
       "pickUpTo": "Elige hasta {{count}}."
+    },
+    "where": {
+      "title": "¿Cuál es la dirección?",
+      "support": "La usamos para encontrar profesionales que trabajan en tu zona.",
+      "line1": "Dirección",
+      "line2": "Apartamento, suite o unidad",
+      "city": "Ciudad",
+      "state": "Estado",
+      "stateHint": "Dos letras.",
+      "zip": "Código postal: {{zip}}",
+      "changeZip": "Cambiar el código postal",
+      "errors": {
+        "line1": "Escribe la dirección.",
+        "city": "Escribe la ciudad.",
+        "state": "Escribe el código de 2 letras del estado."
+      }
+    },
+    "when": {
+      "title": "¿Cuándo te viene bien?",
+      "support": "Elige un día o déjalo abierto: cada profesional propone una hora de inicio con su presupuesto.",
+      "day": "Día",
+      "dayHint": "Déjalo vacío si cualquier día te sirve.",
+      "period": "Momento del día",
+      "periods": {
+        "morning": "Por la mañana",
+        "afternoon": "Tarde",
+        "evening": "Noche",
+        "flexible": "Flexible"
+      },
+      "errors": {
+        "day": "Elige hoy o un día posterior."
+      }
+    },
+    "contact": {
+      "title": "¿Cómo te contactamos?",
+      "support": "Solo lo usamos para hablar contigo sobre esta solicitud.",
+      "firstName": "Nombre",
+      "phone": "Número de celular",
+      "phoneHint": "Un número de EE. UU., 10 dígitos.",
+      "email": "Correo electrónico",
+      "errors": {
+        "firstName": "Escribe tu nombre, con letras.",
+        "phone": "Escribe un número de celular de 10 dígitos.",
+        "email": "Escribe un correo como nombre@ejemplo.com."
+      }
+    },
+    "review": {
+      "title": "Revisa tu solicitud",
+      "support": "Asegúrate de que todo esté bien antes de enviarla.",
+      "sections": {
+        "description": "Qué está pasando",
+        "service": "Servicio",
+        "answers": "Tus respuestas",
+        "address": "Dirección",
+        "when": "Cuándo",
+        "contact": "Cómo te contactamos"
+      },
+      "edit": {
+        "description": "Editar qué está pasando",
+        "answers": "Editar tus respuestas",
+        "address": "Editar la dirección",
+        "when": "Editar el día",
+        "contact": "Editar cómo te contactamos"
+      },
+      "editLabel": "Editar",
+      "notSure": "No estoy seguro",
+      "flexible": "Cualquier día me sirve",
+      "yes": "Sí",
+      "no": "No",
+      "consent": "Al enviar, aceptas que Jack Fix It te contacte por llamada, mensaje de texto o correo sobre esta solicitud.",
+      "terms": "Términos",
+      "privacy": "Privacidad",
+      "honeypot": "Deja este campo vacío",
+      "send": "Enviar a Jack",
+      "sending": "Enviando…",
+      "failedTitle": "Tu solicitud no se envió",
+      "errors": {
+        "stale": "Esta página estuvo abierta un buen rato. Tus respuestas siguen aquí: pulsa Enviar a Jack otra vez.",
+        "retry": "No se envió. Pulsa Enviar a Jack otra vez.",
+        "unavailable": "No pudimos enviar tu solicitud ahora. Tus respuestas siguen aquí: inténtalo de nuevo en un momento.",
+        "rate_limited": "Demasiadas solicitudes desde aquí en poco tiempo. Espera unos minutos y vuelve a intentarlo.",
+        "duplicate": "Puede que ya tengamos esta solicitud. Si no te contactamos, vuelve a cargar la página y envíala otra vez.",
+        "invalid": "Algunas respuestas no pasaron. Revísalas y vuelve a enviarla."
+      },
+      "rateLimitedIn": "Demasiadas solicitudes desde aquí en poco tiempo. Vuelve a intentarlo en {{minutes}}\u00a0min.",
+      "rateLimitedHours": "Demasiadas solicitudes por ahora. Vuelve a intentarlo en unas {{hours}}\u00a0h."
+    },
+    "sent": {
+      "title": "Jack ya está en ello",
+      "code": "Tu número de solicitud: {{code}}",
+      "next": "Alguien de nuestro equipo te llamará o te escribirá sobre ella.",
+      "invite": "Ahora, descarga la app de Jack Fix It y crea tu cuenta. Cuando hablemos, te ayudaremos a seguir con tu solicitud allí.",
+      "appStore": "App Store",
+      "playStore": "Google Play",
+      "seeApp": "Ver la app de Jack Fix It",
+      "home": "Volver a la página de inicio"
+    },
+    "notices": {
+      "invalidCategory": "Este servicio no está disponible ahora. Elige otro o «No estoy seguro».",
+      "invalidAnswers": "Las preguntas de este servicio cambiaron. Revisa tus respuestas y continúa."
     }
   }
 }
