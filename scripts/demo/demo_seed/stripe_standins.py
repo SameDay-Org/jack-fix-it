@@ -209,6 +209,9 @@ class StandInTransfers:
             job_id=metadata.get("job_id"),
             reversed=False,
             request_id=None,
+            # A tip's transfer names its tip, as Stripe returns the create's metadata (#518).
+            kind=metadata.get("kind"),
+            tip_id=metadata.get("tip_id"),
         )
         self._transfers.setdefault(transfer_id, (transfer_group, facts))
         return self._transfers[transfer_id][1]
