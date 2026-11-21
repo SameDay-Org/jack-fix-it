@@ -233,7 +233,7 @@ async def send_phone_code(
     arrives surfaces at verify as invalid_code.
     """
     if await phones.prepare_send(user, data.phone):
-        background.add_task(phones.deliver_code, user.id, data.phone)
+        background.add_task(phones.deliver_code, user.id, data.phone, user.locale)
 
 
 @router.post(
