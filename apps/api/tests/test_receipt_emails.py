@@ -153,7 +153,8 @@ async def test_the_payment_receipt_is_sent_once_with_the_card_read_from_stripe(
     assert email.subject.startswith("Your Jack Fix It receipt · JF-")
     for part in (email.text, email.html):
         assert "Hi Ana," in part
-        assert "Service: Plumbing" in part
+        assert "Category: Plumbing" in part
+        assert part.count("Service:") == 1  # the amount's line only, never the category's
         assert "Pro: María P." in part
         assert "City: Orlando" in part
         assert f"Service: {money(PRICE)}" in part
@@ -182,7 +183,8 @@ async def test_the_receipt_is_in_the_customer_s_language(
     [email] = sender.sent
     assert email.subject.startswith("Tu recibo de Jack Fix It · JF-")
     assert "Hola, Ana:" in email.text
-    assert "Servicio: Plomería" in email.text
+    assert "Categoría: Plomería" in email.text
+    assert email.text.count("Servicio:") == 1
     assert f"Total pagado: {money(PRICE + TAX)}" in email.text
     assert "Pagado con Visa •••• 4242" in email.text
     assert "Programado: 15 ene 2030, 09:30" in email.text
