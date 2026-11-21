@@ -110,7 +110,7 @@ async def test_customer_sees_the_profile_of_a_pro_who_quoted(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: World
 ) -> None:
     request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
-    pro = await quoting_pro(db_session, rating="4.8", jobs_count=12, years=9)
+    pro = await quoting_pro(db_session, ratings=(5, 5, 5, 5, 4), years=9)
     # The last minute of March in UTC: the month is March, never the day.
     await edit_profile(
         db_session,
@@ -136,8 +136,9 @@ async def test_customer_sees_the_profile_of_a_pro_who_quoted(
     assert body == {
         "id": str(pro.profile_id),
         "name": "María P.",
-        "rating_avg": "4.80",
-        "jobs_count": 12,
+        "rating_avg": "4.8",
+        "rating_count": 5,
+        "jobs_count": 5,
         "years_of_experience": 9,
         "verified": True,
         "bio": "Licensed plumber, water heaters and leaks.",
@@ -150,7 +151,7 @@ async def test_profile_card_fields_match_the_list(
 ) -> None:
     """The QuotePro fields mean the same here as on the quote card (#188)."""
     request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
-    pro = await quoting_pro(db_session, last_name=None, rating="3.5", jobs_count=1)
+    pro = await quoting_pro(db_session, last_name=None, ratings=(3, 4))
     quote_id = await add_quote(db_session, request_id, pro)
     [item] = (
         await db_client.get(f"/v1/requests/{request_id}/quotes", headers=customer(world))
@@ -221,7 +222,7 @@ async def test_profile_never_exposes_private_fields(
     """quoting_pro fills the photo, the Stripe account, payouts and the names; a document and a
     service area are added, so a leak of any of them would show."""
     request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
-    pro = await quoting_pro(db_session, rating="4.5", jobs_count=3, years=7)
+    pro = await quoting_pro(db_session, ratings=(5, 4), years=7)
     await edit_profile(db_session, pro, bio="Clean work")
     area_id = await db_session.scalar(select(ServiceArea.id).where(ServiceArea.zip_code == "32801"))
     assert area_id is not None
@@ -242,7 +243,7 @@ async def test_profile_never_exposes_private_fields(
     document = response.json()
     assert set(document) == PROFILE_KEYS
     assert [set(category) for category in document["categories"]] == [CATEGORY_KEYS]
-    assert document["rating_avg"] == "4.50"  # a string, never the raw decimal
+    assert document["rating_avg"] == "4.5"  # a string, never the raw decimal
     assert document["member_since"].endswith("-01")
     secrets = (
         pro.email,
@@ -272,6 +273,7 @@ def test_profile_model_forbids_extra_fields() -> None:
         "id": str(uuid.uuid4()),
         "name": None,
         "rating_avg": None,
+        "rating_count": 0,
         "jobs_count": 0,
         "years_of_experience": None,
         "verified": True,
@@ -566,7 +568,7 @@ async def test_profile_query_count_is_constant(
     plain = await quoting_pro(db_session)
     await give_categories(db_session, plain, [await make_category(db_session, "x53")])
     plain_quote = await add_quote(db_session, small, plain)
-    rich = await quoting_pro(db_session, rating="4.9", jobs_count=40, years=20)
+    rich = await quoting_pro(db_session, ratings=(5, 5, 5, 5, 5, 5, 5, 5, 5, 4), years=20)
     await edit_profile(db_session, rich, bio="Water heaters. " * 50)
     await give_categories(
         db_session, rich, [await make_category(db_session, f"y53-{n}") for n in range(5)]
@@ -584,8 +586,9 @@ async def test_profile_query_count_is_constant(
         counts.append(len(statements))
 
     # The caller's account, the request, its quotes, the pros who can still be hired, their
-    # names, the pro's bio with their category ids, the categories, their contacts.
-    assert counts == [8, 8]
+    # names, the pro's bio with their category ids, the categories, the pro's rating and jobs
+    # completed (#78), their contacts.
+    assert counts == [10, 10]
 
 
 async def test_profile_denials_do_equal_sql_work(
