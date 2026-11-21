@@ -22,6 +22,8 @@ export const APPROACH_MAX_LENGTH = 2000;
  * opens earlier in a day than it (#475).
  */
 const DEFAULT_START_HOUR = 9;
+/** The latest hour the form proposes on its own: a later next hour moves to the next morning. */
+const LATEST_DEFAULT_START_HOUR = 18;
 
 /** What the pro has typed and picked; kept as is while the form, the review and a retry come and go. */
 export type QuoteDraft = {
@@ -60,8 +62,10 @@ export const emptyDraft = (startAt: number): QuoteDraft => ({
 
 /**
  * The start the form opens with: the customer's preferred day at 9:00 AM while that is still
- * ahead, otherwise the next whole hour, moved to 9:00 AM when it falls in the small hours (a quote
- * written at 1 AM opens on that morning, not on 2:00 AM).
+ * ahead, otherwise the next whole hour, moved to the next daytime 9:00 AM when it falls outside
+ * the day: in the small hours to that morning (a quote written at 1 AM opens on 9:00 AM, not on
+ * 2:00 AM), in the evening to the next morning (one written at 10 PM opens on tomorrow 9:00 AM,
+ * not on 11:00 PM, #475).
  */
 export function defaultStartAt(preferredDate: string | null, now: number): number {
   if (preferredDate !== null) {
@@ -74,7 +78,12 @@ export function defaultStartAt(preferredDate: string | null, now: number): numbe
   const next = new Date(now);
   next.setMinutes(0, 0, 0);
   next.setHours(next.getHours() + 1);
-  if (next.getHours() < DEFAULT_START_HOUR) next.setHours(DEFAULT_START_HOUR);
+  if (next.getHours() > LATEST_DEFAULT_START_HOUR) {
+    next.setDate(next.getDate() + 1);
+    next.setHours(DEFAULT_START_HOUR);
+  } else if (next.getHours() < DEFAULT_START_HOUR) {
+    next.setHours(DEFAULT_START_HOUR);
+  }
   return next.getTime();
 }
 
