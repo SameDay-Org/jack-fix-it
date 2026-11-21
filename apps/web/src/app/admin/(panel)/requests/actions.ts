@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { ApiError, apiPost } from "@/lib/api";
 import { staffActionAuth } from "@/lib/session";
 
+import { FOLLOWUPS_PATH } from "../followups/followups";
 import { businessTimeZone } from "../kpis/config";
 import { isUuid, QUEUE_PATH, requestHref } from "../queue/queue";
 import {
@@ -77,8 +78,9 @@ export async function releaseRequest(requestId: string): Promise<ClaimState> {
 // --- The BDC's actions on a request (#82) -------------------------------------------------
 
 function refreshOps(requestId: string): void {
-  // The card shows the action's result, the queue what changed.
+  // The card shows the action's result, the follow-ups page and the queue what changed.
   revalidatePath(requestHref(requestId));
+  revalidatePath(FOLLOWUPS_PATH);
   revalidatePath(QUEUE_PATH);
 }
 

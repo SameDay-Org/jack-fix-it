@@ -236,11 +236,17 @@ async def test_unregister_ignores_a_bad_bearer(
     _, agent = await caller(db_session, UserRole.AGENT)
     past = datetime.now(UTC) - timedelta(days=1)
     expired = security.create_access_token(
-        user_id=ana_id, role=UserRole.CUSTOMER, secret=TEST_JWT_SECRET, ttl_seconds=60, now=past
+        user_id=ana_id,
+        role=UserRole.CUSTOMER,
+        session_id=None,
+        secret=TEST_JWT_SECRET,
+        ttl_seconds=60,
+        now=past,
     )
     forged = security.create_access_token(
         user_id=ana_id,
         role=UserRole.CUSTOMER,
+        session_id=None,
         secret="another-secret-not-the-api-s-0123456789",
         ttl_seconds=900,
         now=datetime.now(UTC),

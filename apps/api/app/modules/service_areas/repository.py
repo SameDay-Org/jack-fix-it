@@ -42,10 +42,12 @@ class ServiceAreaRepository:
         statement = select(ServiceArea.id).where(ServiceArea.id.in_(ids), ServiceArea.active)
         return set((await self._session.scalars(statement)).all())
 
-    async def active_ids_for_zip(self, zip_code: str) -> set[uuid.UUID]:
+    async def active_ids_for_zip(self, zip_code: str, *, lock: bool = False) -> set[uuid.UUID]:
         statement = select(ServiceArea.id).where(
             ServiceArea.zip_code == zip_code, ServiceArea.active
         )
+        if lock:
+            statement = statement.order_by(ServiceArea.id).with_for_update(read=True)
         return set((await self._session.scalars(statement)).all())
 
     async def get_many(self, ids: Collection[uuid.UUID]) -> list[ServiceArea]:
