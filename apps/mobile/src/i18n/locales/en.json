@@ -827,7 +827,9 @@
       "refreshFailed": "We couldn't refresh your jobs.",
       "retry": "Try again",
       "row": "{{status}}. {{when}}. {{what}}.",
-      "for": "{{category}} for {{name}}"
+      "for": "{{category}} for {{name}}",
+      "startedTime": "Started {{time}}",
+      "startedWhen": "Started {{day}}, {{time}}"
     },
     "day": {
       "today": "Today",
