@@ -1547,7 +1547,8 @@ async def test_setup_intents_and_changes_share_one_limit_per_customer(
     assert len(reads.json()) == 1
     assert other.status_code == 200  # another customer has their own budget
     index, _ = window_position(NOW, WRITE_WINDOW)
-    assert limiter.counts == {  # the key is the user id only
+    writes = {k: v for k, v in limiter.counts.items() if k.startswith("payment_method_write:")}
+    assert writes == {  # the key is the user id only
         f"payment_method_write:{ana_id}:{index}": WRITE_LIMIT + 3,
         f"payment_method_write:{bruno_id}:{index}": 1,
     }
@@ -1564,7 +1565,7 @@ def test_openapi_documents_every_error_and_only_the_wallet_fields(app: FastAPI) 
 
     routes = {
         (SETUP, "post"): {"200", "401", "403", "422", "429", "503"},
-        (BASE, "get"): {"200", "401", "403", "422", "503"},
+        (BASE, "get"): {"200", "401", "403", "422", "429", "503"},
         (f"{item}/default", "post"): {"200", "401", "403", "404", "422", "429", "503"},
         (item, "delete"): {"204", "401", "403", "404", "422", "429", "503"},
     }
@@ -1605,3 +1606,53 @@ async def test_the_setup_intent_ephemeral_key_is_deprecated_in_the_schema(
     assert sheet["ephemeral_key_secret"]["deprecated"] is True
     assert "deprecated" not in sheet["customer_session_client_secret"]
     assert "customer_session_client_secret" in schema["PaymentSheetOut"]["required"]
+
+
+READ_LIMIT = 2
+
+
+async def test_the_wallet_list_is_limited_per_customer(db_session: AsyncSession) -> None:
+    """#525: every list is two Stripe reads, so one customer gets PAYMENT_METHOD_READ_LIMIT
+    lists per PAYMENT_METHOD_READ_WINDOW_SECONDS, apart from the write budget; a limited list
+    reaches no Stripe call."""
+    app = make_app(
+        make_settings(
+            stripe_secret_key=None,
+            stripe_publishable_key=PUBLISHABLE_KEY,
+            payment_method_read_limit=READ_LIMIT,
+            payment_method_read_window_seconds=WRITE_WINDOW,
+            payment_method_write_window_seconds=WRITE_WINDOW,
+        )
+    )
+    fakes = install_fakes(app)
+    limiter = InMemoryRateLimiter(clock=lambda: NOW)
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+
+    async def test_session() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = test_session
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        ana_id, ana, ana_customer = await customer_with_stripe(db_session)
+        bruno_id, bruno, _ = await customer_with_stripe(db_session)
+        fakes.methods.add_card(ana_customer)
+        reads = [await client.get(BASE, headers=ana) for _ in range(READ_LIMIT)]
+        calls = len(fakes.methods.calls)
+        limited = await client.get(BASE, headers=ana)
+        after_limit = len(fakes.methods.calls)
+        write = await client.post(SETUP, headers=ana)
+        other = await client.get(BASE, headers=bruno)
+
+    assert [response.status_code for response in reads] == [200] * READ_LIMIT
+    assert (limited.status_code, limited.json()) == (429, RATE_LIMITED)
+    assert int(limited.headers["Retry-After"]) >= 1
+    assert after_limit == calls  # a limited list never reaches Stripe
+    assert write.status_code == 200  # writes have their own budget
+    assert other.status_code == 200  # another customer has their own budget
+    index, _ = window_position(NOW, WRITE_WINDOW)
+    assert limiter.counts == {
+        f"payment_method_read:{ana_id}:{index}": READ_LIMIT + 1,
+        f"payment_method_write:{ana_id}:{index}": 1,
+        f"payment_method_read:{bruno_id}:{index}": 1,
+    }
