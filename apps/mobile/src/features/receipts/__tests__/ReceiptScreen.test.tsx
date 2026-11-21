@@ -1,13 +1,18 @@
 import "@/i18n";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, within } from "@testing-library/react-native";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react-native";
+import { Directory, File, Paths } from "expo-file-system";
+import { isAvailableAsync, shareAsync } from "expo-sharing";
+import { Image } from "react-native";
 
 import { ApiError, apiGet } from "@/api";
+import { dismissToast, toastStore } from "@/components/ui/toast";
 
 import type { ReceiptOut } from "../api";
 import { paymentMethodText, proFirstName } from "../format";
 import { ReceiptScreen } from "../ReceiptScreen";
+import { deferred } from "../../../api/__tests__/helpers";
 
 jest.mock("@/api", () => ({
   ...jest.requireActual("../../../api/errors"),
@@ -24,14 +29,21 @@ jest.mock(
   "react-native-safe-area-context",
   () => jest.requireActual("react-native-safe-area-context/jest/mock").default,
 );
-jest.mock("react-native-view-shot", () => {
-  const { forwardRef } = jest.requireActual<typeof import("react")>("react");
-  const { View } = jest.requireActual<typeof import("react-native")>("react-native");
-  return { __esModule: true, default: forwardRef((props: object, _ref) => <View {...props} />) };
-});
+// expo-sharing and react-native-view-shot: the root manual mocks (apps/mobile/__mocks__).
 
 const mockRequestId = "6f1c2a40-0000-4000-8000-000000000062";
 const HIDDEN = { includeHiddenElements: true } as const;
+/** What the root view-shot mock resolves a base64 capture to. */
+const MOCK_CAPTURE_BASE64 = "iVBORw0KGgo=";
+/** The receipt's private cache folder for shared PNGs (expo-file-system's in-memory mock). */
+const shareDir = () => new Directory(Paths.cache, "receipt-share");
+/** The PNGs a share left behind. */
+const sharedPngs = () =>
+  shareDir().exists
+    ? shareDir()
+        .list()
+        .map((entry) => entry.uri)
+    : [];
 
 const receipt = (overrides: Partial<ReceiptOut> = {}): ReceiptOut => ({
   receipt_number: "JF-000124",
@@ -56,7 +68,10 @@ const receipt = (overrides: Partial<ReceiptOut> = {}): ReceiptOut => ({
 
 async function renderScreen(answer: () => Promise<unknown>) {
   jest.mocked(apiGet).mockImplementation(answer as unknown as typeof apiGet);
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // gcTime Infinity: no five-minute cleanup timer is left behind to keep Jest running.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+  });
   await render(
     <QueryClientProvider client={client}>
       <ReceiptScreen />
@@ -70,7 +85,18 @@ const paper = () => within(screen.getByTestId("receipt-paper"));
 beforeEach(() => {
   jest.mocked(apiGet).mockReset();
   mockPush.mockReset();
+  jest.mocked(shareAsync).mockReset().mockResolvedValue(undefined);
+  jest.mocked(isAvailableAsync).mockReset().mockResolvedValue(true);
+  // getSize is overloaded (promise and callback forms), so the spy spells out the promise form.
+  jest
+    .spyOn(Image, "getSize")
+    .mockImplementation((() =>
+      Promise.resolve({ width: 1080, height: 2400 })) as typeof Image.getSize);
+  if (shareDir().exists) shareDir().delete();
 });
+
+// A toast's hide timer would outlive the test.
+afterEach(() => dismissToast());
 
 describe("ReceiptScreen (#62)", () => {
   it("is the paper of the job: who, what, the lines, the total, how it was paid, who issues it", async () => {
@@ -100,6 +126,35 @@ describe("ReceiptScreen (#62)", () => {
     expect(within(screen.getByTestId("receipt-share")).getByText("Share")).toBeTruthy();
     // Never Jack's fee: the customer pays the total.
     expect(screen.queryByText(/fee/i, HIDDEN)).toBeNull();
+  });
+
+  it("states the API's lines and total as they come: a tax line, and a total it adds up nowhere", async () => {
+    await renderScreen(async () =>
+      receipt({
+        lines: [
+          { kind: "service", amount_cents: 12_500, at: null },
+          { kind: "tax", amount_cents: 875, at: null },
+          { kind: "tip", amount_cents: 1_250, at: null },
+        ],
+        // Deliberately NOT the sum of the lines ($146.25): the paper shows the API's total.
+        total_paid_cents: 14_601,
+      }),
+    );
+    await screen.findByTestId("receipt-paper");
+
+    expect(screen.getByLabelText("Handyman service, $125.00")).toBeTruthy();
+    expect(screen.getByLabelText("Tax, $8.75")).toBeTruthy();
+    expect(screen.getByLabelText("Tip for Dan, $12.50")).toBeTruthy();
+    expect(screen.getByLabelText("Total paid, $146.01")).toBeTruthy();
+    expect(screen.queryByLabelText("Total paid, $146.25")).toBeNull();
+  });
+
+  it("a paid job not done yet says when it is scheduled, never Done", async () => {
+    await renderScreen(async () => receipt({ completed_at: null }));
+    await screen.findByTestId("receipt-paper");
+
+    expect(paper().getByTestId("receipt-job")).toHaveTextContent(/Scheduled for Nov 19, 2026/);
+    expect(paper().queryByText(/^Done /)).toBeNull();
   });
 
   it("without an issuer or a pro's name the paper leaves those lines out, inventing nothing", async () => {
@@ -154,6 +209,50 @@ describe("ReceiptScreen (#62)", () => {
     const shared = within(screen.getByTestId("receipt-share-render", HIDDEN));
     expect(shared.getByText("Receipt JF-000124", HIDDEN)).toBeTruthy();
     expect(shared.queryByText(/Seabreeze/, HIDDEN)).toBeNull();
+  });
+
+  it("Share hands the share sheet a PNG of the receipt's render, gone once the sheet closes", async () => {
+    await renderScreen(async () => receipt());
+    await screen.findByTestId("receipt-paper");
+    // The sheet stays open until the person picks an app or closes it.
+    const sheet = deferred<void>();
+    jest.mocked(shareAsync).mockReturnValue(sheet.promise);
+
+    await fireEvent.press(screen.getByRole("button", { name: "Share" }));
+    await waitFor(() => expect(shareAsync).toHaveBeenCalledTimes(1));
+
+    expect(shareAsync).toHaveBeenCalledWith(expect.any(String), {
+      mimeType: "image/png",
+      UTI: "public.png",
+      dialogTitle: "Share your receipt",
+    });
+    // The capture of the receipt's render, in the receipt's own private folder, and only there.
+    const [shared = ""] = jest.mocked(shareAsync).mock.calls[0] ?? [];
+    expect(shared).toMatch(/\/receipt-share\/receipt-[^/]+\.png$/);
+    expect(sharedPngs()).toEqual([shared]);
+    await expect(new File(shared).base64()).resolves.toBe(MOCK_CAPTURE_BASE64);
+    sheet.resolve();
+    await waitFor(() => expect(sharedPngs()).toEqual([]));
+    expect(toastStore.getState().current).toBeNull();
+  });
+
+  it.each([
+    ["the share sheet fails", () => jest.mocked(shareAsync).mockRejectedValue(new Error("x"))],
+    ["there is no share sheet", () => jest.mocked(isAvailableAsync).mockResolvedValue(false)],
+  ])("a share that cannot finish (%s) says so calmly and leaves no PNG", async (_, arrange) => {
+    arrange();
+    await renderScreen(async () => receipt());
+    await screen.findByTestId("receipt-paper");
+
+    await fireEvent.press(screen.getByRole("button", { name: "Share" }));
+
+    await waitFor(() =>
+      expect(toastStore.getState().current).toMatchObject({
+        message: "We couldn't share the receipt. Try again.",
+        tone: "neutral",
+      }),
+    );
+    expect(sharedPngs()).toEqual([]);
   });
 
   it("offers Add a tip only while the window is open, opening the job", async () => {

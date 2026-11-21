@@ -91,11 +91,10 @@ export function ProRow({ pro, onPress }: ProRowProps) {
   );
 }
 
-/** What the customer paid: the total, and the tax inside it when there is any. */
 /**
- * What was paid, then the way to the receipt (#62): it exists from the payment on, so every phase
- * of a paid job offers it. The link sits outside the row's one accessible label, reachable on its
- * own.
+ * What the customer paid (the total, and the tax inside it when there is any), then the way to the
+ * receipt (#62): it exists from the payment on, so every phase of a paid job offers it. The link
+ * sits outside the row's one accessible label, reachable on its own.
  */
 export function PaidRow({ job, requestId }: { job: CustomerJob; requestId: string }) {
   const { t } = useTranslation();

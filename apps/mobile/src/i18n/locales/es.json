@@ -2241,7 +2241,6 @@
     "notYet": "Tu recibo aparece aquí cuando se complete el pago.",
     "error": {
       "title": "No pudimos cargar tu recibo",
-      "body": "Revisa tu conexión e inténtalo de nuevo.",
       "retry": "Intentar de nuevo"
     }
   }

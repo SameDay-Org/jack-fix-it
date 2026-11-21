@@ -2241,7 +2241,6 @@
     "notYet": "Your receipt shows here once the payment goes through.",
     "error": {
       "title": "We couldn't load your receipt",
-      "body": "Check your connection and try again.",
       "retry": "Try again"
     }
   }
