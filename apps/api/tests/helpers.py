@@ -8,18 +8,24 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
+from datetime import timedelta
 from typing import Final
 
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, PendingRollbackError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings
 from app.observability import JsonFormatter
 
 _SET_STATUS_WRITER: Final = text("SELECT set_config('app.status_writer', :value, true)")
 # The fixtures' wildcard token: the trigger accepts it only in a database whose setting
 # app.status_writer_fixtures is 'on', which conftest sets on the test database alone.
 FIXTURES_TOKEN: Final = "fixtures"
+# REVIEW_PUBLISH_AFTER_DAYS at its default, for services built by hand in tests (#78).
+REVIEW_PUBLISH_AFTER: Final = timedelta(
+    days=Settings.model_fields["review_publish_after_days"].default
+)
 _IN_FAILED_TRANSACTION: Final = "25P02"
 # Hex digits as letters: a fixture slug stays unique with no digit in it that a leak check
 # could read as part of the number it looks for (#283).

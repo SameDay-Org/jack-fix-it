@@ -300,6 +300,24 @@
         "body": "Get the app and tell Jack what you need.",
         "getApp": "Get the app"
       }
+    },
+    "city": {
+      "meta": {
+        "title": "{{name}} in {{city}} | Jack Fix It",
+        "description": "{{name}} in {{city}}: tell Jack about the job, compare fixed-price quotes from pros near you and follow it in the app."
+      },
+      "hero": {
+        "title": "{{name}} in {{city}}"
+      },
+      "areas": {
+        "title": "Where Jack works in {{city}}",
+        "body": "Jack serves these ZIP codes in {{city}}. The app checks yours when you ask for a job.",
+        "zipsLabel": "ZIP codes served",
+        "others": "{{name}} in other cities"
+      },
+      "more": {
+        "title": "More from Jack in {{city}}"
+      }
     }
   },
   "showcase": {
@@ -486,7 +504,9 @@
       "queue": "Queue",
       "pros": "Pros",
       "disputes": "Disputes",
-      "kpis": "KPIs"
+      "kpis": "KPIs",
+      "followups": "Follow-ups",
+      "followupsDue": "{{count}} due today"
     },
     "roles": {
       "agent": "Agent",
@@ -1265,6 +1285,39 @@
           "unavailable": "Something went wrong. Check the dispute before trying again."
         }
       }
+    },
+    "followups": {
+      "title": "Follow-ups",
+      "subtitle": "What the BDC said it would do next, the most overdue first.",
+      "views": {
+        "label": "Show",
+        "today": "Due today",
+        "all": "All open"
+      },
+      "assignee": {
+        "label": "Whose",
+        "mine": "Mine",
+        "show": "Show"
+      },
+      "columns": {
+        "request": "Request",
+        "status": "Status",
+        "note": "What to do",
+        "due": "Due",
+        "assignee": "Assigned to"
+      },
+      "empty": {
+        "today": "Nothing due today.",
+        "all": "No open follow-ups."
+      },
+      "loading": "Loading follow-ups…",
+      "loadError": "We couldn't load the follow-ups.",
+      "retry": "Try again",
+      "older": "Older",
+      "first": "First page",
+      "moved": "The list changed since this page: back to the first page.",
+      "forbidden": "Your account can't read this list now.",
+      "own": "Show my follow-ups"
     },
     "error": {
       "title": "The panel can't reach the server right now",

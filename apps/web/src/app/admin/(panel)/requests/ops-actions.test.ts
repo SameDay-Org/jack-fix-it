@@ -131,6 +131,7 @@ describe("marking contacted, classifying, marking done", () => {
     expect(sent(PATHS.contacted)).toEqual([undefined]);
     expect(sent(PATHS.classify)).toEqual([{ category_id: CATEGORY_ID }]);
     expect(sent(PATHS.done)).toEqual([undefined]);
+    expect(revalidatePath).toHaveBeenCalledWith("/admin/followups");
   });
 
   it("sends nothing for ids that are not UUIDs", async () => {
