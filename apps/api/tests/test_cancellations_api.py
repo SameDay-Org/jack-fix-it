@@ -21,13 +21,10 @@ from app.integrations.stripe_refunds import RefundFacts
 from app.modules.audit.models import AuditLog
 from app.modules.audit.service import AuditService
 from app.modules.cancellations.models import (
-    CancelledFrom,
-    CancelParty,
-    CancelReason,
     JobCancellation,
 )
 from app.modules.disputes.refund_webhooks import RefundsNotConfiguredError, refund_event_handler
-from app.modules.jobs.models import Job, JobStatus
+from app.modules.jobs.models import JobStatus
 from app.modules.payments.cancel_refund_tasks import refund_cancellation, retry_cancel_refunds
 from app.modules.payments.cancel_refunds import (
     CancelRefundOutcome,
@@ -41,7 +38,6 @@ from app.modules.requests.models import RequestStatus, ServiceRequest
 from app.modules.webhooks.events import AfterCommit, StripeEvent
 from app.rate_limit import RateLimitResult, get_rate_limiter
 from tests.conftest import InMemoryRateLimiter, make_settings
-from tests.helpers import as_status_writer
 from tests.job_world import PRICE, TAX, JobWorld, events, job_row
 from tests.job_world import make_job as make_world_job
 from tests.test_dispute_resolution_api import (
@@ -1018,31 +1014,19 @@ async def test_the_customer_s_view_of_a_cancellation_carries_the_total_it_split(
     cancelled: str,
 ) -> None:
     """#489 round 1: CustomerJob.cancellation names what the customer paid, the fee plus the
-    refund, whoever cancelled. A pro's cancel comes with PR 2; its row is written here as that
-    PR will write it (party pro, no fee), so the view is proven for it now."""
+    refund, whoever cancelled (the pro's cancel through its own route, #69 part 2)."""
     status = (
         JobStatus.SCHEDULED if cancelled == "customer_before_on_my_way" else JobStatus.ON_THE_WAY
     )
     job_id = await booked(db_session, world, status)
     request_id = (await job_row(db_session, job_id)).request_id
     if cancelled == "pro":
-        db_session.add(
-            JobCancellation(
-                job_id=job_id,
-                cancelled_by=world.pro.id,
-                party=CancelParty.PRO,
-                reason_code=CancelReason.CANNOT_MAKE_IT,
-                from_status=CancelledFrom.ON_THE_WAY,
-                fee_bps=0,
-                fee_cents=0,
-                refund_cents=TOTAL,
-            )
+        answer = await db_client.post(
+            f"/v1/pros/me/jobs/{job_id}/cancel",
+            json={"reason_code": "cannot_make_it"},
+            headers=world.pro.headers,
         )
-        async with as_status_writer(db_session):
-            await db_session.execute(
-                update(Job).where(Job.id == job_id).values(status=JobStatus.CANCELLED)
-            )
-        await db_session.commit()
+        assert answer.status_code == 200, answer.text
     else:
         assert (await cancel(db_client, world, job_id)).status_code == 200
 

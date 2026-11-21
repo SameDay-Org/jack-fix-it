@@ -1,4 +1,5 @@
-"""A job's cancellation as its customer sends it, previews it and reads it back (#69).
+"""A job's cancellation as its customer sends it, previews it and reads it back, and as its
+pro sends it and reads it back (#69).
 
 Every amount is computed on the server from the job's payment, never taken from the body:
 expected_fee_cents only guards against cancelling at a fee the customer was not shown. No
@@ -14,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from app.modules.addresses.schemas import NO_NUL
 from app.modules.cancellations.models import NOTE_MAX_LENGTH, CancelParty, CancelReason
+from app.modules.cancellations.views import ProJobCancellation
 from app.modules.jobs.service import JobStatus
 from app.modules.payments.cancel_refunds import CancelRefundState
 
@@ -31,6 +33,15 @@ class CustomerCancelReason(StrEnum):
     CHANGED_MY_MIND = CancelReason.CHANGED_MY_MIND.value
     FOUND_ANOTHER_PRO = CancelReason.FOUND_ANOTHER_PRO.value
     PRO_LATE = CancelReason.PRO_LATE.value
+    OTHER = CancelReason.OTHER.value
+
+
+class ProCancelReason(StrEnum):
+    """Why the pro cancels: the reasons their app offers."""
+
+    CANNOT_MAKE_IT = CancelReason.CANNOT_MAKE_IT.value
+    CUSTOMER_UNREACHABLE = CancelReason.CUSTOMER_UNREACHABLE.value
+    SCOPE_CHANGED = CancelReason.SCOPE_CHANGED.value
     OTHER = CancelReason.OTHER.value
 
 
@@ -54,6 +65,26 @@ class CustomerCancelIn(BaseModel):
         "another fee (the pro set off since), nothing changes: 409 cancel_fee_changed. Never "
         "used as an amount.",
     )
+
+
+class ProCancelIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason_code: ProCancelReason
+    note: Note | None = Field(
+        default=None,
+        description="Optional, plain text. Contact details are masked before it is stored; "
+        "only the masked text is kept, for staff.",
+    )
+
+
+class ProCancellationOut(ProJobCancellation):
+    """The cancel's answer to the pro: their job view's cancellation (who, why and when; never
+    the money or the note) with the job. cancelled_by is customer when the customer cancelled
+    first."""
+
+    job_id: uuid.UUID
+    job_status: JobStatus = Field(description="cancelled.")
 
 
 class CancelPreviewOut(_Out):
