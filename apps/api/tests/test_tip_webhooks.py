@@ -384,8 +384,11 @@ async def test_an_earlier_attempts_success_is_contained_and_flagged_for_staff(
     stripe_holds(stripe, tip, status="succeeded", attempt="1")
     stripe_holds(stripe, tip, intent="pi_tipsecond", status="requires_payment_method")
 
-    await deliver(db_session, stripe, event(SUCCEEDED))
+    after = AfterCommit()
+    await tip_event_handler(lambda: stripe)(db_session, event(SUCCEEDED), after)
     await deliver(db_session, stripe, event(SUCCEEDED))  # again: flagged and canceled once
+    # Staff's: no receipt, no transfer, no push (#273 PR A2).
+    assert not after.actions
 
     row = await reread(db_session, tip.id)
     assert row.late_success_at is not None

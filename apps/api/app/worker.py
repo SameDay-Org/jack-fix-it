@@ -41,6 +41,11 @@ from app.modules.quotes.tasks import expire_quotes
 from app.modules.receipts.tasks import send_payment_receipt, send_tip_receipt
 from app.modules.requests.tasks import sanitize_task
 from app.modules.tips.tasks import cancel_unpaid_tips
+from app.modules.tips.transfer_tasks import (
+    check_tip_transfer_reversals,
+    release_succeeded_tips,
+    release_tip_transfer,
+)
 from app.modules.uploads.tasks import sweep_orphan_uploads
 from app.modules.webhooks.tasks import process_stripe_event
 from app.observability import configure_logging, init_sentry
@@ -143,6 +148,8 @@ class WorkerSettings:
         # One run per queued confirmation; it never raises, and the sweep below takes whatever
         # a run could not finish.
         discarding_result(release_transfer, max_tries=1),
+        # A tip's transfer (#273 PR A2): one try, as the job's; its sweep is the retry.
+        discarding_result(release_tip_transfer, max_tries=1),
         # One run per cancel (#69); it never raises, and the sweep below makes whatever a run
         # could not.
         discarding_result(refund_cancellation, max_tries=1),
@@ -238,6 +245,23 @@ class WorkerSettings:
         # cadence and timeout: read-only Stripe calls, never a create.
         cron(
             check_transfer_reversals,
+            minute=every(get_settings().transfer_release_sweep_minutes),
+            timeout=get_settings().transfer_release_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        # The tips' transfers (#273 PR A2), on the job transfers' cadence, timeout and batch:
+        # the net under the release queued when a tip succeeds, and the recovery of the read
+        # after each create.
+        cron(
+            release_succeeded_tips,
+            minute=every(get_settings().transfer_release_sweep_minutes),
+            timeout=get_settings().transfer_release_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        cron(
+            check_tip_transfer_reversals,
             minute=every(get_settings().transfer_release_sweep_minutes),
             timeout=get_settings().transfer_release_sweep_timeout_seconds,
             keep_result=0,

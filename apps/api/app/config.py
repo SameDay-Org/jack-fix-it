@@ -584,6 +584,12 @@ class Settings(BaseSettings):
     # Job chat (D14.1, #71): messages one user may send in one job's chat per window.
     chat_message_rate_limit: int = Field(default=20, gt=0)
     chat_message_rate_window_seconds: int = Field(default=60, gt=0)
+    # The new-message push (#73 part 1): a participant who listed the thread or moved their read
+    # marker within CHAT_PRESENCE_SECONDS has the chat open and gets no push (the app polls every
+    # EXPO_PUBLIC_CHAT_POLL_SECONDS while the chat is on screen); one away gets at most one push
+    # per job per CHAT_PUSH_COOLDOWN_SECONDS.
+    chat_presence_seconds: int = Field(default=15, gt=0)
+    chat_push_cooldown_seconds: int = Field(default=60, gt=0)
     # Support tickets ("Talk to Jack", #274): tickets one user may write per window.
     support_ticket_create_limit: int = Field(default=5, gt=0)
     support_ticket_create_window_seconds: int = Field(default=3_600, gt=0)
