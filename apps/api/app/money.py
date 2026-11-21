@@ -1,5 +1,6 @@
-"""How a price splits between the pro and the platform (#246; Cesar, 2026-10-29), and a
-cancelled job's payment between the fee kept and the refund (#69).
+"""How a price splits between the pro and the platform (#246; Cesar, 2026-10-29), a
+cancelled job's payment between the fee kept and the refund (#69), and what a tip of a
+percent comes to (#273).
 
 The one place the split is computed, so a quote's displayed payout and the amounts a job
 freezes at payment (#58, #61) cannot drift. Integer cents only: the platform fee is the amount
@@ -10,6 +11,7 @@ the rest. The platform absorbs Stripe's card fee, so the customer pays exactly t
 from typing import Final, NamedTuple
 
 BPS_DENOMINATOR: Final = 10_000  # basis points in a whole
+PERCENT_DENOMINATOR: Final = 100  # percents in a whole
 
 
 class Split(NamedTuple):
@@ -31,6 +33,17 @@ def split_amount(amount_cents: int, take_rate_bps: int) -> Split:
         raise ValueError("take_rate_bps must be an integer from 0 to 10000")
     fee = (amount_cents * take_rate_bps + BPS_DENOMINATOR // 2) // BPS_DENOMINATOR
     return Split(pro_payout_cents=amount_cents - fee, platform_fee_cents=fee)
+
+
+def tip_amount(base_cents: int, percent: int) -> int:
+    """A tip of `percent` (a whole percent, 0 or more) of `base_cents` (0 or more: the job's
+    price before tax, #273), in integer cents, rounded half up to the cent as split_amount
+    rounds the fee."""
+    if type(base_cents) is not int or base_cents < 0:
+        raise ValueError("base_cents must be a non-negative integer")
+    if type(percent) is not int or percent < 0:
+        raise ValueError("percent must be a non-negative integer")
+    return (base_cents * percent + PERCENT_DENOMINATOR // 2) // PERCENT_DENOMINATOR
 
 
 def partial_refund_cents(
