@@ -2,6 +2,7 @@
 accepted (D11.1, #58). Never calls Stripe: a fake replaces the wrapper, except where the real
 wrapper runs on a mock transport to prove what reaches Sentry."""
 
+import dataclasses
 import json
 import logging
 import uuid
@@ -24,12 +25,15 @@ from app.config import Settings
 from app.db import get_session
 from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.integrations.stripe_payments import (
+    CardFacts,
     CreatedCustomer,
     FoundPaymentIntents,
+    FoundTipIntents,
     PaymentIntentFacts,
     PaymentIntentState,
     StripePayments,
     StripePaymentsClient,
+    TipIntentFacts,
     get_stripe_payments,
 )
 from app.modules.payments.models import Payment, PaymentStatus
@@ -42,7 +46,13 @@ from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.money import split_amount
 from app.observability import JsonFormatter
-from tests.conftest import _rolled_back_session, make_app, make_settings
+from app.rate_limit import get_rate_limiter, window_position
+from tests.conftest import (
+    InMemoryRateLimiter,
+    _rolled_back_session,
+    make_app,
+    make_settings,
+)
 from tests.helpers import mentions_number
 from tests.test_opportunities_api import EMAIL, NOT_FOUND, World, build_world, make_request
 from tests.test_quote_accept_api import statuses
@@ -161,6 +171,18 @@ class FakeStripePayments:
     cancels: list[tuple[str, str]] = field(default_factory=list)
     cancel_refused: bool = False
     on_cancel_intent: Callable[[], Awaitable[None]] | None = None
+    # The card each PaymentIntent was paid with, as card_of reads it (#62); none by default.
+    cards: dict[str, CardFacts] = field(default_factory=dict)
+    card_reads: list[str] = field(default_factory=list)
+    # Tip intents (#510 round 1), as tip_intent and search_tip_intents read them: what each
+    # create sent, by PaymentIntent id. `tip_statuses` is Stripe's status of one intent (else
+    # `intent_status`; an accepted cancel makes it canceled), `failed_intents` the ones with a
+    # last payment error. `tip_reads` records every read.
+    tip_facts: dict[str, TipIntentFacts] = field(default_factory=dict)
+    tip_statuses: dict[str, str] = field(default_factory=dict)
+    failed_intents: set[str] = field(default_factory=set)
+    tip_reads: list[str] = field(default_factory=list)
+    tip_searches: list[uuid.UUID] = field(default_factory=list)
 
     def add_intent(self, facts: PaymentIntentFacts) -> None:
         """An intent Stripe holds that no create of this run answered with."""
@@ -193,19 +215,21 @@ class FakeStripePayments:
         transfer_group: str,
         metadata: dict[str, str] | Any,
         idempotency_key: str,
+        description: str | None = None,
     ) -> PaymentIntentState:
         if "create_payment_intent" in self.errors:
             raise self.errors["create_payment_intent"]
-        self.intent_calls.append(
-            {
-                "amount_cents": amount_cents,
-                "currency": currency,
-                "customer_id": customer_id,
-                "transfer_group": transfer_group,
-                "metadata": dict(metadata),
-                "idempotency_key": idempotency_key,
-            }
-        )
+        call: dict[str, object] = {
+            "amount_cents": amount_cents,
+            "currency": currency,
+            "customer_id": customer_id,
+            "transfer_group": transfer_group,
+            "metadata": dict(metadata),
+            "idempotency_key": idempotency_key,
+        }
+        if description is not None:  # a tip's (#273); the job payment's calls stay as they were
+            call["description"] = description
+        self.intent_calls.append(call)
         if self.on_create_intent is not None:
             await self.on_create_intent()
         intent_id = self.intents_by_key.get(idempotency_key)
@@ -225,6 +249,20 @@ class FakeStripePayments:
                 customer_id=customer_id,
                 payment_id=dict(metadata).get("payment_id"),
             )
+            sent = dict(metadata)
+            if sent.get("kind") == "tip":
+                self.tip_facts[intent_id] = TipIntentFacts(
+                    payment_intent_id=intent_id,
+                    amount_cents=amount_cents,
+                    currency=currency,
+                    customer_id=customer_id,
+                    status=self.intent_status,
+                    failed=False,
+                    kind="tip",
+                    tip_id=sent.get("tip_id"),
+                    job_id=sent.get("job_id"),
+                    attempt=sent.get("attempt"),
+                )
         if self.lost_answers:
             self.lost_answers -= 1
             raise StripeUnavailableError(request_id="req_fake_lost")
@@ -275,7 +313,44 @@ class FakeStripePayments:
         if self.on_cancel_intent is not None:
             await self.on_cancel_intent()
         self.cancels.append((payment_intent_id, idempotency_key))
+        if not self.cancel_refused:
+            self.tip_statuses[payment_intent_id] = "canceled"
         return not self.cancel_refused
+
+    async def card_of(self, payment_intent_id: str) -> CardFacts | None:
+        if "card_of" in self.errors:
+            raise self.errors["card_of"]
+        self.card_reads.append(payment_intent_id)
+        return self.cards.get(payment_intent_id)
+
+    def tip_now(self, facts: TipIntentFacts) -> TipIntentFacts:
+        """The intent as Stripe holds it now: its status and its last payment error."""
+        intent = facts.payment_intent_id
+        return dataclasses.replace(
+            facts,
+            status=self.tip_statuses.get(intent, self.intent_status),
+            failed=intent in self.failed_intents,
+        )
+
+    def add_tip_intent(self, facts: TipIntentFacts) -> None:
+        """A tip intent Stripe holds that no create of this run answered with."""
+        self.tip_facts[facts.payment_intent_id] = facts
+
+    async def tip_intent(self, payment_intent_id: str) -> TipIntentFacts:
+        if "tip_intent" in self.errors:
+            raise self.errors["tip_intent"]
+        self.tip_reads.append(payment_intent_id)
+        facts = self.tip_facts.get(payment_intent_id)
+        if facts is None:
+            raise StripeRejectedError(request_id="req_fake_missing", code="resource_missing")
+        return self.tip_now(facts)
+
+    async def search_tip_intents(self, tip_id: uuid.UUID) -> FoundTipIntents:
+        if "search_tip_intents" in self.errors:
+            raise self.errors["search_tip_intents"]
+        self.tip_searches.append(tip_id)
+        found = tuple(self.tip_now(f) for f in self.tip_facts.values() if f.tip_id == str(tip_id))
+        return FoundTipIntents(intents=found, complete=self.search_complete)
 
 
 def _fake_stripe(request: Request) -> StripePayments:
@@ -1243,3 +1318,71 @@ async def _quotes(session: AsyncSession, request_id: uuid.UUID) -> list[Any]:
     from tests.test_quotes_api import quotes_of
 
     return await quotes_of(session, request_id)
+
+
+# The per-customer limit (#525)
+
+SHEET_LIMIT = 2
+SHEET_WINDOW = 600
+LIMIT_NOW = 1_800_000_000.0  # a fixed clock, so no test straddles two rate-limit windows
+RATE_LIMITED = {"error": {"code": "rate_limited", "message": "Too many requests. Try again later."}}
+
+
+async def test_the_payment_sheet_is_limited_per_customer(
+    db_session: AsyncSession, world: World
+) -> None:
+    """Every sheet is a PaymentIntent read and a new CustomerSession at Stripe, so one customer
+    gets PAYMENT_SHEET_LIMIT of them per PAYMENT_SHEET_WINDOW_SECONDS; a limited call reaches
+    no Stripe call."""
+    app = make_app(
+        make_settings(
+            stripe_secret_key=None,
+            stripe_publishable_key=PUBLISHABLE_KEY,
+            stripe_payment_intent_reconcile_after_seconds=int(RECONCILE_AFTER.total_seconds()),
+            payment_sheet_limit=SHEET_LIMIT,
+            payment_sheet_window_seconds=SHEET_WINDOW,
+        )
+    )
+    fake = FakeStripePayments()
+    app.state.fake_stripe_payments = fake
+    app.dependency_overrides[get_stripe_payments] = _fake_stripe
+    limiter = InMemoryRateLimiter(clock=lambda: LIMIT_NOW)
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+
+    async def test_session() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = test_session
+    request_id, quote_id, _ = await accepted_request(db_session, world)
+
+    def stripe_calls() -> tuple[int, ...]:
+        return (
+            len(fake.intent_calls),
+            len(fake.retrieved),
+            len(fake.customer_calls),
+            len(fake.customer_sessions),
+            len(fake.ephemeral_keys),
+        )
+
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        allowed = [await pay(client, world, request_id, quote_id) for _ in range(SHEET_LIMIT)]
+        calls = stripe_calls()
+        limited = await pay(client, world, request_id, quote_id)
+        after_limit = stripe_calls()
+
+    assert [response.status_code for response in allowed] == [200] * SHEET_LIMIT
+    assert (limited.status_code, limited.json()) == (429, RATE_LIMITED)
+    assert int(limited.headers["Retry-After"]) >= 1
+    assert limited.headers["Cache-Control"] == "no-store"
+    assert after_limit == calls
+    index, _ = window_position(LIMIT_NOW, SHEET_WINDOW)
+    assert limiter.counts == {f"payment_sheet:{world.customer_id}:{index}": SHEET_LIMIT + 1}
+
+
+def test_the_payment_sheet_limit_is_documented(app: FastAPI) -> None:
+    path = "/v1/requests/{request_id}/quotes/{quote_id}/payment"
+    documented = app.openapi()["paths"][path]["post"]["responses"]["429"]
+
+    assert "rate_limited" in documented["description"]
+    assert "Retry-After" in documented["headers"]

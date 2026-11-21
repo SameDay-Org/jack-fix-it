@@ -231,9 +231,17 @@ def test_every_table_hanging_from_a_request_or_a_job_is_dated_or_named() -> None
     """A new table with a foreign key to service_requests or jobs holds times of a request's
     life: the timeline dates it, or it is listed here with the reason it is not."""
     import_models()
-    # Not written by the seed: the chat (no seeded message) and its flags, and the contacts of
-    # web requests (#86: the seed makes no request without an account).
-    not_seeded = {"job_chat_reads", "job_messages", "chat_offender_flags", "web_request_contacts"}
+    # Not written by the seed: the chat (no seeded message) and its flags, the tips (#273:
+    # no scene tips, so no tip or keyed tip choice is seeded), and the contacts of web
+    # requests (#86: the seed makes no request without an account).
+    not_seeded = {
+        "job_chat_reads",
+        "job_messages",
+        "chat_offender_flags",
+        "tips",
+        "tip_requests",
+        "web_request_contacts",
+    }
     hanging = {
         table.name
         for table in Base.metadata.tables.values()

@@ -333,8 +333,14 @@ class DispatchService:
         by_id = {candidate.pro_id: candidate for candidate in found if candidate.user_id in active}
         offered = await self._dispatches.pro_ids_of(request_id)
         history = await self._dispatches.history(list(by_id))
+        # Ranked as the automatic dispatch ranks: by the published reviews' rating (#78), under
+        # REVIEW_PUBLISH_AFTER_DAYS, never the unread pro_profiles.rating_avg column.
+        ratings = await self._ratings.of({c.pro_id: c.user_id for c in by_id.values()})
         ranked = rank(
-            [DispatchCandidate(c.pro_id, c.user_id, c.rating_avg) for c in by_id.values()],
+            [
+                DispatchCandidate(c.pro_id, c.user_id, ratings[c.pro_id].average)
+                for c in by_id.values()
+            ],
             history,
         )
         return [

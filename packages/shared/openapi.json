@@ -781,6 +781,24 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "rate_limited: too many upload URLs for this account; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2932,6 +2950,24 @@
               }
             }
           },
+          "429": {
+            "description": "rate_limited: too many payment sheets for this account; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "502": {
             "description": "payments_error: Stripe refused the call; nothing changed, the payment can be asked for again.",
             "content": {
@@ -3164,6 +3200,24 @@
           },
           "403": {
             "description": "forbidden: only customers keep payment methods.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many wallet reads; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -9918,6 +9972,244 @@
         ]
       }
     },
+    "/v1/requests/{request_id}/job/tip": {
+      "post": {
+        "tags": [
+          "tips"
+        ],
+        "summary": "Tip the pro of my confirmed job, or choose no tip",
+        "description": "The customer's tip for the pro of their confirmed job, inside the window the job's tip\nshows (closes_at): \"No tip\", one of the offered percents, or an amount within the bounds.\nThe server computes every amount. A tip to pay comes with what the Payment Sheet needs\n(the same PaymentIntent while the amount stays the same; a new amount cancels the earlier\none first); \"No tip\" comes with no sheet. Sending the same choice again is safe.",
+        "operationId": "choose_tip_v1_requests__request_id__job_tip_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A UUID the app makes once per choice and sends again with every retry of it. A retry never changes the choice: while the attempt it settled is still the one to pay it finishes that attempt (the same PaymentIntent, its Payment Sheet), else it answers 200 with the tip as it is now. The same key with another body, or on another job, answers 409 idempotency_key_reused.",
+              "title": "Idempotency-Key"
+            },
+            "description": "A UUID the app makes once per choice and sends again with every retry of it. A retry never changes the choice: while the attempt it settled is still the one to pay it finishes that attempt (the same PaymentIntent, its Payment Sheet), else it answers 200 with the tip as it is now. The same key with another body, or on another job, answers 409 idempotency_key_reused."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/NoTipIn"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PercentTipIn"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CustomTipIn"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TipCreateOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "tip_percent_not_offered: the percent is not one of the job's presets; tip_amount_out_of_range: the amount, or what the percent comes to, is outside the job's bounds; validation_error: a malformed id or body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers tip.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no request of the caller with this id, or no job on it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tip_not_available: the job was never confirmed (under way, disputed, refunded, cancelled) or its tip window closed; tip_already_paid: the tip succeeded; tip_in_progress: its payment is processing, or another change of the tip is under way; tip_needs_review: support has to look at the tip first; idempotency_key_reused: the key went with another body or job. Nothing changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: more than TIP_CHOICE_LIMIT choices in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "payments_error: Stripe refused the call; nothing changed, try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "not_configured: payments are not configured; payments_unavailable: Stripe is not reachable or asked to retry later; nothing changed, retry later.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/requests/{request_id}/receipt": {
+      "get": {
+        "tags": [
+          "receipts"
+        ],
+        "summary": "The receipt of my job",
+        "description": "The proof of payment of the request's job, from the moment its payment went through:\nthe service, the tax when there is some, the tip once it went through and each amount\nreturned to the payment method, the total paid, the card's brand and last 4 digits, and\nwhere the money stands. Never the platform's fee or the pro's payout.",
+        "operationId": "get_receipt_v1_requests__request_id__receipt_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers have receipts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no request of the caller with this id; receipt_not_available: its job's payment has not gone through yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/pros/{pro_id}": {
       "get": {
         "tags": [
@@ -11436,6 +11728,30 @@
         "title": "ContactedOut",
         "description": "When the BDC first contacted the customer: set once."
       },
+      "CustomTipIn": {
+        "properties": {
+          "choice": {
+            "type": "string",
+            "const": "custom",
+            "title": "Choice"
+          },
+          "amount_cents": {
+            "type": "integer",
+            "title": "Amount Cents",
+            "description": "The tip in integer cents, within the options' bounds.",
+            "examples": [
+              1250
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "choice",
+          "amount_cents"
+        ],
+        "title": "CustomTipIn"
+      },
       "CustomerCancelIn": {
         "properties": {
           "reason_code": {
@@ -11746,6 +12062,17 @@
             "type": "integer",
             "title": "Unread Messages",
             "description": "The pro's chat messages the customer has not marked read (#71)."
+          },
+          "tip": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TipOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The customer's tip for the pro (#273): set once the job was confirmed (by the customer or automatically), inside the tip window and after it; null for a job that takes no tip (not confirmed yet, disputed, refunded or cancelled). Always sent; optional in the schema so clients built before #273 keep compiling."
           }
         },
         "additionalProperties": false,
@@ -13884,6 +14211,21 @@
         ],
         "title": "MySupportTicketPage"
       },
+      "NoTipIn": {
+        "properties": {
+          "choice": {
+            "type": "string",
+            "const": "none",
+            "title": "Choice"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "choice"
+        ],
+        "title": "NoTipIn"
+      },
       "NoteIn": {
         "properties": {
           "body": {
@@ -14639,6 +14981,30 @@
         ],
         "title": "PayoutsStatus"
       },
+      "PercentTipIn": {
+        "properties": {
+          "choice": {
+            "type": "string",
+            "const": "percent",
+            "title": "Choice"
+          },
+          "percent": {
+            "type": "integer",
+            "title": "Percent",
+            "description": "One of the percents the job's tip options offer.",
+            "examples": [
+              10
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "choice",
+          "percent"
+        ],
+        "title": "PercentTipIn"
+      },
       "PhoneSendRequest": {
         "properties": {
           "phone": {
@@ -14743,6 +15109,7 @@
         "type": "string",
         "enum": [
           "job_updates",
+          "messages",
           "quotes_and_opportunities",
           "reminders",
           "marketing",
@@ -16486,6 +16853,360 @@
         ],
         "title": "Receipt",
         "description": "How far a message got with its recipient, the participant who did not send it: sent,\ndelivered (their app fetched it) or seen (they marked it read). From the recipient's read\nmarker and deliveries (#331)."
+      },
+      "ReceiptAddress": {
+        "properties": {
+          "line1": {
+            "type": "string",
+            "title": "Line1"
+          },
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "line1",
+          "city",
+          "state"
+        ],
+        "title": "ReceiptAddress",
+        "description": "The customer's own address, on the in-app receipt only: line 1, city and state."
+      },
+      "ReceiptCategory": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Names"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "slug",
+          "names"
+        ],
+        "title": "ReceiptCategory"
+      },
+      "ReceiptIssuer": {
+        "properties": {
+          "legal_name": {
+            "type": "string",
+            "title": "Legal Name"
+          },
+          "support_email": {
+            "type": "string",
+            "title": "Support Email"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "legal_name",
+          "support_email"
+        ],
+        "title": "ReceiptIssuer",
+        "description": "Who issues the receipt (Q-R1): the API's settings, never the app's."
+      },
+      "ReceiptLine": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ReceiptLineKind",
+            "description": "The app names the line by its kind."
+          },
+          "amount_cents": {
+            "type": "integer",
+            "title": "Amount Cents",
+            "description": "Integer cents; negative for an amount returned."
+          },
+          "at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At",
+            "description": "When it went back, for a returned amount; else null."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "amount_cents",
+          "at"
+        ],
+        "title": "ReceiptLine"
+      },
+      "ReceiptLineKind": {
+        "type": "string",
+        "enum": [
+          "service",
+          "tax",
+          "tip",
+          "returned"
+        ],
+        "title": "ReceiptLineKind"
+      },
+      "ReceiptOut": {
+        "properties": {
+          "receipt_number": {
+            "type": "string",
+            "title": "Receipt Number",
+            "description": "The request's public code: one receipt per job.",
+            "examples": [
+              "JF-000124"
+            ]
+          },
+          "paid_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Paid At",
+            "description": "When the job's payment went through."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReceiptStatus"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptCategory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pro_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Name",
+            "description": "The pro's public name; null when none can be shown.",
+            "examples": [
+              "Dan R."
+            ]
+          },
+          "scheduled_start_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Scheduled Start At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At",
+            "description": "When the pro marked the job done."
+          },
+          "address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptAddress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptLine"
+            },
+            "type": "array",
+            "title": "Lines"
+          },
+          "total_paid_cents": {
+            "type": "integer",
+            "title": "Total Paid Cents",
+            "description": "Service plus tax plus tip, minus what went back."
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "description": "Stripe's lower-case currency code.",
+            "examples": [
+              "usd"
+            ]
+          },
+          "payment_method": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptPaymentMethod"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null until Stripe's charge was read, and for a payment it gave no card for: the app then says Card."
+          },
+          "tip": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptTip"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether a tip can still be added and until when; null for a job that takes no tip."
+          },
+          "issuer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptIssuer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who issues the receipt; null until both values are set on the server."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "receipt_number",
+          "paid_at",
+          "status",
+          "category",
+          "pro_name",
+          "scheduled_start_at",
+          "completed_at",
+          "address",
+          "lines",
+          "total_paid_cents",
+          "currency",
+          "payment_method",
+          "tip",
+          "issuer"
+        ],
+        "title": "ReceiptOut",
+        "description": "A job's receipt, from the frozen amounts: the price and tax as charged, the tip once it\nwent through and each amount that went back. Never the platform's fee or the pro's payout,\nand no Stripe id."
+      },
+      "ReceiptPaymentMethod": {
+        "properties": {
+          "brand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand",
+            "description": "Stripe's brand code.",
+            "examples": [
+              "visa"
+            ]
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4",
+            "examples": [
+              "4242"
+            ]
+          },
+          "wallet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet",
+            "description": "Stripe's wallet type.",
+            "examples": [
+              "apple_pay"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "brand",
+          "last4",
+          "wallet"
+        ],
+        "title": "ReceiptPaymentMethod",
+        "description": "The card that paid, as Stripe's charge describes it: never more than this."
+      },
+      "ReceiptStatus": {
+        "type": "string",
+        "enum": [
+          "paid",
+          "under_review",
+          "partly_returned",
+          "returned"
+        ],
+        "title": "ReceiptStatus",
+        "description": "Where the receipt's money stands."
+      },
+      "ReceiptTip": {
+        "properties": {
+          "can_tip": {
+            "type": "boolean",
+            "title": "Can Tip",
+            "description": "Whether a tip can still be added (the job's tip window)."
+          },
+          "closes_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closes At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "can_tip",
+          "closes_at"
+        ],
+        "title": "ReceiptTip"
       },
       "RefreshTokenRequest": {
         "properties": {
@@ -19882,6 +20603,187 @@
         ],
         "title": "TicketTopic",
         "description": "What the ticket is about, as the user picked it in the app."
+      },
+      "TipChoice": {
+        "type": "string",
+        "enum": [
+          "none",
+          "percent",
+          "custom"
+        ],
+        "title": "TipChoice",
+        "description": "What the customer chose (#273): no tip, one of the offered percents, or an amount."
+      },
+      "TipCreateOut": {
+        "properties": {
+          "tip": {
+            "$ref": "#/components/schemas/TipOut"
+          },
+          "sheet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaymentSheetOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the Payment Sheet needs to pay the tip (its amount, no tax); null for No tip."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tip",
+          "sheet"
+        ],
+        "title": "TipCreateOut"
+      },
+      "TipOptions": {
+        "properties": {
+          "presets": {
+            "items": {
+              "$ref": "#/components/schemas/TipPreset"
+            },
+            "type": "array",
+            "title": "Presets",
+            "description": "The percents offered for this job, ascending; a percent whose amount falls outside the bounds below is left out."
+          },
+          "min_cents": {
+            "type": "integer",
+            "title": "Min Cents",
+            "description": "The smallest tip, inclusive."
+          },
+          "max_cents": {
+            "type": "integer",
+            "title": "Max Cents",
+            "description": "The largest tip, inclusive: a share of the job's price, capped."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "presets",
+          "min_cents",
+          "max_cents"
+        ],
+        "title": "TipOptions"
+      },
+      "TipOut": {
+        "properties": {
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TipStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null until the customer chooses. declined: No tip. requires_payment: the Payment Sheet is open or was closed. processing, succeeded, failed, canceled: the payment's. A failed or canceled tip can be tried again while can_tip is true."
+          },
+          "choice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TipChoice"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null until the customer chooses."
+          },
+          "percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percent",
+            "description": "The offered percent chosen; null otherwise."
+          },
+          "amount_cents": {
+            "type": "integer",
+            "title": "Amount Cents",
+            "description": "The tip, in integer cents; 0 until chosen and for No tip."
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "description": "Stripe's lower-case currency code.",
+            "examples": [
+              "usd"
+            ]
+          },
+          "options": {
+            "$ref": "#/components/schemas/TipOptions"
+          },
+          "can_tip": {
+            "type": "boolean",
+            "title": "Can Tip",
+            "description": "Whether a tip may be chosen or paid now: inside the window, nothing paid or being paid yet."
+          },
+          "closes_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Closes At",
+            "description": "When the window closes: the job's confirmation plus TIP_WINDOW_HOURS."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "choice",
+          "percent",
+          "amount_cents",
+          "currency",
+          "options",
+          "can_tip",
+          "closes_at"
+        ],
+        "title": "TipOut",
+        "description": "The job's tip: what the customer chose, where its payment stands and what they may do."
+      },
+      "TipPreset": {
+        "properties": {
+          "percent": {
+            "type": "integer",
+            "title": "Percent",
+            "description": "A whole percent of the job's price.",
+            "examples": [
+              10
+            ]
+          },
+          "amount_cents": {
+            "type": "integer",
+            "title": "Amount Cents",
+            "description": "What that percent comes to, computed by the server (rounded half up): the app shows it as is."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "percent",
+          "amount_cents"
+        ],
+        "title": "TipPreset"
+      },
+      "TipStatus": {
+        "type": "string",
+        "enum": [
+          "declined",
+          "requires_payment",
+          "processing",
+          "succeeded",
+          "failed",
+          "canceled"
+        ],
+        "title": "TipStatus",
+        "description": "Where a tip stands. `declined` is the choice \"No tip\" (no PaymentIntent); the others\nfollow the current attempt's PaymentIntent, moved by its payment_intent.* events."
       },
       "TransferOut": {
         "properties": {
