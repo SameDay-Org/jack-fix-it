@@ -443,10 +443,10 @@ class Settings(BaseSettings):
     tip_max_cents: int = Field(default=50_000, gt=0)
     tip_window_hours: int = Field(default=168, gt=0)
     # Receipts (#62; Foreman decision Q-R1, the values are Cesar's): who issues the receipt.
-    # The legal name and the support email go on the in-app receipt and the email's footer,
-    # the mailing address in the email's footer only. Unset, none is shown: never a value
-    # made up here. How many times the worker tries one receipt email (Resend unavailable,
-    # the card not read yet) and how many seconds it waits between two tries.
+    # The legal name and the support email go on the in-app receipt and the footer of every
+    # email (app.email_layout, #92), the mailing address in that footer only. Unset, none is
+    # shown: never a value made up here. How many times the worker tries one receipt email
+    # (Resend unavailable, the card not read yet) and how many seconds it waits between two.
     receipt_legal_name: str | None = Field(default=None, min_length=1, max_length=200)
     receipt_support_email: str | None = Field(default=None, min_length=3, max_length=254)
     receipt_mailing_address: str | None = Field(default=None, min_length=1, max_length=300)
