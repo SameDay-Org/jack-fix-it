@@ -31,6 +31,7 @@ DEMO_DIR = Path(__file__).resolve().parents[3] / "scripts" / "demo"
 # their folder is the import root.
 sys.path.insert(0, str(DEMO_DIR))
 
+import demo_api  # noqa: E402
 import seed_demo  # noqa: E402
 from demo_seed import cast, flows, guard, history, scenes, timeline  # noqa: E402
 from demo_seed.history import Case, CaseRun, Closing, Ending  # noqa: E402
@@ -453,6 +454,37 @@ async def test_a_whole_run_makes_the_scenes(seeded: Seeded) -> None:
         )
         assert await _scalar(world, apart) == 0
         assert await _nothing_in_the_future(world)
+
+
+async def test_the_demo_api_s_stand_in_verifier_takes_its_code_only() -> None:
+    """Relay's N3 (#568): the demo's API sends no SMS, and only its code verifies a phone."""
+    verifier = demo_api.StandInVerifier("246810")
+
+    await verifier.start("+13055550123", "en")  # nothing sent, nothing raised
+
+    assert await verifier.check("+13055550123", "246810")
+    assert not await verifier.check("+13055550123", "123456")
+    assert not await verifier.check("+13055550123", "")
+    assert "246810" not in repr(verifier)
+
+
+def test_the_demo_api_runs_only_where_the_seed_may() -> None:
+    """The guard the seed runs refuses the demo API a database that is not a local jackdemo."""
+    settings = make_settings(database_url="postgresql://jack:jack@db.example.com:5432/jack")
+    with pytest.raises(guard.DemoGuardError):
+        guard.check_settings(settings)
+
+
+async def test_a_visit_proposed_days_ahead_starts_in_the_day(seeded: Seeded) -> None:
+    """Relay's N9: seeded in the evening, a quote must not propose a visit at night. A start
+    outside the day's hours in the business time zone (America/New_York in the tests) moves to
+    the morning of that day; one in the day stays."""
+    async with open_world(seeded.settings, seeded.storage, seeded.stripe().stand_ins) as world:
+        assert world.settings.business_time_zone == "America/New_York"
+        night = datetime(2030, 3, 4, 2, 0, tzinfo=UTC)  # 21:00 EST on March 3
+        afternoon = datetime(2030, 3, 4, 18, 0, tzinfo=UTC)  # 13:00 EST on March 4
+        assert await scenes._in_the_day(world, night) == datetime(2030, 3, 3, 15, 0, tzinfo=UTC)
+        assert await scenes._in_the_day(world, afternoon) == afternoon
 
 
 async def test_a_second_run_changes_nothing_and_fresh_adds_one_request(seeded: Seeded) -> None:
