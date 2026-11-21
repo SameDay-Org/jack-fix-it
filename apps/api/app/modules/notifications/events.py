@@ -250,6 +250,29 @@ async def push_job_cancelled_by_customer(
     )
 
 
+async def push_job_cancelled_by_pro(
+    queue: JobQueue,
+    *,
+    customer_id: uuid.UUID,
+    job_id: uuid.UUID,
+    request_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the customer, once their pro cancelled the job (#69): the whole payment goes back,
+    in neutral words with no timing promised, and a new request is theirs to start. One cancel
+    per job, so one message id. Opens the job of their request."""
+    await _job_push(
+        queue,
+        customer_id,
+        "job_cancelled_by_pro",
+        job_id,
+        request_id,
+        public_code,
+        timeout_seconds,
+    )
+
+
 async def push_job_cancelled(
     queue: JobQueue,
     *,
@@ -422,6 +445,76 @@ async def push_payouts_enabled(
         kind="payouts_enabled",
         params={},
         deep_link="/",
+        timeout_seconds=timeout_seconds,
+    )
+
+
+async def push_chat_message_to_customer(
+    queue: JobQueue,
+    *,
+    customer_id: uuid.UUID,
+    chat_message_id: uuid.UUID,
+    request_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the customer, for a new message of their job's pro they are not reading (#73 part 1,
+    chat.notify): the message's id, so announcing it twice pushes once. The job's code only,
+    never the text. Opens the job of their request (#64), where the chat shows its unread count.
+    """
+    await _push(
+        queue,
+        customer_id,
+        message_id=f"chat_message:{chat_message_id}",
+        kind="chat_message",
+        params={"public_code": public_code},
+        deep_link=f"/requests/{request_id}/job/chat",
+        timeout_seconds=timeout_seconds,
+    )
+
+
+async def push_chat_message_to_pro(
+    queue: JobQueue,
+    *,
+    pro_user_id: uuid.UUID,
+    chat_message_id: uuid.UUID,
+    job_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the pro, for a new message of the job's customer they are not reading (#73 part 1),
+    as push_chat_message_to_customer. Opens the job (#63), where the chat shows its unread
+    count."""
+    await _push(
+        queue,
+        pro_user_id,
+        message_id=f"chat_message:{chat_message_id}",
+        kind="chat_message",
+        params={"public_code": public_code},
+        deep_link=f"/jobs/{job_id}/chat",
+        timeout_seconds=timeout_seconds,
+    )
+
+
+async def push_tip_received(
+    queue: JobQueue,
+    *,
+    pro_user_id: uuid.UUID,
+    tip_id: uuid.UUID,
+    job_id: uuid.UUID,
+    public_code: str,
+    timeout_seconds: float,
+) -> None:
+    """To the pro, once the customer's tip on the job succeeded (#273): a tip succeeds once, so
+    one message id per tip. Neither the customer's name nor the amount (a lock screen shows the
+    push). Opens the job."""
+    await _push(
+        queue,
+        pro_user_id,
+        message_id=f"tip_received:{tip_id}",
+        kind="tip_received",
+        params={"public_code": public_code},
+        deep_link=f"/jobs/{job_id}",
         timeout_seconds=timeout_seconds,
     )
 

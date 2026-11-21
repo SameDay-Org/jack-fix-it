@@ -96,6 +96,14 @@ class StaffSupportTicketItem(_Out):
     role: TicketRole = Field(description="The writer's role when they wrote the ticket.")
     topic: TicketTopic
     job_id: uuid.UUID | None = Field(description="The job the ticket is about, if any.")
+    job_request_id: uuid.UUID | None = Field(
+        description="The request of the ticket's job, for the panel's request page; null "
+        "without a job (#503)."
+    )
+    job_request_code: str | None = Field(
+        description="That request's public code, as staff name and search it; null without a "
+        "job (#503)."
+    )
     status: TicketStatus
     created_at: datetime
 

@@ -27,6 +27,7 @@ from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.pros.models import ProProfile
 from app.modules.quotes.models import Quote, QuoteStatus
 from app.modules.requests.models import RequestOrigin, RequestStatus, ServiceRequest
+from app.modules.tips.service import TipConfig
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
 from app.observability import JsonFormatter, init_sentry
@@ -48,6 +49,8 @@ CONFIG = JobExecutionConfig(
     photo_url_ttl_seconds=300,
     enqueue_timeout_seconds=1.0,
     auto_confirm_after=timedelta(hours=48),
+    tips=TipConfig.from_settings(make_settings()),
+    review_publish_after=timedelta(days=14),
 )
 
 

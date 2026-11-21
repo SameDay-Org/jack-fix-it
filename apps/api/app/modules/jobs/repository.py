@@ -6,6 +6,7 @@ from sqlalchemy import Select, Subquery, exists, func, or_, select, tuple_, upda
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.jobs.models import Job, JobEvent, JobPhoto, JobPhotoKind, JobStatus
+from app.modules.jobs.transitions import REVIEWABLE
 from app.modules.media.safe_status import MediaSafeStatus
 
 
@@ -16,10 +17,32 @@ class JobRepository:
         self._session = session
 
     @staticmethod
+    def request_ids() -> Subquery:
+        """Every job's id (`job_id`) and its request (`request_id`) only, as a subquery for
+        another module's query (#503)."""
+        return select(Job.id.label("job_id"), Job.request_id.label("request_id")).subquery()
+
+    @staticmethod
     def confirmations() -> Subquery:
         """Every job's id (`job_id`) and confirmation time (`confirmed_at`, NULL when it was
         never confirmed) only, as a subquery for another module's query."""
         return select(Job.id.label("job_id"), Job.confirmed_at.label("confirmed_at")).subquery()
+
+    async def completed_counts(self, pro_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, int]:
+        """How many confirmed jobs each pro has (confirmed, or paid out after a confirmation,
+        as is_reviewable reads one), in one grouped query; a pro with none is left out."""
+        if not pro_ids:
+            return {}
+        statement = (
+            select(Job.pro_id, func.count())
+            .where(
+                Job.pro_id.in_(pro_ids),
+                Job.status.in_(REVIEWABLE),
+                Job.confirmed_at.is_not(None),
+            )
+            .group_by(Job.pro_id)
+        )
+        return {pro_id: count for pro_id, count in (await self._session.execute(statement)).all()}
 
     @staticmethod
     def confirmed() -> Subquery:

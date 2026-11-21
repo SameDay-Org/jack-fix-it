@@ -699,6 +699,35 @@ describe("the chat with the customer (#74)", () => {
   });
 });
 
+describe("cancelling the job (#69)", () => {
+  it.each([
+    ["scheduled", proJob()],
+    ["on the way", onTheWay()],
+    ["checked in", arrived()],
+    ["on the way with the check-in locked", onTheWay({ arrival_code_locked: true })],
+  ])("offers Cancel job while the job is %s, once and outside the dock", async (_, job) => {
+    await open(job);
+    expect(screen.getAllByText("Cancel job")).toHaveLength(1);
+    expect(actionButtons().map((button) => button.props.testID)).not.toContain("pro-job-cancel");
+    await act(async () => fireEvent.press(screen.getByTestId("pro-job-cancel")));
+    expect(router.push).toHaveBeenCalledWith({
+      pathname: "/jobs/[id]/cancel",
+      params: { id: JOB_ID },
+    });
+  });
+
+  it.each([
+    ["working", working()],
+    ["done", working({ status: "completed", completed_at: minutesFromNow(-1) })],
+    ["confirmed", working({ status: "confirmed", completed_at: minutesFromNow(-60) })],
+    ["cancelled", proJob({ status: "cancelled", address: null })],
+  ])("offers no Cancel job once the job is %s", async (_, job) => {
+    await open(job);
+    expect(screen.queryByTestId("pro-job-cancel")).toBeNull();
+    expect(screen.queryByText("Cancel job")).toBeNull();
+  });
+});
+
 describe("the customer's report on the job (#75)", () => {
   const DISPUTE = "/v1/pros/me/jobs/{job_id}/dispute";
   const JOB = "/v1/pros/me/jobs/{job_id}";
