@@ -781,6 +781,24 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "rate_limited: too many upload URLs for this account; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2932,6 +2950,24 @@
               }
             }
           },
+          "429": {
+            "description": "rate_limited: too many payment sheets for this account; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "502": {
             "description": "payments_error: Stripe refused the call; nothing changed, the payment can be asked for again.",
             "content": {
@@ -3164,6 +3200,24 @@
           },
           "403": {
             "description": "forbidden: only customers keep payment methods.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many wallet reads; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -14855,6 +14909,7 @@
         "type": "string",
         "enum": [
           "job_updates",
+          "messages",
           "quotes_and_opportunities",
           "reminders",
           "marketing",

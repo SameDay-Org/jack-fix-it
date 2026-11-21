@@ -62,6 +62,7 @@ CUSTOMER_KEYS = {
     "dispute_status",
     "dispute_resolution",
     "unread_messages",
+    "tip",
 }
 PRO_KEYS = {
     "id",

@@ -21,10 +21,14 @@ from typing import Final
 
 from app.integrations.stripe_connect import AccountState
 from app.integrations.stripe_payments import (
+    CardFacts,
     CreatedCustomer,
     FoundPaymentIntents,
+    FoundTipIntents,
     PaymentIntentFacts,
     PaymentIntentState,
+    TipChargeFacts,
+    TipIntentFacts,
 )
 from app.integrations.stripe_refunds import FoundRefunds, RefundFacts
 from app.integrations.stripe_transfers import FoundTransfers, TransferFacts
@@ -50,6 +54,8 @@ def is_stand_in(stripe_id: str) -> bool:
 class _Intent:
     facts: PaymentIntentFacts
     status: str
+    # The create's metadata: what a tip intent's reads report (#510's tip_intent, search).
+    metadata: Mapping[str, str]
 
 
 class StandInPayments:
@@ -70,6 +76,7 @@ class StandInPayments:
         transfer_group: str,
         metadata: Mapping[str, str],
         idempotency_key: str,
+        description: str | None = None,
     ) -> PaymentIntentState:
         intent_id = stand_in_id("pi", idempotency_key)
         self._intents.setdefault(
@@ -83,6 +90,7 @@ class StandInPayments:
                     payment_id=metadata.get("payment_id"),
                 ),
                 status=_REQUIRES_PAYMENT,
+                metadata=dict(metadata),
             ),
         )
         return self._state(intent_id)
@@ -100,6 +108,33 @@ class StandInPayments:
 
     async def payment_intent_facts(self, payment_intent_id: str) -> PaymentIntentFacts:
         return self._intents[payment_intent_id].facts
+
+    async def card_of(self, payment_intent_id: str) -> CardFacts | None:
+        """A paid intent's card, as Stripe's test card reads; none before it is paid."""
+        if self._intents[payment_intent_id].status != _SUCCEEDED:
+            return None
+        return CardFacts(brand="visa", last4="4242", wallet=None)
+
+    async def tip_charge(self, payment_intent_id: str) -> TipChargeFacts:
+        """A tip's intent with its charge once paid: never refunded nor disputed here."""
+        paid = self._intents[payment_intent_id].status == _SUCCEEDED
+        return TipChargeFacts(
+            intent=self._tip_facts(payment_intent_id),
+            charge_id=stand_in_id("ch", payment_intent_id) if paid else None,
+            refunded=False,
+            disputed=False,
+        )
+
+    async def tip_intent(self, payment_intent_id: str) -> TipIntentFacts:
+        return self._tip_facts(payment_intent_id)
+
+    async def search_tip_intents(self, tip_id: uuid.UUID) -> FoundTipIntents:
+        found = tuple(
+            self._tip_facts(intent_id)
+            for intent_id, intent in self._intents.items()
+            if intent.metadata.get("tip_id") == str(tip_id)
+        )
+        return FoundTipIntents(intents=found, complete=True)
 
     async def create_customer_session(self, customer_id: str) -> str:
         return stand_in_id("cuss_secret", customer_id)
@@ -120,6 +155,21 @@ class StandInPayments:
         intent = self._intents[payment_intent_id]
         intent.status = _SUCCEEDED
         return intent.facts
+
+    def _tip_facts(self, intent_id: str) -> TipIntentFacts:
+        intent = self._intents[intent_id]
+        return TipIntentFacts(
+            payment_intent_id=intent_id,
+            amount_cents=intent.facts.amount_cents,
+            currency=intent.facts.currency,
+            customer_id=intent.facts.customer_id,
+            status=intent.status,
+            failed=False,
+            kind=intent.metadata.get("kind"),
+            tip_id=intent.metadata.get("tip_id"),
+            job_id=intent.metadata.get("job_id"),
+            attempt=intent.metadata.get("attempt"),
+        )
 
     def _state(self, intent_id: str) -> PaymentIntentState:
         return PaymentIntentState(
@@ -159,6 +209,9 @@ class StandInTransfers:
             job_id=metadata.get("job_id"),
             reversed=False,
             request_id=None,
+            # A tip's transfer names its tip, as Stripe returns the create's metadata (#518).
+            kind=metadata.get("kind"),
+            tip_id=metadata.get("tip_id"),
         )
         self._transfers.setdefault(transfer_id, (transfer_group, facts))
         return self._transfers[transfer_id][1]

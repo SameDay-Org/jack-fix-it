@@ -8,6 +8,7 @@ from app.config import Settings, get_app_settings
 from app.db import get_session
 from app.errors import ErrorResponse
 from app.modules.auth.permissions import AppUser, PanelUser
+from app.modules.chat.notify import ChatNotifier, get_chat_notifier
 from app.modules.chat.schemas import (
     ChatMessageIn,
     ChatOffenderFlagPage,
@@ -35,8 +36,9 @@ def _error(description: str) -> dict[str, Any]:
 def get_chat_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[Settings, Depends(get_app_settings)],
+    notifier: Annotated[ChatNotifier, Depends(get_chat_notifier)],
 ) -> ChatService:
-    return ChatService(session, ChatConfig.from_settings(settings))
+    return ChatService(session, ChatConfig.from_settings(settings), notifier)
 
 
 Chat = Annotated[ChatService, Depends(get_chat_service)]

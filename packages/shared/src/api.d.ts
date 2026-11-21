@@ -4685,7 +4685,7 @@ export interface components {
          * PreferenceGroup
          * @enum {string}
          */
-        PreferenceGroup: "job_updates" | "quotes_and_opportunities" | "reminders" | "marketing" | "account_and_security";
+        PreferenceGroup: "job_updates" | "messages" | "quotes_and_opportunities" | "reminders" | "marketing" | "account_and_security";
         /**
          * PreferredPeriod
          * @description When in the preferred day the customer would like the visit (#237). Pros propose the
@@ -8070,6 +8070,17 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description rate_limited: too many upload URLs for this account; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     create_download_url_v1_uploads_download_url_post: {
@@ -9579,6 +9590,17 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description rate_limited: too many payment sheets for this account; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description payments_error: Stripe refused the call; nothing changed, the payment can be asked for again. */
             502: {
                 headers: {
@@ -9763,6 +9785,17 @@ export interface operations {
             /** @description The request is invalid. */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many wallet reads; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

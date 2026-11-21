@@ -33,6 +33,9 @@ class Caller:
     recipient: str  # the keyword holding the user id
     message_id: str  # with {keyword} for the event's id
     link: str  # the deep link, with {keyword} for the ids
+    # The catalog kind, when the function is one of several senders of one kind; else the
+    # function's name without push_.
+    kind: str | None = None
 
 
 CALLERS = (
@@ -102,11 +105,28 @@ CALLERS = (
     ),
     # Home: the pro's opportunities show there once payouts are on (#280).
     Caller("push_payouts_enabled", "pro_user_id", "payouts_enabled:{stripe_event_id}", "/"),
+    # A new chat message (#73): one kind, each side opening its own chat of the job (P3).
+    Caller(
+        "push_chat_message_to_customer",
+        "customer_id",
+        "chat_message:{chat_message_id}",
+        "/requests/{request_id}/job/chat",
+        kind="chat_message",
+    ),
+    Caller(
+        "push_chat_message_to_pro",
+        "pro_user_id",
+        "chat_message:{chat_message_id}",
+        "/jobs/{job_id}/chat",
+        kind="chat_message",
+    ),
+    # A tip succeeds once (#273 PR A2): one message per tip, opening the pro's job.
+    Caller("push_tip_received", "pro_user_id", "tip_received:{tip_id}", "/jobs/{job_id}"),
 )
 
 
 def kind(caller: Caller) -> str:
-    return caller.name.removeprefix("push_")
+    return caller.kind or caller.name.removeprefix("push_")
 
 
 def function(caller: Caller) -> Callable[..., Awaitable[None]]:
