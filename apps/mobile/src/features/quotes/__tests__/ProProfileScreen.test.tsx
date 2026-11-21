@@ -39,6 +39,16 @@ jest.mock("expo-router", () => {
   };
 });
 jest.mock("expo-status-bar", () => ({ StatusBar: () => null }));
+// The reviews section reads its own pages (`ProReviews.test.tsx`): here only where it goes, and
+// for which pro. A View says nothing, so the page's reading order below is the profile's own.
+jest.mock("../ProReviews", () => {
+  const { createElement } = jest.requireActual<typeof import("react")>("react");
+  const { View } = jest.requireActual<typeof import("react-native")>("react-native");
+  return {
+    ProReviews: ({ proId }: { proId: string }) =>
+      createElement(View, { testID: `pro-profile-reviews-of-${proId}` }),
+  };
+});
 jest.mock(
   "react-native-safe-area-context",
   () => jest.requireActual("react-native-safe-area-context/jest/mock").default,
@@ -126,6 +136,8 @@ describe("ProProfileScreen", () => {
     expect(screen.getByLabelText("Painting")).toBeTruthy();
     expect(screen.getByRole("header", { name: "About" })).toBeTruthy();
     expect(screen.getByRole("header", { name: "What they do" })).toBeTruthy();
+    // The reviews customers left, read by this pro's id (#78).
+    expect(screen.getByTestId(`pro-profile-reviews-of-${PROFILE.id}`)).toBeTruthy();
     expect(screen.queryByTestId(/card/)).toBeNull();
     // One pass, top to bottom: who and since when, the figures, what they say, what they do,
     // what verified means, then the bar.

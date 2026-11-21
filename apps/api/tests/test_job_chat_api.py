@@ -20,12 +20,13 @@ from app.config import Settings
 from app.db import get_session
 from app.main import create_app
 from app.modules.chat.models import MESSAGE_MAX_LENGTH, JobChatRead, JobMessage
+from app.modules.chat.notify import get_chat_notifier
 from app.modules.chat.repository import ChatRepository
 from app.modules.jobs.models import Job, JobStatus
 from app.observability import JsonFormatter
 from app.rate_limit import get_rate_limiter
 from app.redaction import MASK
-from tests.conftest import InMemoryRateLimiter, make_settings
+from tests.conftest import InMemoryRateLimiter, make_settings, quiet_chat_notifier
 from tests.job_world import LEAKS, JobWorld, Party, build_world, make_job
 from tests.test_sentry_scrubbing import TEST_DSN, MemoryTransport, _payloads
 
@@ -387,8 +388,16 @@ async def test_messages_in_one_transaction_keep_their_order(
 
 @pytest.mark.parametrize("settings", [make_settings(chat_message_rate_limit=3)])
 async def test_messages_are_rate_limited_per_user_per_job(
-    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, settings: Settings
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    settings: Settings,
 ) -> None:
+    # One fixed window for the whole test (#448): on the real clock, a run slowed by load can
+    # cross the end of a window between two sends and start counting again.
+    limiter = InMemoryRateLimiter(clock=lambda: T0.timestamp())
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
     job = await make_job(db_session, world)
     other_job = await make_job(db_session, world)
 
@@ -745,6 +754,8 @@ async def test_a_failed_send_reaches_sentry_without_the_body(
     app: FastAPI = create_app(make_settings(sentry_dsn=TEST_DSN))
     limiter = InMemoryRateLimiter()
     app.dependency_overrides[get_rate_limiter] = lambda: limiter
+    notifier = quiet_chat_notifier()
+    app.dependency_overrides[get_chat_notifier] = lambda: notifier
     app.state.rolled_back_session = db_session
 
     async def session_override() -> Any:

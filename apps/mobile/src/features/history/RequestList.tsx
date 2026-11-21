@@ -1,4 +1,5 @@
-import { router, unstable_useIsNavigating, useScrollToTop } from "expo-router";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { router, unstable_useIsNavigating, useIsFocused, useScrollToTop } from "expo-router";
 import {
   useCallback,
   useEffect,
@@ -11,9 +12,10 @@ import {
 import { useTranslation } from "react-i18next";
 import { FlatList, RefreshControl, View } from "react-native";
 
-import { SessionExpiredError } from "@/api";
+import { isCurrentGeneration, SessionExpiredError, useSessionGeneration } from "@/api";
 import { showToast } from "@/components/ui";
 import { useCategories } from "@/features/home/useCategories";
+import { customerJobQueryOptions, jobHref } from "@/features/jobs/api";
 import { RetryNotice } from "@/features/opportunities/RetryNotice";
 import { useRefetchOnReturn, useSettledError } from "@/features/quotes/useRequestQuotes";
 import { tokens } from "@/theme";
@@ -174,20 +176,68 @@ export function RequestList({ header, empty, testID = "request-list" }: RequestL
 /**
  * Opens a request. A second tap before it is up opens nothing: the router queues a push and the
  * list stays tappable until it lands. Once the router is idle again a row opens again.
+ *
+ * A cancelled request whose job was booked opens on that job (#545): the cancel, where its money
+ * stands and, after a pro's cancel, the way to a new request are there. Its quotes are not: the
+ * API lists none once a request is cancelled. The job the app already holds opens at once (the
+ * customer who just cancelled on the job screen); otherwise it is asked first, with the job
+ * screen's own query, so the screen opens with it. With none (cancelled before anyone was hired)
+ * or no answer, the request opens as any other. While that answer is on its way the list stays
+ * live: a newer tap wins over it, and it opens nothing once History is no longer in front (the
+ * customer went to another tab) or the session that asked is over.
  */
 function useOpenRequest() {
+  const client = useQueryClient();
+  const generation = useSessionGeneration();
+  // Read when the answer comes, not when the tap came in.
+  const focused = useIsFocused();
+  const inFront = useRef(focused);
+  useEffect(() => {
+    inFront.current = focused;
+  }, [focused]);
+  // A push is under way (the router queues it): no second one.
   const opening = useRef(false);
+  // The newest tap: one still waiting for its job opens nothing once another came in.
+  const latest = useRef(0);
   const navigating = unstable_useIsNavigating();
 
   useEffect(() => {
     if (!navigating) opening.current = false;
   }, [navigating]);
 
-  return useCallback((request: RequestSummary) => {
-    if (opening.current) return;
-    opening.current = true;
-    router.push({ pathname: "/requests/[id]", params: { id: request.id } });
-  }, []);
+  const open = useCallback(
+    async (request: RequestSummary) => {
+      if (opening.current) return;
+      const tap = ++latest.current;
+      const booked =
+        request.status === "cancelled" && (await hasJob(client, request.id, generation));
+      const wanted =
+        tap === latest.current &&
+        inFront.current &&
+        !opening.current &&
+        isCurrentGeneration(generation);
+      if (!wanted) return;
+      opening.current = true;
+      router.push(
+        booked ? jobHref(request.id) : { pathname: "/requests/[id]", params: { id: request.id } },
+      );
+    },
+    [client, generation],
+  );
+  return useCallback((request: RequestSummary) => void open(request), [open]);
+}
+
+/**
+ * Whether the request's job answers: the one the app already holds (whatever its age: the job
+ * screen reads it again as it opens), else asked now; false on a 404 or no answer.
+ */
+async function hasJob(client: QueryClient, requestId: string, generation: number) {
+  try {
+    await client.ensureQueryData(customerJobQueryOptions(requestId, generation));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Row-shaped placeholders, read as one "Loading your requests" progress indicator. */

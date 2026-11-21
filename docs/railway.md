@@ -291,39 +291,46 @@ The worker builds the same settings when `app/worker.py` is imported, so the sam
 stop it: without every required variable it crash-loops under its `ALWAYS` restart policy and
 never logs `worker_started`. Use the same values as api.
 
-| Variable                           | Value                                                      | Secret          | Source      |
-| ---------------------------------- | ---------------------------------------------------------- | --------------- | ----------- |
-| `APP_ENV`                          | same as api                                                | no              | D3.1 (#22)  |
-| `LOG_LEVEL`                        | same as api                                                | no              | D3.1 (#22)  |
-| `DATABASE_URL`                     | `${{Postgres.DATABASE_URL}}`                               | yes (reference) | D3.1 (#22)  |
-| `REDIS_URL`                        | `${{Redis.REDIS_URL}}`                                     | yes (reference) | D3.1 (#22)  |
-| `SENTRY_DSN`                       | same as api                                                | no              | D3.1 (#22)  |
-| `JWT_SECRET`                       | same as api                                                | yes             | D4.2 (#25)  |
-| `RATE_LIMIT_KEY_SECRET`            | same as api                                                | yes             | #137        |
-| `WEB_SERVICE_KEY`                  | same as api                                                | yes             | #409        |
-| `REFRESH_ROTATION_SECRET`          | same as api                                                | yes             | #152        |
-| `TWILIO_ACCOUNT_SID`               | same as api                                                | no              | D4.3 (#26)  |
-| `TWILIO_AUTH_TOKEN`                | same as api                                                | yes             | D4.3 (#26)  |
-| `TWILIO_VERIFY_SERVICE_SID`        | same as api                                                | no              | D4.3 (#26)  |
-| `RESEND_API_KEY`                   | same as api                                                | yes             | D4.3 (#27)  |
-| `EMAIL_FROM`                       | same as api                                                | no              | D4.3 (#27)  |
-| `S3_ENDPOINT_URL`                  | same as api                                                | no              | D6.2 (#35)  |
-| `S3_BUCKET`                        | same as api                                                | no              | D6.2 (#35)  |
-| `S3_ACCESS_KEY_ID`                 | same as api                                                | yes             | D6.2 (#35)  |
-| `S3_SECRET_ACCESS_KEY`             | same as api                                                | yes             | D6.2 (#35)  |
-| `STRIPE_SECRET_KEY`                | same as api                                                | yes             | D7.1 (#39)  |
-| `PUBLIC_API_URL`                   | same as api                                                | no              | D7.1 (#39)  |
-| `EXPO_ACCESS_TOKEN`                | optional; set it only if Expo enhanced push security is on | yes             | D10.3 (#54) |
-| `ORPHAN_UPLOAD_MIN_AGE_HOURS`      | same as api (shared variable)                              | no              | #191, #298  |
-| `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` | same as api (shared variable)                              | no              | #298        |
-| `GEOCODE_ON_SAVE`                  | same as api (shared variable); see "Geocode on save"       | no              | #384        |
-| `MAPBOX_ACCESS_TOKEN`              | same as api; only needed with `GEOCODE_ON_SAVE=true`       | yes             | #384        |
+| Variable                           | Value                                                                                   | Secret          | Source      |
+| ---------------------------------- | --------------------------------------------------------------------------------------- | --------------- | ----------- |
+| `APP_ENV`                          | same as api                                                                             | no              | D3.1 (#22)  |
+| `LOG_LEVEL`                        | same as api                                                                             | no              | D3.1 (#22)  |
+| `DATABASE_URL`                     | `${{Postgres.DATABASE_URL}}`                                                            | yes (reference) | D3.1 (#22)  |
+| `REDIS_URL`                        | `${{Redis.REDIS_URL}}`                                                                  | yes (reference) | D3.1 (#22)  |
+| `SENTRY_DSN`                       | same as api                                                                             | no              | D3.1 (#22)  |
+| `JWT_SECRET`                       | same as api                                                                             | yes             | D4.2 (#25)  |
+| `RATE_LIMIT_KEY_SECRET`            | same as api                                                                             | yes             | #137        |
+| `WEB_SERVICE_KEY`                  | same as api                                                                             | yes             | #409        |
+| `REFRESH_ROTATION_SECRET`          | same as api                                                                             | yes             | #152        |
+| `TWILIO_ACCOUNT_SID`               | same as api                                                                             | no              | D4.3 (#26)  |
+| `TWILIO_AUTH_TOKEN`                | same as api                                                                             | yes             | D4.3 (#26)  |
+| `TWILIO_VERIFY_SERVICE_SID`        | same as api                                                                             | no              | D4.3 (#26)  |
+| `RESEND_API_KEY`                   | same as api                                                                             | yes             | D4.3 (#27)  |
+| `EMAIL_FROM`                       | same as api                                                                             | no              | D4.3 (#27)  |
+| `S3_ENDPOINT_URL`                  | same as api                                                                             | no              | D6.2 (#35)  |
+| `S3_BUCKET`                        | same as api                                                                             | no              | D6.2 (#35)  |
+| `S3_ACCESS_KEY_ID`                 | same as api                                                                             | yes             | D6.2 (#35)  |
+| `S3_SECRET_ACCESS_KEY`             | same as api                                                                             | yes             | D6.2 (#35)  |
+| `STRIPE_SECRET_KEY`                | same as api                                                                             | yes             | D7.1 (#39)  |
+| `PUBLIC_API_URL`                   | same as api                                                                             | no              | D7.1 (#39)  |
+| `EXPO_ACCESS_TOKEN`                | optional; set it only if Expo enhanced push security is on                              | yes             | D10.3 (#54) |
+| `ORPHAN_UPLOAD_MIN_AGE_HOURS`      | same as api (shared variable)                                                           | no              | #191, #298  |
+| `ORPHAN_UPLOAD_MODE`               | optional; `dry_run` by default; `delete` once the dry-run counts look right (see below) | no              | #191, #529  |
+| `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` | same as api (shared variable)                                                           | no              | #298        |
+| `GEOCODE_ON_SAVE`                  | same as api (shared variable); see "Geocode on save"                                    | no              | #384        |
+| `MAPBOX_ACCESS_TOKEN`              | same as api; only needed with `GEOCODE_ON_SAVE=true`                                    | yes             | #384        |
 
 `ORPHAN_UPLOAD_MIN_AGE_HOURS` and `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` must hold the same values
 on api and worker: the api refuses job photo uploads older than the window, and the worker's
 orphan sweep deletes only uploads older than the minimum age. Each service checks the rule
 (window at most half the minimum age) against its own values only, so set both as shared
 variables, or the sweep can delete a photo a job just attached (#298).
+
+`ORPHAN_UPLOAD_MODE` is `dry_run` by default, so the sweep only counts and logs
+(`orphan_uploads_swept`). Until it is `delete`, every upload no row references stays in the bucket.
+The upload URL limit (`UPLOAD_URL_LIMIT` per `UPLOAD_URL_WINDOW_SECONDS`, #529) bounds how fast one
+account can add them, not how many stay. **Cesar (ops):** check a few dry-run counts on staging,
+then set `ORPHAN_UPLOAD_MODE=delete` on the worker, staging first, then production.
 
 The worker makes the transfers to the pros (D13.3, #68) with the same `STRIPE_SECRET_KEY` it
 cancels unpaid payments with: a task queued when a job is confirmed, and the
@@ -351,17 +358,23 @@ is missing from either table, so this list cannot fall behind `app/config.py`.
 
 ### web
 
-| Variable                    | Value                                                                                                                             | Secret | Source      |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------ | ----------- |
-| `APP_ENV`                   | `staging` or `production` (only production is indexable)                                                                          | no     | D3.1 (#22)  |
-| `API_INTERNAL_URL`          | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`                                                                            | no     | D3.1 (#22)  |
-| `REFRESH_TOKEN_TTL_SECONDS` | the api's refresh token lifetime (2592000 unless the api sets another); the panel's session cookie lasts as long                  | no     | D16.1 (#80) |
-| `API_TIMEOUT_MS`            | `5000`: the longest wait on the api for one call, body included                                                                   | no     | D16.1 (#80) |
-| `SITE_URL`                  | optional: the site's public origin, e.g. `https://${{RAILWAY_PUBLIC_DOMAIN}}` or the custom domain                                | no     | D17 (#403)  |
-| `BUSINESS_TIME_ZONE`        | optional, mirrors the api's `BUSINESS_TIME_ZONE` (unset: its default, `America/New_York`): the KPI page's presets end today there | no     | D16.5 (#84) |
-| `METRICS_MAX_RANGE_DAYS`    | optional, mirrors the api's `METRICS_MAX_RANGE_DAYS` (unset: its default, `366`): the longest range the KPI page asks for         | no     | D16.5 (#84) |
-| `DISPUTE_AGE_WARN_HOURS`    | optional: the hours after which an open dispute's age turns amber in the panel (unset: `24`)                                      | no     | #83         |
-| `DISPUTE_AGE_LATE_HOURS`    | optional: the hours after which it turns red (unset: `48`; ignored with the amber one unless it is larger)                        | no     | #83         |
+| Variable                        | Value                                                                                                                                                                                               | Secret | Source      |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ----------- |
+| `APP_ENV`                       | `staging` or `production` (only production is indexable)                                                                                                                                            | no     | D3.1 (#22)  |
+| `API_INTERNAL_URL`              | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`                                                                                                                                              | no     | D3.1 (#22)  |
+| `REFRESH_TOKEN_TTL_SECONDS`     | the api's refresh token lifetime (2592000 unless the api sets another); the panel's session cookie lasts as long                                                                                    | no     | D16.1 (#80) |
+| `API_TIMEOUT_MS`                | `5000`: the longest wait on the api for one call, body included                                                                                                                                     | no     | D16.1 (#80) |
+| `SITE_URL`                      | optional: the site's public origin, e.g. `https://${{RAILWAY_PUBLIC_DOMAIN}}` or the custom domain                                                                                                  | no     | D17 (#403)  |
+| `BUSINESS_TIME_ZONE`            | optional, mirrors the api's `BUSINESS_TIME_ZONE` (unset: its default, `America/New_York`): the KPI page's presets end today there                                                                   | no     | D16.5 (#84) |
+| `METRICS_MAX_RANGE_DAYS`        | optional, mirrors the api's `METRICS_MAX_RANGE_DAYS` (unset: its default, `366`): the longest range the KPI page asks for                                                                           | no     | D16.5 (#84) |
+| `DISPUTE_AGE_WARN_HOURS`        | optional: the hours after which an open dispute's age turns amber in the panel (unset: `24`)                                                                                                        | no     | #83         |
+| `DISPUTE_AGE_LATE_HOURS`        | optional: the hours after which it turns red (unset: `48`; ignored with the amber one unless it is larger)                                                                                          | no     | #83         |
+| `INTEREST_FORM_ENABLED`         | `true` shows the "tell me when the app is out" form on `/app` and `/es/app`; read when the site is built, so a change needs a deploy (unset: off)                                                   | no     | #409        |
+| `INTEREST_FORM_SECRET`          | required while the form is on: random, at least 32 characters; signs the form's token, never leaves the web server                                                                                  | yes    | #409        |
+| `INTEREST_FORM_MIN_SECONDS`     | optional: how old the form's token must be to send (unset: `3`)                                                                                                                                     | no     | #409        |
+| `INTEREST_FORM_MAX_AGE_SECONDS` | optional: how old it may be at most (unset: `7200`)                                                                                                                                                 | no     | #409        |
+| `WEB_SERVICE_KEY`               | required while the form is on: the api's `WEB_SERVICE_KEY`, the same value; sent only from the web server to the api                                                                                | yes    | #409        |
+| `CLIENT_IP_HEADER`              | the one edge header holding the visitor's address (its last value is forwarded); check it on staging with a spoofed `X-Forwarded-For` before a public form goes on (unset: no address is forwarded) | no     | #409        |
 
 The web server calls the API over the private network; browsers and the mobile app use the
 api's public domain. `SITE_URL` is read when the site is built: it gives the showcase page
