@@ -379,8 +379,10 @@ async def _configuration_is_unsafe(
     refused then, never served with it. Only the copy's one video stream is read, never the
     original's streams. H.264's configuration (avcC) holds parameter sets only."""
     video = next(stream for stream in streams if stream.kind == "video")
-    if video.codec != "hevc" or video.configuration_bytes == 0:
+    if video.codec != "hevc":
         return False
+    # A size of 0 is also what an ffprobe that does not print it gives: read the record then
+    # too, and an empty one is refused (hevc_configuration_is_unsafe).
     if video.configuration_bytes > _HEVC_CONFIGURATION_MAX_BYTES:
         return True
     arguments = [
@@ -398,6 +400,8 @@ async def _configuration_is_unsafe(
         record = _hex_dump_bytes(str(stream["extradata"]))
     except (ValueError, KeyError, TypeError):
         raise SanitizeError(SanitizeFailure.UNREADABLE) from None
+    if len(record) > _HEVC_CONFIGURATION_MAX_BYTES:
+        return True
     return hevc_configuration_is_unsafe(record)
 
 

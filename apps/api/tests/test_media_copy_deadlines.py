@@ -35,8 +35,8 @@ from tests.test_dispatch import sessions_of
 from tests.test_media_copies import Media, MemoryStorage, gps_jpeg, make_media, row
 from tests.test_schema_requests_jobs import add
 
-# Steps of 0.1 s and a job of 2 s: one file's budget is 6 x 0.1 + 0.2 (its write) = 0.8 s, and
-# the job needs 0.2 (the query) + 0.8 + 0.5 (the settle reserve) = 1.5 s at least.
+# Steps of 0.1 s and a job of 2 s: one file's budget is 7 x 0.1 + 0.2 (its write) = 0.9 s, and
+# the job needs 0.2 (the query) + 0.9 + 0.5 (the settle reserve) = 1.6 s at least.
 FAST: dict[str, object] = {
     "media_sanitize_timeout_seconds": 0.1,
     "media_sanitize_overhead_seconds": 0.2,
@@ -327,9 +327,9 @@ async def test_the_accepted_minimum_budget_copies_a_file(db_session: AsyncSessio
         media_sanitize_timeout_seconds=120,
         media_sanitize_overhead_seconds=30,
         media_sanitize_settle_seconds=60,
-        media_sanitize_job_timeout_seconds=840,
+        media_sanitize_job_timeout_seconds=960,
     )
-    assert settings.media_sanitize_min_job_seconds == 840
+    assert settings.media_sanitize_min_job_seconds == 960
 
     outcome = await fast_copier(db_session, storage, settings).copy_pending(
         media.request_id, attempt=1, clock=JumpClock(reads=1, before=0.0, after=0.001)
@@ -350,7 +350,7 @@ async def test_a_file_starts_on_the_terms_the_settings_check(db_session: AsyncSe
         media_sanitize_timeout_seconds=120,
         media_sanitize_overhead_seconds=30,
         media_sanitize_settle_seconds=60,
-        media_sanitize_job_timeout_seconds=840,
+        media_sanitize_job_timeout_seconds=960,
     )
 
     outcome = await fast_copier(db_session, storage, settings).copy_pending(
@@ -371,7 +371,7 @@ async def test_the_first_file_starts_even_when_the_query_ran_long(
         media_sanitize_timeout_seconds=120,
         media_sanitize_overhead_seconds=30,
         media_sanitize_settle_seconds=60,
-        media_sanitize_job_timeout_seconds=840,
+        media_sanitize_job_timeout_seconds=960,
     )
 
     outcome = await fast_copier(db_session, storage, settings).copy_pending(
@@ -387,9 +387,9 @@ def test_the_job_timeout_must_cover_the_query_one_file_and_the_reserve() -> None
         "media_sanitize_overhead_seconds": 30,
         "media_sanitize_settle_seconds": 60,
     }
-    make_settings(**lowest, media_sanitize_job_timeout_seconds=840)
+    make_settings(**lowest, media_sanitize_job_timeout_seconds=960)
     with pytest.raises(ValueError, match="MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS"):
-        make_settings(**lowest, media_sanitize_job_timeout_seconds=839)
+        make_settings(**lowest, media_sanitize_job_timeout_seconds=959)
 
 
 def test_the_settle_reserve_must_cover_two_database_steps() -> None:
