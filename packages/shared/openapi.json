@@ -781,6 +781,24 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "rate_limited: too many upload URLs for this account; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2932,6 +2950,24 @@
               }
             }
           },
+          "429": {
+            "description": "rate_limited: too many payment sheets for this account; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "502": {
             "description": "payments_error: Stripe refused the call; nothing changed, the payment can be asked for again.",
             "content": {
@@ -3164,6 +3200,24 @@
           },
           "403": {
             "description": "forbidden: only customers keep payment methods.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many wallet reads; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -12566,7 +12620,19 @@
           "amount_cents": {
             "type": "integer",
             "title": "Amount Cents",
-            "description": "What the pro receives, in integer cents."
+            "description": "What the pro receives for the job, in integer cents (never the tip)."
+          },
+          "tip_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tip Cents",
+            "description": "The customer's tip on the job, all of it the pro's, in integer cents; 0 when none. Its own transfer: the summary counts it by that transfer's state. Always sent; optional in the schema so clients built before #273 keep compiling."
           },
           "status": {
             "$ref": "#/components/schemas/EarningStatus"
@@ -12671,7 +12737,7 @@
           "pending_cents": {
             "type": "integer",
             "title": "Pending Cents",
-            "description": "Confirmed, the transfer still to be made."
+            "description": "Confirmed, the transfer still to be made; a tip whose own transfer is."
           },
           "on_hold_cents": {
             "type": "integer",
@@ -14843,6 +14909,7 @@
         "type": "string",
         "enum": [
           "job_updates",
+          "messages",
           "quotes_and_opportunities",
           "reminders",
           "marketing",

@@ -52,6 +52,22 @@ def _transfer_id(event: StripeEvent) -> str:
     return transfer_id
 
 
+def transfer_id_of(event: StripeEvent) -> str:
+    """The id of the event's Transfer; a malformed object is logged and raised (#273 PR A2:
+    the tip transfer's handler reads it the same way)."""
+    return _transfer_id(event)
+
+
+def transfer_kind(event: StripeEvent) -> str | None:
+    """The metadata kind of the event's Transfer ("tip" for a tip's, #273 PR A2), for the
+    webhook registry's routing; None when it has none. It routes, never selects a row."""
+    data = event.payload.get("data")
+    transfer = data.get("object") if isinstance(data, Mapping) else None
+    metadata = transfer.get("metadata") if isinstance(transfer, Mapping) else None
+    kind = metadata.get("kind") if isinstance(metadata, Mapping) else None
+    return kind if isinstance(kind, str) else None
+
+
 async def record_reversal(
     session: AsyncSession, stripe_transfer_id: str, ids: Mapping[str, str | int]
 ) -> bool:

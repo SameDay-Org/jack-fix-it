@@ -3513,9 +3513,14 @@ export interface components {
             category: components["schemas"]["EarningCategory"] | null;
             /**
              * Amount Cents
-             * @description What the pro receives, in integer cents.
+             * @description What the pro receives for the job, in integer cents (never the tip).
              */
             amount_cents: number;
+            /**
+             * Tip Cents
+             * @description The customer's tip on the job, all of it the pro's, in integer cents; 0 when none. Its own transfer: the summary counts it by that transfer's state. Always sent; optional in the schema so clients built before #273 keep compiling.
+             */
+            tip_cents?: number | null;
             status: components["schemas"]["EarningStatus"];
             /**
              * Completed At
@@ -3562,7 +3567,7 @@ export interface components {
             awaiting_confirmation_cents: number;
             /**
              * Pending Cents
-             * @description Confirmed, the transfer still to be made.
+             * @description Confirmed, the transfer still to be made; a tip whose own transfer is.
              */
             pending_cents: number;
             /** On Hold Cents */
@@ -4680,7 +4685,7 @@ export interface components {
          * PreferenceGroup
          * @enum {string}
          */
-        PreferenceGroup: "job_updates" | "quotes_and_opportunities" | "reminders" | "marketing" | "account_and_security";
+        PreferenceGroup: "job_updates" | "messages" | "quotes_and_opportunities" | "reminders" | "marketing" | "account_and_security";
         /**
          * PreferredPeriod
          * @description When in the preferred day the customer would like the visit (#237). Pros propose the
@@ -8065,6 +8070,17 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description rate_limited: too many upload URLs for this account; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     create_download_url_v1_uploads_download_url_post: {
@@ -9574,6 +9590,17 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description rate_limited: too many payment sheets for this account; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description payments_error: Stripe refused the call; nothing changed, the payment can be asked for again. */
             502: {
                 headers: {
@@ -9758,6 +9785,17 @@ export interface operations {
             /** @description The request is invalid. */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many wallet reads; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

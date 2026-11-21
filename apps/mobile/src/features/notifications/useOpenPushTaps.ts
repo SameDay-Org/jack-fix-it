@@ -48,13 +48,16 @@ export async function openPushTap(
   }
   const route = pushRoute(link, role);
   if (link === null || route === null) return;
+  let answer: unknown;
   try {
-    await route.probe(client, link.id, tap.generation);
+    answer = await route.probe(client, link.id, tap.generation);
   } catch (error) {
     if (isRefused(error)) return;
   }
-  // An allowed path is the screen's own pathname: `/jobs/<id>` opens `/jobs/[id]`.
-  if (wanted() && currentPath() !== tap.url) router.push(route.href(link.id));
+  // An allowed path is the screen's own pathname (`/jobs/<id>` opens `/jobs/[id]`), unless its
+  // route says where the screen is (a customer's chat is under the job's id, not the request's).
+  const path = route.path?.(link.id, answer) ?? tap.url;
+  if (wanted() && currentPath() !== path) router.push(route.href(link.id, answer));
 }
 
 /**
