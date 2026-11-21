@@ -35,7 +35,7 @@ from app.modules.service_areas.service import ServiceAreaService
 from app.modules.uploads.keys import owned_upload
 from app.modules.uploads.schemas import PhotoOut, UploadPurpose
 from app.modules.users.service import UserService
-from app.modules.users.types import UserAccount
+from app.modules.users.types import UserAccount, UserRole
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,6 @@ class AssignCandidate:
 
     pro_id: uuid.UUID
     user_id: uuid.UUID
-    rating_avg: Decimal | None  # NULL until the first review
     approved: bool
     payouts_enabled: bool
     in_category: bool
@@ -79,10 +78,24 @@ class ProCard:
     user_id: uuid.UUID
     # "María P." (users.names.safe_public_name); None when a name is missing or shows a contact
     name: str | None
-    rating_avg: Decimal | None  # NULL until the first review
-    jobs_count: int
     years_of_experience: int | None
     verified: bool  # verification approved
+
+
+@dataclass(frozen=True)
+class VisiblePro:
+    """An approved pro with an active account, as any signed-in user may see them (#78): the
+    bio as written (the caller masks its contacts), when the profile was created and its
+    active categories. `user_id` is for the caller's lookups (the rating, the contacts to
+    mask), never for a response. No photo (#53), documents, areas, payouts or Stripe."""
+
+    pro_id: uuid.UUID
+    user_id: uuid.UUID
+    name: str | None
+    bio: str | None
+    years_of_experience: int | None
+    created_at: datetime
+    categories: list[CategorySummary]
 
 
 @dataclass(frozen=True)
@@ -286,13 +299,42 @@ class ProService:
                 pro_id=pro_id,
                 user_id=user_id,
                 name=names.get(user_id),
-                rating_avg=rating_avg,
-                jobs_count=jobs_count,
                 years_of_experience=years,
                 verified=status is ProVerificationStatus.APPROVED,
             )
-            for pro_id, user_id, rating_avg, jobs_count, years, status in rows
+            for pro_id, user_id, years, status in rows
         }
+
+    async def visible_user_id(self, pro_id: uuid.UUID) -> uuid.UUID | None:
+        """The account behind a profile visible_profile would show; None in the same cases,
+        through the same single statement (#78)."""
+        found = await self._profiles.visible_profile(
+            pro_id, UserService.active_ids_of_role(UserRole.PRO)
+        )
+        return None if found is None else found[0]
+
+    async def visible_profile(self, pro_id: uuid.UUID) -> VisiblePro | None:
+        """The public profile any signed-in user may read (#78): only for an approved pro
+        whose account is active with the pro role. None for every other case (no profile,
+        pending, rejected, suspended, no longer a pro), decided by one statement, so the
+        answers cannot tell them apart. Then one query for the name and one for the
+        categories."""
+        found = await self._profiles.visible_profile(
+            pro_id, UserService.active_ids_of_role(UserRole.PRO)
+        )
+        if found is None:
+            return None
+        user_id, bio, years, created_at, category_ids = found
+        names = await self._users.public_names([user_id])
+        return VisiblePro(
+            pro_id=pro_id,
+            user_id=user_id,
+            name=names.get(user_id),
+            bio=bio,
+            years_of_experience=years,
+            created_at=created_at,
+            categories=await self._categories.active_summaries(category_ids),
+        )
 
     async def request_coverage(self, pro_id: uuid.UUID) -> ProCoverage | None:
         """The profile's categories and service areas when it receives requests (approved,
@@ -315,7 +357,6 @@ class ProService:
             AssignCandidate(
                 pro_id=row.id,
                 user_id=row.user_id,
-                rating_avg=row.rating_avg,
                 approved=True,
                 payouts_enabled=row.payouts_enabled,
                 in_category=True,
@@ -344,7 +385,6 @@ class ProService:
         return AssignCandidate(
             pro_id=profile.id,
             user_id=profile.user_id,
-            rating_avg=profile.rating_avg,
             approved=profile.verification_status is ProVerificationStatus.APPROVED,
             payouts_enabled=profile.payouts_enabled,
             in_category=in_category,
@@ -373,7 +413,8 @@ class ProService:
         """Profiles that may receive requests (approved, payouts enabled: context doc section
         5) in the category and in one of the areas. The caller still checks the accounts."""
         return [
-            DispatchCandidate(pro_id=row.id, user_id=row.user_id, rating_avg=row.rating_avg)
+            # The rating is the reviews module's to compute (#78): dispatch sets it.
+            DispatchCandidate(pro_id=row.id, user_id=row.user_id, rating_avg=None)
             for row in await self._profiles.dispatch_candidates(category_id, service_area_ids)
         ]
 

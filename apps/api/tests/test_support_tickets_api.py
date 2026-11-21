@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
 from app.modules.audit.types import ActorNotStaffError
+from app.modules.requests.models import ServiceRequest
 from app.modules.support.models import SupportTicket, TicketRole, TicketStatus, TicketTopic
 from app.modules.support.repository import SupportTicketRepository
 from app.observability import JsonFormatter
@@ -24,6 +25,7 @@ from tests.audit_helpers import AuditRow, audit_rows
 from tests.conftest import InMemoryRateLimiter, make_settings
 from tests.job_world import CUSTOMER_FIRST, LEAKS, JobWorld, Party, build_world, make_job
 from tests.test_chat_originals import _app, _client
+from tests.test_quote_list_api import counted_statements
 from tests.test_sentry_scrubbing import TEST_DSN, MemoryTransport, _payloads, sentry_transport
 
 __all__ = ["sentry_transport"]  # a fixture, used by name
@@ -51,6 +53,8 @@ ITEM_KEYS = {
     "role",
     "topic",
     "job_id",
+    "job_request_id",
+    "job_request_code",
     "status",
     "created_at",
 }
@@ -113,6 +117,11 @@ async def row(session: AsyncSession, ticket_id: object) -> SupportTicket:
         .where(SupportTicket.id == ticket_id)
         .execution_options(populate_existing=True)
     )
+    return (await session.scalars(statement)).one()
+
+
+async def request_code(session: AsyncSession, request_id: uuid.UUID) -> str:
+    statement = select(ServiceRequest.public_code).where(ServiceRequest.id == request_id)
     return (await session.scalars(statement)).one()
 
 
@@ -395,6 +404,8 @@ async def test_staff_list_every_ticket_newest_first_without_the_message(
         "role": "customer",
         "topic": "other",
         "job_id": str(job.id),
+        "job_request_id": str(job.request_id),
+        "job_request_code": await request_code(db_session, job.request_id),
         "status": "open",
         "created_at": oldest["created_at"],
     }
@@ -403,8 +414,57 @@ async def test_staff_list_every_ticket_newest_first_without_the_message(
         "closed",
         "María",
     )
-    # A writer without a name on file.
+    # A writer without a name on file, and a ticket about no job: no request either.
     assert (newest["user_first_name"], newest["job_id"]) == (None, None)
+    assert (newest["job_request_id"], newest["job_request_code"]) == (None, None)
+
+
+async def test_staff_see_each_ticket_s_own_job_request_in_one_statement(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld
+) -> None:
+    """#503: each ticket names its own job's request (id and code), never another's, in
+    the list and the detail alike; the list reads them in one statement however many of its
+    tickets have a job."""
+    mine = await make_job(db_session, world)
+    others = await make_job(db_session, world, pro=world.other_pro)
+    by_customer = await seed(db_session, world.customer, job_id=mine.id, age=timedelta(hours=2))
+    by_other_pro = await seed(
+        db_session, world.other_pro, role=TicketRole.PRO, job_id=others.id, age=timedelta(hours=1)
+    )
+    headers = world.agent.headers
+    expected = {
+        str(by_customer.id): (
+            str(mine.request_id),
+            await request_code(db_session, mine.request_id),
+        ),
+        str(by_other_pro.id): (
+            str(others.request_id),
+            await request_code(db_session, others.request_id),
+        ),
+    }
+    assert len({code for _, code in expected.values()}) == 2
+
+    listed = await db_client.get(STAFF, headers=headers)
+
+    assert ids(listed) == [str(by_other_pro.id), str(by_customer.id)]
+    for item in listed.json()["items"]:
+        assert (item["job_request_id"], item["job_request_code"]) == expected[item["id"]]
+    for ticket_id, request in expected.items():
+        detail = (await db_client.get(f"{STAFF}/{ticket_id}", headers=headers)).json()
+        assert (detail["job_request_id"], detail["job_request_code"]) == request
+
+    # The same statements for one ticket with a job as for three.
+    counts: list[int] = []
+    for extra in range(2):
+        if extra:
+            for _ in range(2):
+                job = await make_job(db_session, world)
+                await seed(db_session, world.customer, job_id=job.id)
+        db_session.expunge_all()  # nothing served from the identity map
+        with counted_statements(db_session) as statements:
+            assert (await db_client.get(STAFF, headers=headers)).status_code == 200
+        counts.append(len(statements))
+    assert counts[0] == counts[1]
 
 
 async def test_staff_filter_the_list_by_status(
@@ -447,6 +507,10 @@ async def test_staff_read_one_ticket_with_its_message(
     assert set(detail) == DETAIL_KEYS
     assert (detail["message"], detail["topic"], detail["role"]) == (MESSAGE, "safety", "pro")
     assert (detail["job_id"], detail["user_id"]) == (str(job.id), str(world.pro.id))
+    assert (detail["job_request_id"], detail["job_request_code"]) == (
+        str(job.request_id),
+        await request_code(db_session, job.request_id),
+    )
     assert (detail["app_version"], detail["platform"]) == (VERSION, "android")
     assert (detail["status"], detail["closed_at"]) == ("open", None)
     # Reading changes nothing and is not an audited action.

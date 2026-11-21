@@ -23,8 +23,12 @@ class EmailUnavailableError(Exception):
 
 
 class EmailSender(Protocol):
-    async def send(self, to: str, subject: str, text: str, html: str) -> None:
-        """Sends one message. Raises EmailUnavailableError when it was not accepted."""
+    async def send(
+        self, to: str, subject: str, text: str, html: str, *, idempotency_key: str | None = None
+    ) -> None:
+        """Sends one message. Raises EmailUnavailableError when it was not accepted. With
+        `idempotency_key`, the provider sends a message under that key once, however many times
+        it is asked (a retry after a lost answer, #62)."""
         ...
 
 
@@ -52,13 +56,21 @@ class ResendEmailSender:
             timeout_seconds=settings.resend_timeout_seconds,
         )
 
-    async def send(self, to: str, subject: str, text: str, html: str) -> None:
+    async def send(
+        self, to: str, subject: str, text: str, html: str, *, idempotency_key: str | None = None
+    ) -> None:
         payload = {"from": self._sender, "to": [to], "subject": subject, "text": text, "html": html}
+        # Resend keeps a key for 24 hours and answers a repeat without sending again.
+        headers = (
+            self._headers
+            if idempotency_key is None
+            else {**self._headers, "Idempotency-Key": idempotency_key}
+        )
         try:
             async with httpx.AsyncClient(
                 timeout=self._timeout, transport=self._transport
             ) as client:
-                response = await client.post(RESEND_EMAILS_URL, json=payload, headers=self._headers)
+                response = await client.post(RESEND_EMAILS_URL, json=payload, headers=headers)
         except httpx.HTTPError as error:
             # The exception text may carry the request; log only its type.
             logger.error("email_unreachable", extra={"error": type(error).__name__})

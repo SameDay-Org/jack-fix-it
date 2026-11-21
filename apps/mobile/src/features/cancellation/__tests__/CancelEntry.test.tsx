@@ -20,7 +20,14 @@ import {
 import { attachQueryClient, sessionStore } from "../../../api/session";
 import { SIGNED_OUT } from "../../auth/__tests__/helpers";
 import { customerJob } from "../../jobs/__tests__/helpers";
-import { cancelFailureOf, isRateLimited, mayCancel, refusalOf, type CancelPreview } from "../api";
+import {
+  cancelFailureOf,
+  isRateLimited,
+  mayCancel,
+  proCancelFailureOf,
+  refusalOf,
+  type CancelPreview,
+} from "../api";
 import { CancelEntry } from "../CancelEntry";
 
 jest.mock(
@@ -229,5 +236,19 @@ describe("the cancel's API helpers", () => {
     expect(cancelFailureOf(new ApiError(422, "validation_error"))).toBe("invalid");
     expect(cancelFailureOf(new ApiError(500, "internal_error"))).toBe("failed");
     expect(cancelFailureOf(new Error("boom"))).toBe("failed");
+  });
+
+  it("maps the pro's failures: a review stops the cancel, a moved or missing job is read again", () => {
+    expect(proCancelFailureOf(new SessionExpiredError())).toBeNull();
+    expect(proCancelFailureOf(new ApiError(409, "cancel_needs_review"))).toBe("review");
+    expect(proCancelFailureOf(new ApiError(409, "cancel_not_allowed"))).toBe("closed");
+    expect(proCancelFailureOf(new ApiError(409, "idempotency_key_reused"))).toBe("closed");
+    // No fee on the pro's side: should the API ever say so, the job is read again.
+    expect(proCancelFailureOf(new ApiError(409, "cancel_fee_changed"))).toBe("closed");
+    expect(proCancelFailureOf(new ApiError(404, "not_found"))).toBe("closed");
+    expect(proCancelFailureOf(new ApiError(429, "rate_limited"))).toBe("rateLimited");
+    expect(proCancelFailureOf(new NetworkError(false))).toBe("offline");
+    expect(proCancelFailureOf(new ApiError(422, "validation_error"))).toBe("invalid");
+    expect(proCancelFailureOf(new ApiError(500, "internal_error"))).toBe("failed");
   });
 });

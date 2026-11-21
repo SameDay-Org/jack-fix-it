@@ -20,6 +20,8 @@ from app.config import Settings
 from app.db import Base, get_session
 from app.main import create_app
 from app.modules.auth.models import RefreshToken
+from app.modules.chat.notify import ChatNotifier, get_chat_notifier
+from app.modules.chat.presence import PushClaim
 from app.modules.jobs.location import Position, get_job_location_store
 from app.modules.jobs.route import CachedRoute, Turn, get_job_route_cache
 from app.modules.users.models import User
@@ -100,6 +102,44 @@ class InMemoryRateLimiter:
         return RateLimitResult(allowed=self.counts[key] <= limit, retry_after_seconds=retry_after)
 
 
+class InMemoryChatPresence:
+    """Test-only ChatPresence: RedisChatPresence's rules in two dicts, on a clock the test sets
+    (`now`, seconds). tests/test_chat_push.py runs the Redis one itself."""
+
+    def __init__(self, *, presence_seconds: int = 15, cooldown_seconds: int = 60) -> None:
+        self.presence_seconds = presence_seconds
+        self.cooldown_seconds = cooldown_seconds
+        self.now = 0.0
+        self.present: dict[tuple[uuid.UUID, uuid.UUID], float] = {}
+        self.pushed: dict[tuple[uuid.UUID, uuid.UUID], float] = {}
+
+    async def seen(self, job_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        self.present[(job_id, user_id)] = self.now + self.presence_seconds
+        self.pushed.pop((job_id, user_id), None)
+
+    async def claim_push(self, job_id: uuid.UUID, user_id: uuid.UUID) -> PushClaim:
+        key = (job_id, user_id)
+        if self.present.get(key, float("-inf")) > self.now:
+            return PushClaim.PRESENT
+        if self.pushed.get(key, float("-inf")) > self.now:
+            return PushClaim.COOLDOWN
+        self.pushed[key] = self.now + self.cooldown_seconds
+        return PushClaim.PUSH
+
+
+class DroppingQueue:
+    """Test-only JobQueue that accepts every job and keeps none: the chat's pushes in tests that
+    do not look at them."""
+
+    async def enqueue_job(self, function: str, *args: object, _job_id: str | None = None) -> object:
+        return object()
+
+
+def quiet_chat_notifier() -> ChatNotifier:
+    """The chat's notifier for tests that do not look at its pushes (make_app's default)."""
+    return ChatNotifier(InMemoryChatPresence(), DroppingQueue(), enqueue_timeout_seconds=1.0)
+
+
 class InMemoryJobLocationStore:
     """Test-only JobLocationStore: RedisJobLocationStore's rules in a dict, with no expiry."""
 
@@ -159,8 +199,8 @@ class InMemoryJobRouteCache:
 
 
 def make_app(settings: Settings) -> FastAPI:
-    """create_app with an in-memory rate limiter, location store and route cache: the
-    lifespan, which creates Redis, never runs."""
+    """create_app with an in-memory rate limiter, location store, route cache and chat
+    notifier: the lifespan, which creates Redis, never runs."""
     app = create_app(settings)
     limiter = InMemoryRateLimiter()
     app.dependency_overrides[get_rate_limiter] = lambda: limiter
@@ -168,6 +208,10 @@ def make_app(settings: Settings) -> FastAPI:
     app.dependency_overrides[get_job_location_store] = lambda: locations
     routes = InMemoryJobRouteCache()
     app.dependency_overrides[get_job_route_cache] = lambda: routes
+    # The chat's presence and push queue (#73) are Redis: tests that look at them install
+    # their own (tests/test_chat_push.py).
+    notifier = quiet_chat_notifier()
+    app.dependency_overrides[get_chat_notifier] = lambda: notifier
     return app
 
 

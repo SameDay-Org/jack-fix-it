@@ -1,6 +1,7 @@
 """A pro's earning jobs, read through the subqueries their modules expose (ADR 0003): the jobs'
-own facts (jobs), the transfer rows' state (payments; our rows, never a live Stripe call) and
-the disputes an admin resolved with a release (disputes, #76).
+own facts (jobs), the transfer rows' state (payments; our rows, never a live Stripe call), the
+disputes an admin resolved with a release (disputes, #76) and the succeeded tips with their own
+transfer's state (tips, #273 PR A2).
 """
 
 import uuid
@@ -15,6 +16,7 @@ from app.modules.disputes.service import released_dispute_jobs
 from app.modules.earnings.schemas import EarningStatus
 from app.modules.jobs.service import JobStatus, job_earning_facts
 from app.modules.payments.transfer_reader import transfer_payout_facts
+from app.modules.tips.earnings_reader import tip_payout_facts
 
 # The jobs whose money the pro earned or may still earn: the work is done. Refunded and
 # cancelled jobs pay nothing.
@@ -32,6 +34,7 @@ class EarningRow:
     request_id: uuid.UUID
     status: EarningStatus
     amount_cents: int
+    tip_cents: int
     completed_at: datetime
     paid_at: datetime | None
 
@@ -42,6 +45,8 @@ class _Sources:
     transfers: Subquery
     # Disputes resolved with a release, full or partial (#76): job_id, pro_release_cents.
     released: Subquery
+    # Succeeded tips (#273 PR A2): job_id, tip_cents, tip_made, tip_reversed.
+    tips: Subquery
 
     def status(self) -> ColumnElement[str]:
         """The pro's status of a job, in order: an open dispute holds it whatever else; a job
@@ -72,6 +77,17 @@ class _Sources:
             self.jobs.c.pro_payout_cents,
         )
 
+    def tip_status(self) -> ColumnElement[str]:
+        """A tip's status, by its own transfer: reversed by Stripe, or held for staff, is on
+        hold (staff look), made is paid, anything else (waiting for the pro's payout setup or
+        approval included) is on its way."""
+        return case(
+            (self.tips.c.tip_reversed.is_(True), EarningStatus.ON_HOLD.value),
+            (self.tips.c.tip_held_for_staff.is_(True), EarningStatus.ON_HOLD.value),
+            (self.tips.c.tip_made.is_(True), EarningStatus.PAID.value),
+            else_=EarningStatus.ON_THE_WAY.value,
+        )
+
     def of_pro(self, pro_id: uuid.UUID) -> tuple[Any, ...]:
         return (
             self.jobs.c.pro_id == pro_id,
@@ -87,13 +103,17 @@ def _sources() -> _Sources:
         jobs=job_earning_facts(),
         transfers=transfer_payout_facts(),
         released=released_dispute_jobs(),
+        tips=tip_payout_facts(),
     )
 
 
 def _joined(s: _Sources) -> Any:
-    """The jobs, with their transfer row and their released dispute when they have one."""
-    return s.jobs.outerjoin(s.transfers, s.transfers.c.job_id == s.jobs.c.job_id).outerjoin(
-        s.released, s.released.c.job_id == s.jobs.c.job_id
+    """The jobs, with their transfer row, their released dispute and their succeeded tip
+    when they have one (at most one of each per job)."""
+    return (
+        s.jobs.outerjoin(s.transfers, s.transfers.c.job_id == s.jobs.c.job_id)
+        .outerjoin(s.released, s.released.c.job_id == s.jobs.c.job_id)
+        .outerjoin(s.tips, s.tips.c.job_id == s.jobs.c.job_id)
     )
 
 
@@ -102,17 +122,28 @@ class EarningsRepository:
         self._session = session
 
     async def totals(self, pro_id: uuid.UUID) -> dict[EarningStatus, int]:
-        """The sum of each status over all the pro's earning jobs, in one statement."""
+        """The sum of each status over all the pro's earning jobs and, by its own transfer,
+        their succeeded tips: two grouped statements, added up."""
         s = _sources()
-        statement = (
+        jobs = (
             select(s.status().label("status"), func.sum(s.amount()).label("cents"))
             .select_from(_joined(s))
             .where(*s.of_pro(pro_id))
             # By the output column's name: the CASE's values are bound parameters.
             .group_by(literal_column("status"))
         )
-        rows = await self._session.execute(statement)
-        return {EarningStatus(row.status): int(row.cents) for row in rows}
+        tips = (
+            select(s.tip_status().label("status"), func.sum(s.tips.c.tip_cents).label("cents"))
+            .select_from(_joined(s))
+            .where(*s.of_pro(pro_id), s.tips.c.job_id.is_not(None))
+            .group_by(literal_column("status"))
+        )
+        totals: dict[EarningStatus, int] = {}
+        for statement in (jobs, tips):
+            for row in await self._session.execute(statement):
+                status = EarningStatus(row.status)
+                totals[status] = totals.get(status, 0) + int(row.cents)
+        return totals
 
     async def page(
         self, pro_id: uuid.UUID, limit: int, before: tuple[datetime, uuid.UUID] | None
@@ -126,6 +157,7 @@ class EarningsRepository:
                 s.jobs.c.request_id,
                 s.status().label("status"),
                 s.amount().label("amount_cents"),
+                func.coalesce(s.tips.c.tip_cents, 0).label("tip_cents"),
                 s.jobs.c.completed_at,
                 s.jobs.c.paid_out_at,
             )
@@ -148,6 +180,7 @@ class EarningsRepository:
                 request_id=row.request_id,
                 status=EarningStatus(row.status),
                 amount_cents=row.amount_cents,
+                tip_cents=row.tip_cents,
                 completed_at=row.completed_at,
                 paid_at=row.paid_out_at if row.status == EarningStatus.PAID.value else None,
             )

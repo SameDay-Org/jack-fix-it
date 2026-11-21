@@ -1,7 +1,8 @@
 """Phone verification by SMS code (D4.3, #26): a signed-in user proves they own a number.
 
 - send: checks the number's country code and answers 202. A number another account has
-  verified gets the same 202 but no SMS. Twilio is called only after the response is sent
+  verified gets the same 202 but no SMS. The SMS is Twilio Verify's own text, in the user's
+  language (`Locale`, #92). Twilio is called only after the response is sent
   (deliver_code, a background task), so neither the answer, its timing, nor a Twilio error can
   tell whether a number is taken. Twilio failures on send are logged, not returned.
 - verify: asks Twilio whether the code is right first. Only then is the number stored, so a
@@ -13,6 +14,7 @@ Logs carry the user id only: never the number or the code.
 import logging
 import uuid
 from datetime import UTC, datetime
+from typing import Final, get_args
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,9 +27,12 @@ from app.modules.auth.errors import (
 )
 from app.modules.users.errors import PhoneUnavailableError
 from app.modules.users.service import UserService
-from app.modules.users.types import UserAccount
+from app.modules.users.types import Locale, UserAccount
 
 logger = logging.getLogger(__name__)
+
+# The app's languages, which Twilio Verify also writes: the SMS goes out in the user's (#92).
+SMS_LOCALES: Final = frozenset(get_args(Locale))
 
 
 class PhoneVerificationService:
@@ -51,11 +56,12 @@ class PhoneVerificationService:
             return False
         return True
 
-    async def deliver_code(self, user_id: uuid.UUID, phone: str) -> None:
-        """Asks Twilio to text the code. Runs after the response, so it never raises."""
+    async def deliver_code(self, user_id: uuid.UUID, phone: str, locale: str) -> None:
+        """Asks Twilio to text the code in the user's language (#92; any other: the number's
+        default). Runs after the response, so it never raises."""
         extra = {"user_id": str(user_id)}
         try:
-            await self._verifier.start(phone)
+            await self._verifier.start(phone, locale if locale in SMS_LOCALES else None)
         except sms_verify.InvalidPhoneError:
             logger.info("phone_code_not_sent", extra={**extra, "reason": "invalid_number"})
             return
