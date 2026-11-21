@@ -15,6 +15,8 @@ vi.mock("next/navigation", async () => {
     redirect: (url: string) => {
       throw new Signal(url);
     },
+    // The action bar's forms read the router (to read the card again after a lost answer).
+    useRouter: () => ({ refresh: () => {} }),
     // A missing record answers 404 (not-found.tsx, #494).
     notFound: () => {
       throw new Error("NEXT_NOT_FOUND");
@@ -65,9 +67,10 @@ function text(page: string): string {
   return page.replaceAll(/<[^>]+>/g, " ").replaceAll(/\s+/g, " ");
 }
 
-/** The labels of the page's buttons, in order. */
+/** The labels of the claim control's buttons, in order (the action bar's group left out). */
 function buttons(page: string): string[] {
-  return [...page.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map(([, label]) => label ?? "");
+  const claim = page.replace(/<div role="group" aria-label="[^"]*"[\s\S]*?<\/div>/, "");
+  return [...claim.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map(([, label]) => label ?? "");
 }
 
 /** The href of every link that is not a page of the panel. */

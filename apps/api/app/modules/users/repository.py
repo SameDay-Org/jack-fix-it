@@ -14,13 +14,15 @@ class UserRepository:
         self._session = session
 
     async def active_ids_with_role(
-        self, user_ids: Collection[uuid.UUID], role: UserRole
+        self, user_ids: Collection[uuid.UUID], role: UserRole, *, lock: bool = False
     ) -> set[uuid.UUID]:
         if not user_ids:
             return set()
         statement = select(User.id).where(
             User.id.in_(user_ids), User.role == role, User.status == UserStatus.ACTIVE
         )
+        if lock:
+            statement = statement.order_by(User.id).with_for_update(read=True)
         return set((await self._session.scalars(statement)).all())
 
     async def ids_with_role(

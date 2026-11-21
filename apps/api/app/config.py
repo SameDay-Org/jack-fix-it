@@ -556,6 +556,8 @@ class Settings(BaseSettings):
     ops_followup_max_days: int = Field(default=30, gt=0)
     ops_action_limit: int = Field(default=60, gt=0)
     ops_action_window_seconds: int = Field(default=60, gt=0)
+    # The most pros a request's eligible list names for a manual assignment (#82).
+    ops_eligible_pros_limit: int = Field(default=50, gt=0)
     # The IANA time zone "scheduled today" is read in, as Postgres names it.
     business_time_zone: str = Field(
         default="America/New_York", pattern=r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$"

@@ -48,6 +48,20 @@ class DispatchCandidate:
 
 
 @dataclass(frozen=True)
+class AssignCandidate:
+    """A pro as staff weigh them for one request (#82): what dispatch asks of a profile, each
+    answer on its own, so a refusal can say which one failed."""
+
+    pro_id: uuid.UUID
+    user_id: uuid.UUID
+    rating_avg: Decimal | None  # NULL until the first review
+    approved: bool
+    payouts_enabled: bool
+    in_category: bool
+    in_area: bool
+
+
+@dataclass(frozen=True)
 class ProCoverage:
     """What a pro that receives requests covers: its categories and service areas (#478)."""
 
@@ -333,6 +347,68 @@ class ProService:
             tuple(await self._profiles.category_ids(pro_id)),
             tuple(await self._profiles.service_area_ids(pro_id)),
         )
+
+    async def assign_candidates(
+        self, category_id: uuid.UUID, service_area_ids: Collection[uuid.UUID]
+    ) -> list[AssignCandidate]:
+        """The approved profiles in the category and in one of the areas, payouts enabled or
+        not (#82): the pros staff may weigh for a request. The caller still checks the
+        accounts."""
+        return [
+            AssignCandidate(
+                pro_id=row.id,
+                user_id=row.user_id,
+                rating_avg=row.rating_avg,
+                approved=True,
+                payouts_enabled=row.payouts_enabled,
+                in_category=True,
+                in_area=True,
+            )
+            for row in await self._profiles.approved_in(category_id, service_area_ids)
+        ]
+
+    async def assign_candidate(
+        self,
+        pro_id: uuid.UUID,
+        category_id: uuid.UUID,
+        service_area_ids: Collection[uuid.UUID],
+        *,
+        lock: bool = False,
+    ) -> AssignCandidate | None:
+        """One profile against a request's category and areas (#82): each condition of
+        receiving it, answered apart. None when no profile has this id. The caller still
+        checks the account. `lock` (#511): read FOR SHARE, held until the caller's
+        transaction ends (the profile, then its category and area rows): a revocation
+        committed first is read, one made after waits for the caller's commit."""
+        found = await self._profiles.with_coverage(pro_id, category_id, service_area_ids, lock=lock)
+        if found is None:
+            return None
+        profile, in_category, in_area = found
+        return AssignCandidate(
+            pro_id=profile.id,
+            user_id=profile.user_id,
+            rating_avg=profile.rating_avg,
+            approved=profile.verification_status is ProVerificationStatus.APPROVED,
+            payouts_enabled=profile.payouts_enabled,
+            in_category=in_category,
+            in_area=in_area,
+        )
+
+    async def categories_of(
+        self, pro_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, list[CategorySummary]]:
+        """Each of these profiles' active categories, by slug; a profile with none is left
+        out. Two queries, whatever the count."""
+        listed = await self._profiles.category_ids_of(pro_ids)
+        wanted = {category_id for ids in listed.values() for category_id in ids}
+        summaries = {item.id: item for item in await self._categories.active_summaries(wanted)}
+        return {
+            pro_id: sorted(
+                (summaries[category_id] for category_id in ids if category_id in summaries),
+                key=lambda summary: summary.slug,
+            )
+            for pro_id, ids in listed.items()
+        }
 
     async def dispatch_candidates(
         self, category_id: uuid.UUID, service_area_ids: Collection[uuid.UUID]

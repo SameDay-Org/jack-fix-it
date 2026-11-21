@@ -49,7 +49,7 @@ select = ["E", "W", "F", "I", "B", "UP", "N", "S", "ASYNC", "BLE", "SIM", "PT", 
 "scripts/**" = ["T20"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["app", "tests", "scripts"]
+known-first-party = ["app", "tests", "scripts", "demo_seed", "seed_demo"]
 known-third-party = ["alembic"]
 
 [tool.mypy]
@@ -57,6 +57,9 @@ python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 exclude = ['^\.venv/']
+# The demo scripts (scripts/demo at the repo root) run in this environment, and
+# tests/test_demo_seed.py imports them.
+mypy_path = "$MYPY_CONFIG_FILE_DIR/../../scripts/demo"
 
 [[tool.mypy.overrides]]
 module = ["asyncpg.*"]
