@@ -2,6 +2,10 @@
 
 A session is a family of refresh tokens: each refresh spends the presented token and issues the
 next one. A spent token presented again means it leaked, so its whole family is revoked.
+
+Every access token names its family (`sid`), and a request is refused once that family is
+revoked: logout, reuse detection and a password reset end the session's access tokens at the
+next request too, not when they expire (#161).
 """
 
 import asyncio
@@ -214,7 +218,7 @@ class AuthService:
         replacement = await self._add_refresh_token(user, token.family_id, new_refresh_token, now)
         token.revoked_at = now
         token.replaced_by_id = replacement.id
-        return await self._issue_tokens(user, new_refresh_token, now)
+        return await self._issue_tokens(user, token.family_id, new_refresh_token, now)
 
     async def _grace_replay(
         self, token: RefreshToken, presented: str, now: datetime
@@ -243,7 +247,7 @@ class AuthService:
             "auth_refresh_grace_replay",
             extra={"user_id": str(token.user_id), "family_id": str(token.family_id)},
         )
-        return await self._issue_tokens(user, raw, now)
+        return await self._issue_tokens(user, token.family_id, raw, now)
 
     async def logout(self, refresh_token: str) -> None:
         """Revokes the session of a known token. An unknown token is ignored, without a sign."""
@@ -257,8 +261,9 @@ class AuthService:
         """Issues an access token and the first refresh token of a new family, then commits."""
         now = datetime.now(UTC)
         refresh_token = security.new_refresh_token()
-        await self._add_refresh_token(user, uuid.uuid4(), refresh_token, now)
-        return await self._issue_tokens(user, refresh_token, now)
+        family_id = uuid.uuid4()
+        await self._add_refresh_token(user, family_id, refresh_token, now)
+        return await self._issue_tokens(user, family_id, refresh_token, now)
 
     async def _add_refresh_token(
         self, user: UserAccount, family_id: uuid.UUID, refresh_token: str, now: datetime
@@ -273,16 +278,17 @@ class AuthService:
         )
 
     async def _issue_tokens(
-        self, user: UserAccount, refresh_token: str, now: datetime
+        self, user: UserAccount, family_id: uuid.UUID, refresh_token: str, now: datetime
     ) -> AuthResponse:
-        """Prepares the photo, creates the access token, commits the refresh token rows and
-        builds the response. The photo comes first: it is the step that can fail, and a
+        """Prepares the photo, creates the family's access token, commits the refresh token rows
+        and builds the response. The photo comes first: it is the step that can fail, and a
         failure must leave the rotation uncommitted, with the presented token unspent (#290).
         """
         photo = self.prepare_photo(user)
         access_token = security.create_access_token(
             user_id=user.id,
             role=user.role,
+            session_id=family_id,
             secret=self._config.jwt_secret,
             ttl_seconds=self._config.access_token_ttl_seconds,
             now=now,
@@ -302,9 +308,20 @@ class AuthService:
 
 
 async def authenticate_access_token(
-    token: str, *, users: UserService, config: AuthConfig
+    token: str, *, session: AsyncSession, users: UserService, config: AuthConfig
 ) -> UserAccount:
-    """The active user the access token belongs to. Raises InvalidTokenError otherwise."""
+    """The active user the access token belongs to, while its session is open. Raises
+    InvalidTokenError otherwise.
+
+    Both are read on every request, never cached, so nothing waits for the token to expire:
+    - the account: suspended or gone is refused, and the role is the account's current one
+      (a demoted admin's token still carries the old role, which nothing reads);
+    - the session, `sid` (#161): a revoked family is refused. A token without `sid` was issued
+      before #161 and names no session: it works until it expires, at most
+      ACCESS_TOKEN_TTL_SECONDS after the deploy, so the deploy logs nobody out.
+    Both are database reads, no Redis: with the database down the request fails, it never
+    passes (closed for every route).
+    """
     try:
         claims = security.decode_access_token(token, secret=config.jwt_secret)
     except security.InvalidAccessTokenError:
@@ -312,4 +329,8 @@ async def authenticate_access_token(
     user = await users.get_by_id(claims.user_id)
     if user is None or user.status is not UserStatus.ACTIVE:
         raise InvalidTokenError
+    if claims.session_id is not None:
+        sessions = RefreshTokenRepository(session)
+        if not await sessions.family_is_live(claims.session_id, claims.user_id):
+            raise InvalidTokenError
     return user

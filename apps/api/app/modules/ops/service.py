@@ -38,12 +38,13 @@ from app.modules.audit.types import (
     AuditEntityType,
     ReaderNotStaffError,
 )
+from app.modules.cancellations.service import pro_cancelled_job_ids
 from app.modules.categories.schemas import CategorySummary
 from app.modules.categories.service import CategoryService
 from app.modules.dispatch.opportunities import sign_safe_media
 from app.modules.jobs.service import JobStaffReader, JobStatus, StaffJob
 from app.modules.jobs.transitions import CUSTOMER_STATUS
-from app.modules.ops.actions import OpsRecords
+from app.modules.ops.actions import OpsRecords, status_changes
 from app.modules.ops.errors import (
     InvalidQueueQueryError,
     QueueRequestNotFoundError,
@@ -98,6 +99,8 @@ class OpsConfig:
     quote_waiting_minutes: int
     time_zone: str
     url_ttl_seconds: int
+    # How long a request whose pro cancelled its job stays under problems (#69).
+    pro_cancel_attention_hours: int
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "OpsConfig":
@@ -108,6 +111,7 @@ class OpsConfig:
             quote_waiting_minutes=settings.ops_quote_waiting_minutes,
             time_zone=settings.business_time_zone,
             url_ttl_seconds=settings.download_url_ttl_seconds,
+            pro_cancel_attention_hours=settings.ops_pro_cancel_attention_hours,
         )
 
 
@@ -137,6 +141,9 @@ class OpsQueueService:
             quote_starts=QuoteReader.starts(),
             pending_quotes=QuoteReader.pending_by_request(),
             open_ticket_jobs=SupportTicketService.open_job_ids(),
+            pro_cancelled_jobs=pro_cancelled_job_ids(
+                timedelta(hours=config.pro_cancel_attention_hours)
+            ),
             zips=AddressService.zips(),
             problem_job_statuses=(JobStatus.DISPUTED,),
             active_job_statuses=_VISIT_AHEAD,
@@ -207,6 +214,8 @@ class OpsQueueService:
         card.actions_allowed = (
             holder is None or holder.id == viewer.id or viewer.role is UserRole.ADMIN
         )
+        card.info_requested_at = row.info_requested_at
+        card.allowed_status_changes = list(status_changes(row.status))
         # Committed before the answer: an audit write that fails answers 500, so no contact
         # is shown unaudited.
         try:

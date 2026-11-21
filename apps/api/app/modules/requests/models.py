@@ -99,6 +99,10 @@ class ServiceRequest(IdTimestampsMixin, Base):
     assigned_agent_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"), index=True)
     next_action: Mapped[str | None] = mapped_column(Text)
     first_contact_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The BDC asked the customer for more information (#82): the request waits in reviewing
+    # and the re-dispatch (#478) leaves it alone until staff resume it, change its status or
+    # assign a pro, which clear it.
+    info_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_contact_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     origin: Mapped[RequestOrigin] = mapped_column(str_enum(RequestOrigin, "request_origin"))
     utm: Mapped[dict[str, str] | None] = mapped_column(JSONB)

@@ -16,6 +16,7 @@ from typing import Any, Final
 
 import httpx
 import pytest
+from fastapi import FastAPI
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -27,7 +28,7 @@ from app.modules.requests.models import RequestOrigin, ServiceRequest
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
 from tests.conftest import Committed
-from tests.job_world import JobWorld, Party, headers_for
+from tests.job_world import JobWorld, Party, headers_for, record_pushes
 from tests.test_ops_actions_api import FOLLOWUPS, NOW, Clock, _followup, clock, staff
 from tests.test_ops_queue_api import BASE, FORBIDDEN, HELD, make_request, storage, world
 
@@ -209,6 +210,60 @@ async def test_an_action_on_another_agent_s_held_request(
     else:
         assert response.status_code in (200, 201), response.text
         assert team.audited != []
+
+
+async def request_status(team: Staff) -> tuple[Any, Any]:
+    async with team.sessions() as session:
+        row = (
+            await session.execute(
+                select(ServiceRequest.status, ServiceRequest.info_requested_at).where(
+                    ServiceRequest.id == team.request_id
+                )
+            )
+        ).one()
+    return row.status, row.info_requested_at
+
+
+@pytest.mark.parametrize(
+    ("action", "body", "as_admin"),
+    [
+        ("more-info", {"question": "Which wall is the leak on?"}, 200),
+        ("resume", None, 200),
+        ("status", {"to": "reviewing", "reason": "Needs a closer look"}, 200),
+        # Past the holder rule: the request has no category yet.
+        ("assign", {"pro_id": str(uuid.uuid4())}, 409),
+    ],
+)
+@pytest.mark.parametrize("demoted", [True, False], ids=["demoted", "still_admin"])
+async def test_a_part_2_action_on_another_agent_s_held_request(
+    app: FastAPI,
+    team: Staff,
+    monkeypatch: pytest.MonkeyPatch,
+    demoted: bool,
+    action: str,
+    body: dict[str, str] | None,
+    as_admin: int,
+) -> None:
+    """#82 part 2's actions take the same check: an admin demoted to agent after
+    authentication is an agent, and another agent holds the request, so nothing is written."""
+    pushes = record_pushes(app)  # an assignment's route takes the queue
+    happened = revoke_on_check(team, monkeypatch, team.admin, {"role": "agent"}) if demoted else []
+    before = await request_status(team)
+
+    response = await team.client.post(
+        f"{BASE}/{team.request_id}/{action}", json=body, headers=team.admin.headers
+    )
+
+    if demoted:
+        assert happened == ["committed"]
+        assert (response.status_code, response.json()) == (409, HELD)
+        assert await notes_of(team) == []
+        assert await request_status(team) == before
+        assert team.audited == []
+        assert pushes.jobs == {}
+    else:
+        assert response.status_code == as_admin, response.text
+        assert response.json() != HELD
 
 
 @pytest.mark.parametrize("demoted", [True, False], ids=["demoted", "still_admin"])

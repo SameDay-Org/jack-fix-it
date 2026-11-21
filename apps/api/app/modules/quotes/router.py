@@ -16,6 +16,7 @@ from app.modules.quotes.schemas import (
     QuoteOut,
 )
 from app.modules.quotes.service import QuoteService
+from app.modules.reviews.service import ReviewConfig
 from app.queue import JobQueue, get_job_queue
 
 router = APIRouter(prefix="/pros/me/opportunities", tags=["pros"])
@@ -32,7 +33,12 @@ def get_quote_service(
     queue: Annotated[JobQueue, Depends(get_job_queue)],
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> QuoteService:
-    return QuoteService(session, queue, settings.job_enqueue_timeout_seconds)
+    return QuoteService(
+        session,
+        queue,
+        settings.job_enqueue_timeout_seconds,
+        ReviewConfig.from_settings(settings).publish_after,
+    )
 
 
 @router.post(

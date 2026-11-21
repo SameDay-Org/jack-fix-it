@@ -14,13 +14,15 @@ class UserRepository:
         self._session = session
 
     async def active_ids_with_role(
-        self, user_ids: Collection[uuid.UUID], role: UserRole
+        self, user_ids: Collection[uuid.UUID], role: UserRole, *, lock: bool = False
     ) -> set[uuid.UUID]:
         if not user_ids:
             return set()
         statement = select(User.id).where(
             User.id.in_(user_ids), User.role == role, User.status == UserStatus.ACTIVE
         )
+        if lock:
+            statement = statement.order_by(User.id).with_for_update(read=True)
         return set((await self._session.scalars(statement)).all())
 
     async def ids_with_role(
@@ -36,6 +38,11 @@ class UserRepository:
         """The upload keys among `keys` that a user holds as their ID photo, as a statement
         (the uploads sweep of unreferenced uploads, #191)."""
         return select(User.photo_key).where(User.photo_key.in_(keys))
+
+    @staticmethod
+    def active_ids_of_role(role: UserRole) -> Select[uuid.UUID]:
+        """The ids of the active accounts with `role`, as a statement."""
+        return select(User.id).where(User.role == role, User.status == UserStatus.ACTIVE)
 
     async def get_by_id(self, user_id: uuid.UUID) -> User | None:
         return await self._session.get(User, user_id)
