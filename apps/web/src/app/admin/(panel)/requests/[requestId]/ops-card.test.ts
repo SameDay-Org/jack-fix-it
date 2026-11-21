@@ -59,12 +59,13 @@ function api(
   body: ReturnType<typeof card>,
   role: "agent" | "admin" = "agent",
   locale = "en",
+  categories: unknown = CATEGORIES,
 ): void {
   fetchMock.mockImplementation(
     routeFetch({
       "/v1/auth/me": () => me(role, locale),
       [CARD]: () => Response.json(body),
-      "/v1/categories": () => Response.json(CATEGORIES),
+      "/v1/categories": () => Response.json(categories),
       "/v1/admin/staff": () => Response.json(STAFF),
     }),
   );
@@ -130,7 +131,15 @@ describe("the request card's actions", () => {
   });
 
   it("names who holds the request instead of the bar when the API says the reader may not act", async () => {
-    api(card({ status: "received", actions_allowed: false, assigned_agent: OTHER }));
+    // No answers to name either (#546): nothing needs the categories.
+    api(
+      card({
+        status: "received",
+        actions_allowed: false,
+        assigned_agent: OTHER,
+        intake_answers: {},
+      }),
+    );
     const html = decoded(await markup());
     expect(bar(html)).toEqual([]);
     expect(html).toContain("Sam holds this request: take it to act on it.");
@@ -140,7 +149,7 @@ describe("the request card's actions", () => {
   it.each(["finding_pro", "quote_ready", "accepted", "expired", "cancelled"] as const)(
     "offers no Classify once the request is %s (the API would refuse it)",
     async (status) => {
-      api(card({ status, actions_allowed: true }));
+      api(card({ status, actions_allowed: true, intake_answers: {} }));
       expect(bar(await markup())).not.toContain("Classify");
       expect(asked("/v1/categories")).toBe(0);
     },
@@ -272,5 +281,136 @@ describe("the request card's follow-ups", () => {
     expect(html).toContain("Every follow-up on this request, whoever it is assigned to.");
     expect(html).toContain("No follow-ups on this request.");
     expect(html).not.toContain("assigned to you");
+  });
+});
+
+describe("the request's answers (#546)", () => {
+  const QUESTIONS = [
+    {
+      key: "leak_location",
+      type: "text",
+      required: true,
+      labels: { en: "Where is the leak?", es: "¿Dónde está la fuga?" },
+      max_length: 200,
+    },
+    {
+      key: "urgent",
+      type: "boolean",
+      required: false,
+      labels: { en: "Is it urgent?", es: "¿Es urgente?" },
+    },
+    {
+      key: "rooms",
+      type: "multi_choice",
+      required: false,
+      labels: { en: "Which rooms?", es: "¿Qué cuartos?" },
+      min_selected: 0,
+      options: [
+        { value: "kitchen", labels: { en: "Kitchen", es: "Cocina" } },
+        { value: "bathroom", labels: { en: "Bathroom", es: "Baño" } },
+      ],
+    },
+  ];
+  const ANSWERS = {
+    leak_location: "Under the sink",
+    urgent: true,
+    rooms: ["kitchen", "attic"],
+    retired_key: "Kept as typed",
+  };
+
+  /** The card's facts as (term, value) pairs. */
+  function facts(html: string): [string, string][] {
+    return [...html.matchAll(/<dt[^>]*>([^<]*)<\/dt><dd[^>]*>([^<]*)<\/dd>/g)].map(
+      ([, term, value]) => [term!, value!],
+    );
+  }
+
+  it.each([
+    [
+      "en",
+      [
+        ["Where is the leak?", "Under the sink"],
+        ["Is it urgent?", "Yes"],
+        ["Which rooms?", "Kitchen, attic"],
+        ["retired_key", "Kept as typed"],
+      ],
+    ],
+    [
+      "es",
+      [
+        ["¿Dónde está la fuga?", "Under the sink"],
+        ["¿Es urgente?", "Sí"],
+        ["¿Qué cuartos?", "Cocina, attic"],
+        ["retired_key", "Kept as typed"],
+      ],
+    ],
+  ])("are in the category's words, in the reader's language (%s)", async (locale, expected) => {
+    const categories = [{ ...CATEGORIES[0], intake_questions: QUESTIONS }];
+    // Past Classify (quote_ready): the categories are read for the answers alone.
+    api(card({ status: "quote_ready", intake_answers: ANSWERS }), "agent", locale, categories);
+
+    const pairs = facts(decoded(await markup()));
+
+    // A key or an option the category no longer has stays as it is stored.
+    for (const pair of expected) expect(pairs).toContainEqual(pair);
+  });
+
+  it("stay as stored when the catalog cannot be read", async () => {
+    api(card({ intake_answers: ANSWERS }));
+    fetchMock.mockImplementation(
+      routeFetch({
+        "/v1/auth/me": () => me("agent", "en"),
+        [CARD]: () => Response.json(card({ intake_answers: ANSWERS })),
+        "/v1/categories": () => new Response(null, { status: 503 }),
+      }),
+    );
+
+    const pairs = facts(decoded(await markup()));
+
+    expect(pairs).toContainEqual(["leak_location", "Under the sink"]);
+    expect(pairs).toContainEqual(["urgent", "true"]);
+    expect(pairs).toContainEqual(["rooms", "kitchen, attic"]);
+  });
+
+  it("are in the request's own category's words, never another's with the same key", async () => {
+    // As in the demo seed: several categories ask "jobs", each with its own words and options.
+    const jobs = (en: string, options: [string, string][]) => [
+      {
+        key: "jobs",
+        type: "multi_choice",
+        required: true,
+        labels: { en, es: en },
+        min_selected: 1,
+        options: options.map(([value, label]) => ({ value, labels: { en: label, es: label } })),
+      },
+    ];
+    const OWN_ID = "c0a7e901-1111-4222-8333-944455556699";
+    const own = { id: OWN_ID, slug: "handyman-own", names: { en: "Handyman", es: "Manitas" } };
+    const categories = [
+      {
+        ...CATEGORIES[0],
+        intake_questions: jobs("Which painting jobs?", [["mounting", "Murals"]]),
+      },
+      {
+        id: "c0a7e901-1111-4222-8333-944455556698",
+        slug: "lawn",
+        names: { en: "Lawn", es: "Césped" },
+        intake_questions: jobs("Which yard jobs?", [["mounting", "Mowing"]]),
+      },
+      { ...own, intake_questions: jobs("Which handyman jobs?", [["mounting", "TV mounting"]]) },
+    ];
+    api(
+      card({ status: "quote_ready", category: own, intake_answers: { jobs: ["mounting"] } }),
+      "agent",
+      "en",
+      categories,
+    );
+
+    const pairs = facts(decoded(await markup()));
+
+    // The catalog's third category, the request's own: not the first, nor another asking "jobs".
+    expect(pairs).toContainEqual(["Which handyman jobs?", "TV mounting"]);
+    expect(pairs.map(([term]) => term)).not.toContain("Which painting jobs?");
+    expect(pairs.map(([term]) => term)).not.toContain("Which yard jobs?");
   });
 });
