@@ -530,3 +530,53 @@ async def test_card_of_an_intent_without_a_charge_is_none() -> None:
     wrapper, _ = client((200, intent_body(status="requires_payment_method", latest_charge=None)))
 
     assert await wrapper.card_of(INTENT) is None
+
+
+def tip_charged(charge: object) -> dict[str, Any]:
+    """A succeeded tip intent (#273 PR A2) with `charge` as its latest charge."""
+    metadata = {"kind": "tip", "tip_id": "tip-1", "job_id": "job-1", "attempt": "1"}
+    return intent_body(status="succeeded", latest_charge=charge, metadata=metadata)
+
+
+def a_charge(**fields: Any) -> dict[str, Any]:
+    return {
+        "id": "ch_test273",
+        "object": "charge",
+        "refunded": False,
+        "amount_refunded": 0,
+        "disputed": False,
+        **fields,
+    }
+
+
+@pytest.mark.parametrize(
+    ("charge", "expected"),
+    [
+        (a_charge(), ("ch_test273", False, False)),
+        (a_charge(amount_refunded=1), ("ch_test273", True, False)),
+        (a_charge(refunded=True, amount_refunded=10_000), ("ch_test273", True, False)),
+        (a_charge(disputed=True), ("ch_test273", False, True)),
+        # Not expanded, or none: no charge to pay from.
+        ("ch_test273", (None, False, False)),
+        (None, (None, False, False)),
+    ],
+)
+async def test_tip_charge_reads_the_expanded_charge_and_the_intent(
+    charge: object, expected: tuple[str | None, bool, bool]
+) -> None:
+    wrapper, http = client((200, tip_charged(charge)))
+
+    found = await wrapper.tip_charge(INTENT)
+
+    assert (found.charge_id, found.refunded, found.disputed) == expected
+    assert (found.intent.kind, found.intent.tip_id, found.intent.attempt, found.intent.status) == (
+        "tip",
+        "tip-1",
+        "1",
+        "succeeded",
+    )
+    [(method, url, _, _)] = http.sent
+    assert (method, url) == (
+        "get",
+        f"https://api.stripe.com/v1/payment_intents/{INTENT}?expand[0]=latest_charge",
+    )

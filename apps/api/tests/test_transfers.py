@@ -169,6 +169,8 @@ class FakeStripeTransfers:
                     job_id=dict(metadata).get("job_id"),
                     reversed=False,
                     request_id="req_fake_transfer",
+                    kind=dict(metadata).get("kind"),
+                    tip_id=dict(metadata).get("tip_id"),
                 ),
                 transfer_group,
             )
@@ -1290,7 +1292,9 @@ async def test_transfer_reversed_marks_the_row_once(
     await service(db_session, stripe, clock).release(job.id)
     made = stripe.by_key[f"transfer:{job.id}"]
     handler = handler_for("transfer.reversed")
-    assert handler is transfer_reversed
+    # Routed by the transfer's metadata kind (#273 PR A2): a job's goes to its own handler.
+    assert handler is not None
+    assert handler.__name__ == transfer_reversed.__name__
 
     await handler(db_session, reversed_event(made), AfterCommit())
     await handler(db_session, reversed_event(made), AfterCommit())  # a repeat: nothing
