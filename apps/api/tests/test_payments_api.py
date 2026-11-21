@@ -47,7 +47,13 @@ from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.money import split_amount
 from app.observability import JsonFormatter
-from tests.conftest import _rolled_back_session, make_app, make_settings
+from app.rate_limit import get_rate_limiter, window_position
+from tests.conftest import (
+    InMemoryRateLimiter,
+    _rolled_back_session,
+    make_app,
+    make_settings,
+)
 from tests.helpers import mentions_number
 from tests.test_opportunities_api import EMAIL, NOT_FOUND, World, build_world, make_request
 from tests.test_quote_accept_api import statuses
@@ -1335,3 +1341,71 @@ async def _quotes(session: AsyncSession, request_id: uuid.UUID) -> list[Any]:
     from tests.test_quotes_api import quotes_of
 
     return await quotes_of(session, request_id)
+
+
+# The per-customer limit (#525)
+
+SHEET_LIMIT = 2
+SHEET_WINDOW = 600
+LIMIT_NOW = 1_800_000_000.0  # a fixed clock, so no test straddles two rate-limit windows
+RATE_LIMITED = {"error": {"code": "rate_limited", "message": "Too many requests. Try again later."}}
+
+
+async def test_the_payment_sheet_is_limited_per_customer(
+    db_session: AsyncSession, world: World
+) -> None:
+    """Every sheet is a PaymentIntent read and a new CustomerSession at Stripe, so one customer
+    gets PAYMENT_SHEET_LIMIT of them per PAYMENT_SHEET_WINDOW_SECONDS; a limited call reaches
+    no Stripe call."""
+    app = make_app(
+        make_settings(
+            stripe_secret_key=None,
+            stripe_publishable_key=PUBLISHABLE_KEY,
+            stripe_payment_intent_reconcile_after_seconds=int(RECONCILE_AFTER.total_seconds()),
+            payment_sheet_limit=SHEET_LIMIT,
+            payment_sheet_window_seconds=SHEET_WINDOW,
+        )
+    )
+    fake = FakeStripePayments()
+    app.state.fake_stripe_payments = fake
+    app.dependency_overrides[get_stripe_payments] = _fake_stripe
+    limiter = InMemoryRateLimiter(clock=lambda: LIMIT_NOW)
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+
+    async def test_session() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = test_session
+    request_id, quote_id, _ = await accepted_request(db_session, world)
+
+    def stripe_calls() -> tuple[int, ...]:
+        return (
+            len(fake.intent_calls),
+            len(fake.retrieved),
+            len(fake.customer_calls),
+            len(fake.customer_sessions),
+            len(fake.ephemeral_keys),
+        )
+
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        allowed = [await pay(client, world, request_id, quote_id) for _ in range(SHEET_LIMIT)]
+        calls = stripe_calls()
+        limited = await pay(client, world, request_id, quote_id)
+        after_limit = stripe_calls()
+
+    assert [response.status_code for response in allowed] == [200] * SHEET_LIMIT
+    assert (limited.status_code, limited.json()) == (429, RATE_LIMITED)
+    assert int(limited.headers["Retry-After"]) >= 1
+    assert limited.headers["Cache-Control"] == "no-store"
+    assert after_limit == calls
+    index, _ = window_position(LIMIT_NOW, SHEET_WINDOW)
+    assert limiter.counts == {f"payment_sheet:{world.customer_id}:{index}": SHEET_LIMIT + 1}
+
+
+def test_the_payment_sheet_limit_is_documented(app: FastAPI) -> None:
+    path = "/v1/requests/{request_id}/quotes/{quote_id}/payment"
+    documented = app.openapi()["paths"][path]["post"]["responses"]["429"]
+
+    assert "rate_limited" in documented["description"]
+    assert "Retry-After" in documented["headers"]
