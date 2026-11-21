@@ -273,23 +273,3 @@ def test_home_deep_link_allowed_alone() -> None:
         "https://evil.example/",
     ):
         assert not deep_links.is_allowed(path), path
-
-
-def test_the_chat_deep_links_are_the_last_two_in_their_order() -> None:
-    """#73 P3: the pro's chat, then the customer's, appended at the end of the allowlist; the
-    app's own list mirrors this one in its order (deepLinks.test.ts reads this file)."""
-    job_id, request_id = uuid.UUID(int=8), uuid.UUID(int=9)
-    *_, pro, customer = deep_links.ALLOWED_DEEP_LINKS
-
-    assert pro.fullmatch(f"/jobs/{job_id}/chat")
-    assert customer.fullmatch(f"/requests/{request_id}/job/chat")
-    for path in (
-        f"/jobs/{job_id}/chat/",
-        f"/jobs/{job_id}/chats",
-        f"/jobs/{job_id}/chat?x=1",
-        f"/requests/{request_id}/chat",
-        f"/requests/{request_id}/job/chat/x",
-        "/jobs/not-a-uuid/chat",
-        f"https://evil.example/jobs/{job_id}/chat",
-    ):
-        assert not deep_links.is_allowed(path), path

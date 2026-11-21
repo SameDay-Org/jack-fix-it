@@ -15,11 +15,6 @@ ALLOWED_DEEP_LINKS: Final = (
     re.compile(rf"/quotes/{_UUID}"),
     re.compile(rf"/opportunities/{_UUID}"),  # a pro's dispatch (#49), from the new request push
     re.compile(r"/"),  # home: a pro's jobs and opportunities, from the quote accepted push (#338)
-    # A new chat message (#73 P3), each side's own chat of the job: the pro's by the job id,
-    # the customer's by the request id (their job screen is the request's). Appended last: the
-    # app's list mirrors this one in its order.
-    re.compile(rf"/jobs/{_UUID}/chat"),
-    re.compile(rf"/requests/{_UUID}/job/chat"),
 )
 
 

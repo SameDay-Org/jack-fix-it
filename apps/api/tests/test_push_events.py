@@ -99,19 +99,19 @@ CALLERS = (
     ),
     # Home: the pro's opportunities show there once payouts are on (#280).
     Caller("push_payouts_enabled", "pro_user_id", "payouts_enabled:{stripe_event_id}", "/"),
-    # A new chat message (#73): one kind, each side opening its own chat of the job (P3).
+    # A new chat message (#73): one kind, each side opening its own job screen.
     Caller(
         "push_chat_message_to_customer",
         "customer_id",
         "chat_message:{chat_message_id}",
-        "/requests/{request_id}/job/chat",
+        "/requests/{request_id}/job",
         kind="chat_message",
     ),
     Caller(
         "push_chat_message_to_pro",
         "pro_user_id",
         "chat_message:{chat_message_id}",
-        "/jobs/{job_id}/chat",
+        "/jobs/{job_id}",
         kind="chat_message",
     ),
 )
