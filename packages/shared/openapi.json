@@ -5362,6 +5362,61 @@
         ]
       }
     },
+    "/v1/interest": {
+      "post": {
+        "tags": [
+          "interest"
+        ],
+        "summary": "Join the app-launch interest list (the web service only)",
+        "description": "Puts the email on the list of people who want to hear when the app is in the stores,\nwith the version of the consent words the visitor saw and the time. Called by the web app's\nserver with its key (`X-JFI-Web-Key`) and the visitor's address (`X-JFI-Client-IP`): the\nbrowser never calls it. Nothing is sent to the email.",
+        "operationId": "join_interest_v1_interest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterestJoin"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "On the list: the same answer whether the email already was."
+          },
+          "422": {
+            "description": "validation_error: a bad email, locale, source or consent_version, or an unknown field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_service_key: no X-JFI-Web-Key, or not the web service's.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many joins from this visitor's address or for this email in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/webhooks/stripe": {
       "post": {
         "tags": [
@@ -13145,6 +13200,51 @@
         ],
         "title": "IntegerQuestion"
       },
+      "InterestJoin": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email",
+            "description": "Trimmed and lowercased before it is checked and stored."
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "en",
+              "es"
+            ],
+            "title": "Locale",
+            "description": "The page's language.",
+            "default": "en"
+          },
+          "source": {
+            "$ref": "#/components/schemas/InterestSource",
+            "description": "Where the form was: showcase only.",
+            "default": "showcase"
+          },
+          "consent_version": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+            "title": "Consent Version",
+            "description": "The id of the consent words the visitor saw, stored with the time of the join (e.g. \"interest-2026-11-19\"): letters, digits, \".\", \"-\" and \"_\", 1 to 64 characters."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "email",
+          "consent_version"
+        ],
+        "title": "InterestJoin"
+      },
+      "InterestSource": {
+        "type": "string",
+        "enum": [
+          "showcase"
+        ],
+        "title": "InterestSource"
+      },
       "JobAddress": {
         "properties": {
           "line1": {
@@ -19972,6 +20072,31 @@
             "title": "Job Id",
             "description": "The job the ticket is about, if any."
           },
+          "job_request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Id",
+            "description": "The request of the ticket's job, for the panel's request page; null without a job (#503)."
+          },
+          "job_request_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Code",
+            "description": "That request's public code, as staff name and search it; null without a job (#503)."
+          },
           "status": {
             "$ref": "#/components/schemas/TicketStatus"
           },
@@ -19990,6 +20115,8 @@
           "role",
           "topic",
           "job_id",
+          "job_request_id",
+          "job_request_code",
           "status",
           "created_at"
         ],
@@ -20039,6 +20166,31 @@
             ],
             "title": "Job Id",
             "description": "The job the ticket is about, if any."
+          },
+          "job_request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Id",
+            "description": "The request of the ticket's job, for the panel's request page; null without a job (#503)."
+          },
+          "job_request_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Code",
+            "description": "That request's public code, as staff name and search it; null without a job (#503)."
           },
           "status": {
             "$ref": "#/components/schemas/TicketStatus"
@@ -20102,6 +20254,8 @@
           "role",
           "topic",
           "job_id",
+          "job_request_id",
+          "job_request_code",
           "status",
           "created_at",
           "message",

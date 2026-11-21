@@ -143,8 +143,12 @@ export default async function SupportPage({
                   </span>
                   <span className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
                     <span>{t(`admin.support.topic.${ticket.topic}`)}</span>
-                    {ticket.job_id ? (
-                      <Badge variant="muted">{t("admin.support.aboutJob")}</Badge>
+                    {/* The job's request code (#503); nothing when the API names none. */}
+                    {ticket.job_request_code ? (
+                      <Badge variant="muted">
+                        <span className="sr-only">{t("admin.support.aboutJob")} </span>
+                        {ticket.job_request_code}
+                      </Badge>
                     ) : null}
                   </span>
                   <span className="text-sm text-gray-500">

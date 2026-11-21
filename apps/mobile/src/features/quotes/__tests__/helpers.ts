@@ -183,6 +183,8 @@ const router = {
   canGoBack: jest.fn(() => true),
   setParams: jest.fn(),
   dismissTo: jest.fn(),
+  canDismiss: jest.fn(() => true),
+  navigate: jest.fn(),
 };
 
 export const routerMock = {

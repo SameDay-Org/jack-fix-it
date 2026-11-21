@@ -18,7 +18,7 @@ import { announce } from "@/components/ui/focus";
 import { ChatEntry } from "@/features/chat";
 import { cancelJobHref, mayCancel } from "@/features/cancellation/api";
 import { CancelEntry } from "@/features/cancellation/CancelEntry";
-import { CancellationStatus } from "@/features/cancellation/CancellationStatus";
+import { CancellationStatus, NewRequestAction } from "@/features/cancellation/CancellationStatus";
 import { hasReport, ReportStatus } from "@/features/disputes/ReportStatus";
 import { useRefreshExpiredMedia } from "@/features/opportunities/useOpportunity";
 import { isUuid, useGuardedPush } from "@/features/quotes/navigation";
@@ -86,7 +86,7 @@ const jobProfileHref = (requestId: string, quoteId: string) => ({
  * its `ConfirmDock`, #66, #75), then to the confirmed job (`ConfirmedJob`). A reported job shows
  * its report and where it stands (`ReportStatus`). Until the work starts the customer may cancel
  * it, as the API's preview allows (`CancelEntry`, #69); a cancelled job shows where its money
- * stands (`CancellationStatus`).
+ * stands (`CancellationStatus`), and one its pro called off offers a new request.
  */
 export function JobScreen() {
   const { t } = useTranslation();
@@ -399,6 +399,7 @@ function JobContent({ job, requestId, updatedAt, refetch, text, now }: JobConten
           ) : null}
         </View>
         {job.cancellation ? <CancellationStatus cancellation={job.cancellation} /> : null}
+        {job.cancellation?.cancelled_by === "pro" ? <NewRequestAction /> : null}
         {hasReport(job) ? <ReportStatus job={job} /> : null}
         <PaidRow job={job} />
         <JobPhotos photos={job.photos} updatedAt={updatedAt} refetch={refetch} />

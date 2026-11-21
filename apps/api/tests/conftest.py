@@ -49,6 +49,11 @@ TEST_TWILIO_SETTINGS: dict[str, object] = {
 TEST_RATE_LIMIT_SETTINGS: dict[str, object] = {
     "rate_limit_key_secret": "test-rate-limit-key-secret-not-real-0123",
 }
+# Fixture value only, never a real key. make_settings leaves it unset, so the web service's
+# routes refuse every call unless a test sets it; deployed settings must have one (#409).
+TEST_WEB_SERVICE_SETTINGS: dict[str, object] = {
+    "web_service_key": "test-web-service-key-not-real-0123456789",
+}
 # Fixture value only. make_settings leaves it unset, so tests use the development rotation key
 # unless a test sets it; deployed settings must have one (#152).
 TEST_REFRESH_SETTINGS: dict[str, object] = {
@@ -373,7 +378,10 @@ async def committed(app: FastAPI, test_database_url: URL) -> AsyncIterator[Commi
         await engine.dispose()
 
 
-LOCK_WAIT_DEADLINE_SECONDS = 5
+# How long a test waits for one backend to be seen waiting on another's lock. Generous on
+# purpose: it bounds a polled condition, so a pass is as fast as before, and only a machine
+# under load (or a real bug) gets near it; 5 s failed under CI load (#448).
+LOCK_WAIT_DEADLINE_SECONDS = 30
 
 
 async def backend_pid(session: AsyncSession) -> int:

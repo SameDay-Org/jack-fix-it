@@ -9,6 +9,7 @@ from tests.conftest import (
     TEST_STORAGE_SETTINGS,
     TEST_STRIPE_SETTINGS,
     TEST_TWILIO_SETTINGS,
+    TEST_WEB_SERVICE_SETTINGS,
     make_settings,
 )
 
@@ -82,6 +83,7 @@ def test_jwt_secret_required_in_staging_and_production(app_env: str) -> None:
         **TEST_TWILIO_SETTINGS,
         **TEST_RATE_LIMIT_SETTINGS,
         **TEST_REFRESH_SETTINGS,
+        **TEST_WEB_SERVICE_SETTINGS,
         **TEST_EMAIL_SETTINGS,
         **TEST_STRIPE_SETTINGS,
     )
@@ -119,6 +121,7 @@ def test_secret_required_in_staging_and_production(app_env: str) -> None:
         **deployed,
         **TEST_RATE_LIMIT_SETTINGS,
         **TEST_REFRESH_SETTINGS,
+        **TEST_WEB_SERVICE_SETTINGS,
         **TEST_EMAIL_SETTINGS,
         **TEST_STRIPE_SETTINGS,
     )
@@ -220,6 +223,7 @@ def test_s3_settings_required_in_staging_and_production(app_env: str, missing: s
         **TEST_TWILIO_SETTINGS,
         **TEST_RATE_LIMIT_SETTINGS,
         **TEST_REFRESH_SETTINGS,
+        **TEST_WEB_SERVICE_SETTINGS,
         **TEST_EMAIL_SETTINGS,
         **TEST_STRIPE_SETTINGS,
     )
@@ -288,6 +292,7 @@ def test_twilio_settings_required_in_staging_and_production(app_env: str, missin
         **TEST_STORAGE_SETTINGS,
         **TEST_RATE_LIMIT_SETTINGS,
         **TEST_REFRESH_SETTINGS,
+        **TEST_WEB_SERVICE_SETTINGS,
         **TEST_EMAIL_SETTINGS,
         **TEST_STRIPE_SETTINGS,
     )
@@ -350,6 +355,7 @@ def test_resend_settings_required_in_staging_and_production(app_env: str, missin
         **TEST_TWILIO_SETTINGS,
         **TEST_RATE_LIMIT_SETTINGS,
         **TEST_REFRESH_SETTINGS,
+        **TEST_WEB_SERVICE_SETTINGS,
         **TEST_EMAIL_SETTINGS,
         **TEST_STRIPE_SETTINGS,
     }
@@ -439,6 +445,7 @@ def test_settings_stripe_required_and_live_key_refused(app_env: str) -> None:
         **TEST_TWILIO_SETTINGS,
         **TEST_RATE_LIMIT_SETTINGS,
         **TEST_REFRESH_SETTINGS,
+        **TEST_WEB_SERVICE_SETTINGS,
         **TEST_EMAIL_SETTINGS,
         **TEST_STRIPE_SETTINGS,
     }
@@ -520,6 +527,7 @@ def test_publishable_key_accepts_only_pk_keys(app_env: str, value: str) -> None:
             **TEST_TWILIO_SETTINGS,
             **TEST_RATE_LIMIT_SETTINGS,
             **TEST_REFRESH_SETTINGS,
+            **TEST_WEB_SERVICE_SETTINGS,
             **TEST_EMAIL_SETTINGS,
             **TEST_STRIPE_SETTINGS,
         }
