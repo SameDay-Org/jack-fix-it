@@ -290,38 +290,45 @@ The worker builds the same settings when `app/worker.py` is imported, so the sam
 stop it: without every required variable it crash-loops under its `ALWAYS` restart policy and
 never logs `worker_started`. Use the same values as api.
 
-| Variable                           | Value                                                      | Secret          | Source      |
-| ---------------------------------- | ---------------------------------------------------------- | --------------- | ----------- |
-| `APP_ENV`                          | same as api                                                | no              | D3.1 (#22)  |
-| `LOG_LEVEL`                        | same as api                                                | no              | D3.1 (#22)  |
-| `DATABASE_URL`                     | `${{Postgres.DATABASE_URL}}`                               | yes (reference) | D3.1 (#22)  |
-| `REDIS_URL`                        | `${{Redis.REDIS_URL}}`                                     | yes (reference) | D3.1 (#22)  |
-| `SENTRY_DSN`                       | same as api                                                | no              | D3.1 (#22)  |
-| `JWT_SECRET`                       | same as api                                                | yes             | D4.2 (#25)  |
-| `RATE_LIMIT_KEY_SECRET`            | same as api                                                | yes             | #137        |
-| `REFRESH_ROTATION_SECRET`          | same as api                                                | yes             | #152        |
-| `TWILIO_ACCOUNT_SID`               | same as api                                                | no              | D4.3 (#26)  |
-| `TWILIO_AUTH_TOKEN`                | same as api                                                | yes             | D4.3 (#26)  |
-| `TWILIO_VERIFY_SERVICE_SID`        | same as api                                                | no              | D4.3 (#26)  |
-| `RESEND_API_KEY`                   | same as api                                                | yes             | D4.3 (#27)  |
-| `EMAIL_FROM`                       | same as api                                                | no              | D4.3 (#27)  |
-| `S3_ENDPOINT_URL`                  | same as api                                                | no              | D6.2 (#35)  |
-| `S3_BUCKET`                        | same as api                                                | no              | D6.2 (#35)  |
-| `S3_ACCESS_KEY_ID`                 | same as api                                                | yes             | D6.2 (#35)  |
-| `S3_SECRET_ACCESS_KEY`             | same as api                                                | yes             | D6.2 (#35)  |
-| `STRIPE_SECRET_KEY`                | same as api                                                | yes             | D7.1 (#39)  |
-| `PUBLIC_API_URL`                   | same as api                                                | no              | D7.1 (#39)  |
-| `EXPO_ACCESS_TOKEN`                | optional; set it only if Expo enhanced push security is on | yes             | D10.3 (#54) |
-| `ORPHAN_UPLOAD_MIN_AGE_HOURS`      | same as api (shared variable)                              | no              | #191, #298  |
-| `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` | same as api (shared variable)                              | no              | #298        |
-| `GEOCODE_ON_SAVE`                  | same as api (shared variable); see "Geocode on save"       | no              | #384        |
-| `MAPBOX_ACCESS_TOKEN`              | same as api; only needed with `GEOCODE_ON_SAVE=true`       | yes             | #384        |
+| Variable                           | Value                                                                                   | Secret          | Source      |
+| ---------------------------------- | --------------------------------------------------------------------------------------- | --------------- | ----------- |
+| `APP_ENV`                          | same as api                                                                             | no              | D3.1 (#22)  |
+| `LOG_LEVEL`                        | same as api                                                                             | no              | D3.1 (#22)  |
+| `DATABASE_URL`                     | `${{Postgres.DATABASE_URL}}`                                                            | yes (reference) | D3.1 (#22)  |
+| `REDIS_URL`                        | `${{Redis.REDIS_URL}}`                                                                  | yes (reference) | D3.1 (#22)  |
+| `SENTRY_DSN`                       | same as api                                                                             | no              | D3.1 (#22)  |
+| `JWT_SECRET`                       | same as api                                                                             | yes             | D4.2 (#25)  |
+| `RATE_LIMIT_KEY_SECRET`            | same as api                                                                             | yes             | #137        |
+| `REFRESH_ROTATION_SECRET`          | same as api                                                                             | yes             | #152        |
+| `TWILIO_ACCOUNT_SID`               | same as api                                                                             | no              | D4.3 (#26)  |
+| `TWILIO_AUTH_TOKEN`                | same as api                                                                             | yes             | D4.3 (#26)  |
+| `TWILIO_VERIFY_SERVICE_SID`        | same as api                                                                             | no              | D4.3 (#26)  |
+| `RESEND_API_KEY`                   | same as api                                                                             | yes             | D4.3 (#27)  |
+| `EMAIL_FROM`                       | same as api                                                                             | no              | D4.3 (#27)  |
+| `S3_ENDPOINT_URL`                  | same as api                                                                             | no              | D6.2 (#35)  |
+| `S3_BUCKET`                        | same as api                                                                             | no              | D6.2 (#35)  |
+| `S3_ACCESS_KEY_ID`                 | same as api                                                                             | yes             | D6.2 (#35)  |
+| `S3_SECRET_ACCESS_KEY`             | same as api                                                                             | yes             | D6.2 (#35)  |
+| `STRIPE_SECRET_KEY`                | same as api                                                                             | yes             | D7.1 (#39)  |
+| `PUBLIC_API_URL`                   | same as api                                                                             | no              | D7.1 (#39)  |
+| `EXPO_ACCESS_TOKEN`                | optional; set it only if Expo enhanced push security is on                              | yes             | D10.3 (#54) |
+| `ORPHAN_UPLOAD_MIN_AGE_HOURS`      | same as api (shared variable)                                                           | no              | #191, #298  |
+| `ORPHAN_UPLOAD_MODE`               | optional; `dry_run` by default; `delete` once the dry-run counts look right (see below) | no              | #191, #529  |
+| `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` | same as api (shared variable)                                                           | no              | #298        |
+| `GEOCODE_ON_SAVE`                  | same as api (shared variable); see "Geocode on save"                                    | no              | #384        |
+| `MAPBOX_ACCESS_TOKEN`              | same as api; only needed with `GEOCODE_ON_SAVE=true`                                    | yes             | #384        |
 
 `ORPHAN_UPLOAD_MIN_AGE_HOURS` and `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` must hold the same values
 on api and worker: the api refuses job photo uploads older than the window, and the worker's
 orphan sweep deletes only uploads older than the minimum age. Each service checks the rule
 (window at most half the minimum age) against its own values only, so set both as shared
 variables, or the sweep can delete a photo a job just attached (#298).
+
+`ORPHAN_UPLOAD_MODE` is `dry_run` by default, so the sweep only counts and logs
+(`orphan_uploads_swept`). Until it is `delete`, every upload no row references stays in the bucket.
+The upload URL limit (`UPLOAD_URL_LIMIT` per `UPLOAD_URL_WINDOW_SECONDS`, #529) bounds how fast one
+account can add them, not how many stay. **Cesar (ops):** check a few dry-run counts on staging,
+then set `ORPHAN_UPLOAD_MODE=delete` on the worker, staging first, then production.
 
 The worker makes the transfers to the pros (D13.3, #68) with the same `STRIPE_SECRET_KEY` it
 cancels unpaid payments with: a task queued when a job is confirmed, and the
