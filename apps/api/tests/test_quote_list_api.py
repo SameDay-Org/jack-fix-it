@@ -24,6 +24,7 @@ from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.queue import get_job_queue
 from tests.conftest import TEST_JWT_SECRET
+from tests.ratings_seed import rate
 from tests.test_opportunities_api import (
     EMAIL,
     NOT_FOUND,
@@ -58,7 +59,15 @@ ITEM_KEYS = {
     "created_at",
     "pro",
 }
-PRO_KEYS = {"id", "name", "rating_avg", "jobs_count", "years_of_experience", "verified"}
+PRO_KEYS = {
+    "id",
+    "name",
+    "rating_avg",
+    "rating_count",
+    "jobs_count",
+    "years_of_experience",
+    "verified",
+}
 
 
 @dataclass(frozen=True)
@@ -106,15 +115,15 @@ async def quoting_pro(
     *,
     first_name: str | None = "María",
     last_name: str | None = "Pérez",
-    rating: str | None = None,
-    jobs_count: int = 0,
+    ratings: tuple[int, ...] = (),
     years: int | None = None,
     verification: ProVerificationStatus = ProVerificationStatus.APPROVED,
     payouts_enabled: bool = True,
     email: str | None = None,
 ) -> QuotingPro:
     """A pro with every private field filled, so a leak would show. Hireable by default:
-    approved, payouts enabled."""
+    approved, payouts enabled. `ratings`: published reviews of them, each on its own confirmed
+    job (tests.ratings_seed): what their rating and jobs completed are computed from (#78)."""
     pro = await make_pro(session)
     user = await session.get(User, pro.caller.id)
     profile = await session.get(ProProfile, pro.profile_id)
@@ -124,8 +133,9 @@ async def quoting_pro(
     if email is not None:
         user.email = email
     user.phone = PRO_PHONE if not await _phone_taken(session) else None
-    profile.rating_avg = Decimal(rating) if rating is not None else None
-    profile.jobs_count = jobs_count
+    # The stored columns say otherwise: the cards never read them (#78).
+    profile.rating_avg = Decimal("1.00")
+    profile.jobs_count = 99
     profile.years_of_experience = years
     profile.verification_status = verification
     profile.payouts_enabled = payouts_enabled
@@ -133,6 +143,7 @@ async def quoting_pro(
     profile.photo_key = f"{PHOTO_KEY}-{pro.profile_id.hex}"
     profile.stripe_account_id = f"{STRIPE_ID}-{pro.profile_id.hex}"
     await session.flush()
+    await rate(session, pro.profile_id, *ratings)
     return QuotingPro(pro.profile_id, user.id, user.email)
 
 
@@ -538,7 +549,7 @@ async def test_no_pro_contact_or_internal_field_leaks(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: World
 ) -> None:
     request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
-    pro = await quoting_pro(db_session, rating="4.5", jobs_count=3, years=7)
+    pro = await quoting_pro(db_session, ratings=(5, 4), years=7)
     await add_quote(db_session, request_id, pro, scope="Clean the drain")
 
     response = await db_client.get(path(request_id), headers=customer(world))
@@ -587,7 +598,7 @@ async def test_pro_fields(
     db_client: httpx.AsyncClient, db_session: AsyncSession, world: World
 ) -> None:
     request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
-    rated = await quoting_pro(db_session, rating="4.8", jobs_count=12, years=9)
+    rated = await quoting_pro(db_session, ratings=(5, 5, 5, 5, 4), years=9)
     new = await quoting_pro(db_session, last_name=None)
     unnamed = await quoting_pro(db_session, first_name=None, last_name=None)
     await add_quote(db_session, request_id, rated, amount=1_000)
@@ -601,8 +612,9 @@ async def test_pro_fields(
         {
             "id": str(rated.profile_id),
             "name": "María P.",
-            "rating_avg": "4.80",
-            "jobs_count": 12,
+            "rating_avg": "4.8",
+            "rating_count": 5,
+            "jobs_count": 5,
             "years_of_experience": 9,
             "verified": True,
         },
@@ -610,6 +622,7 @@ async def test_pro_fields(
             "id": str(new.profile_id),
             "name": None,
             "rating_avg": None,
+            "rating_count": 0,
             "jobs_count": 0,
             "years_of_experience": None,
             "verified": True,
@@ -618,6 +631,7 @@ async def test_pro_fields(
             "id": str(unnamed.profile_id),
             "name": None,
             "rating_avg": None,
+            "rating_count": 0,
             "jobs_count": 0,
             "years_of_experience": None,
             "verified": True,
@@ -674,7 +688,7 @@ async def test_contact_in_an_edited_name_withholds_the_name(
     /v1/auth/me refuses it since #198, so the name is one stored before that check. The name is
     withheld whole (null), nothing else changes."""
     request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
-    pro = await quoting_pro(db_session, rating="4.5", jobs_count=3, years=7)
+    pro = await quoting_pro(db_session, ratings=(5, 4), years=7)
     await add_quote(db_session, request_id, pro)
     before = (await db_client.get(path(request_id), headers=customer(world))).json()
 
@@ -796,8 +810,9 @@ async def test_constant_query_count(
         assert len(response.json()["items"]) == expected
         counts.append(len(statements))
 
-    # The caller's account, the request, its quotes, the pros, their names, their contacts.
-    assert counts == [6, 6]
+    # The caller's account, the request, its quotes, the pros, their names, their contacts,
+    # their ratings and their jobs completed (#78).
+    assert counts == [8, 8]
 
 
 # The contract
@@ -808,6 +823,7 @@ def test_response_models_forbid_extra_fields() -> None:
         "id": str(uuid.uuid4()),
         "name": None,
         "rating_avg": None,
+        "rating_count": 0,
         "jobs_count": 0,
         "years_of_experience": None,
         "verified": True,

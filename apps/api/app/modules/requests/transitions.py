@@ -49,8 +49,9 @@ TRANSITIONS: Final[Mapping[tuple[RequestStatus, RequestStatus], frozenset[ActorK
             (_S.ACCEPTED, _S.QUOTE_READY): frozenset({_A.SYSTEM}),
             # The customer abandons before paying, or staff close it: no money has moved. Or
             # its paid job was cancelled (#69): the request closes with it, and the job's
-            # cancellation holds the refund; the customer's way back is a new request.
-            (_S.ACCEPTED, _S.CANCELLED): frozenset({_A.CUSTOMER, _A.STAFF}),
+            # cancellation holds the refund; the customer's way back is a new request. After
+            # the pro's cancel the system closes it: pros never move a request.
+            (_S.ACCEPTED, _S.CANCELLED): frozenset({_A.CUSTOMER, _A.STAFF, _A.SYSTEM}),
             # The BDC pulls the request back to reclassify it.
             (_S.FINDING_PRO, _S.REVIEWING): frozenset({_A.STAFF}),
         }

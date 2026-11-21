@@ -515,6 +515,16 @@ class CustomerRequestReader:
         """The public code of each request among `request_ids`, for staff lists (#76)."""
         return await self._requests.public_codes(request_ids)
 
+    async def own_address(self, request_id: uuid.UUID) -> AddressOut:
+        """The request's address as its customer typed it, unmasked: for the customer's own
+        receipt (#62), never a pro's view (which masks contacts typed into it). The caller
+        already checked the request is the customer's: this does not."""
+        request = await self._requests.get(request_id)
+        found = None if request is None else await self._addresses.full_many([request.address_id])
+        if request is None or found is None or request.address_id not in found:
+            raise NotFoundError  # pragma: no cover - both ids are foreign keys
+        return found[request.address_id]
+
     async def place(self, request_id: uuid.UUID) -> AddressPlace:
         """Where the request takes place, for the route of its job (#351). The caller already
         holds the request's job and checked whose it is: this does not."""

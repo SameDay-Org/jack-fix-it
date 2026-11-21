@@ -66,6 +66,9 @@ update, a repeated check-in, Job's done or confirm, and a refused action push no
 that cannot be queued is logged with ids and never fails the action. No push carries the
 arrival code or the ETA.
 
+The customer's view carries the job's tip (#273) once the job was confirmed: tips/service.py
+reads it and says what the customer may do. Confirming never reads or writes a tip.
+
 Confirmation (#66), the customer's, on the job's row lock: completed -> confirmed through the
 state machine (it sets confirmed_at; the event's actor is the customer), then the pro's push.
 Again once confirmed: 200, unchanged, no second event or push. Any other status: 409
@@ -135,7 +138,7 @@ from app.modules.jobs.schemas import (
     ProJob,
     ProJobPage,
 )
-from app.modules.jobs.service import JobStateMachine
+from app.modules.jobs.service import JobStateMachine, tip_facts
 from app.modules.jobs.transitions import customer_status_of
 from app.modules.media.safe_status import MediaSafeStatus
 from app.modules.notifications.events import (
@@ -153,6 +156,8 @@ from app.modules.quotes.schemas import QuotePro
 from app.modules.quotes.service import QuoteReader
 from app.modules.requests.errors import InvalidRequestError
 from app.modules.requests.service import CustomerRequestReader, ProRequestReader
+from app.modules.reviews.ratings import ProRatings
+from app.modules.tips.service import TipConfig, TipReader
 from app.modules.uploads.keys import owned_upload, upload_issued_at
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.users.service import UserService
@@ -189,6 +194,9 @@ class JobExecutionConfig:
     photo_url_ttl_seconds: int
     enqueue_timeout_seconds: float
     auto_confirm_after: timedelta
+    tips: TipConfig
+    # REVIEW_PUBLISH_AFTER_DAYS, for the pro's rating on the card (#78).
+    review_publish_after: timedelta
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "JobExecutionConfig":
@@ -201,6 +209,8 @@ class JobExecutionConfig:
             photo_url_ttl_seconds=settings.download_url_ttl_seconds,
             enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
             auto_confirm_after=timedelta(hours=settings.job_auto_confirm_after_hours),
+            tips=TipConfig.from_settings(settings),
+            review_publish_after=timedelta(days=settings.review_publish_after_days),
         )
 
 
@@ -223,6 +233,7 @@ class JobExecutionService:
         self._photos = JobPhotoRepository(session)
         self._signer = JobPhotoSigner(storage, config.photo_url_ttl_seconds)
         self._pros = ProService(session)
+        self._ratings = ProRatings(session, config.review_publish_after)
         self._locations = locations
         self._machine = JobStateMachine(session, self._pros, locations)
         self._customer_requests = CustomerRequestReader(session)
@@ -233,6 +244,7 @@ class JobExecutionService:
         self._chat = ChatUnreadReader(session)
         self._transfers = TransferReader(session)
         self._cancellations = CancellationReader(session)
+        self._tips = TipReader(session, config.tips)
 
     # Reads
 
@@ -245,6 +257,7 @@ class JobExecutionService:
         card = (await self._pros.cards([job.pro_id])).get(job.pro_id)
         if card is None:  # pragma: no cover - jobs.pro_id is a foreign key
             raise NotFoundError
+        rating = (await self._ratings.of({card.pro_id: card.user_id}))[card.pro_id]
         events = await self._jobs.events_of(job.id)
         photos = await self._photos.of_jobs([job.id])
         unread = await self._chat.unread_counts([job.id], user.id)
@@ -260,8 +273,9 @@ class JobExecutionService:
             pro=QuotePro(
                 id=card.pro_id,
                 name=card.name,
-                rating_avg=None if card.rating_avg is None else format(card.rating_avg, ".2f"),
-                jobs_count=card.jobs_count,
+                rating_avg=rating.text,
+                rating_count=rating.count,
+                jobs_count=rating.jobs_completed,
                 years_of_experience=card.years_of_experience,
                 verified=card.verified,
             ),
@@ -282,6 +296,7 @@ class JobExecutionService:
             dispute_status=None if outcome is None else outcome.status,
             dispute_resolution=None if outcome is None else outcome.resolution,
             unread_messages=unread[job.id],
+            tip=await self._tips.for_job(tip_facts(job)),
         )
 
     async def pro_jobs(

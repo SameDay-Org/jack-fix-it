@@ -49,8 +49,8 @@ Logs carry ids, statuses and counts only.
 import logging
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Final
 
@@ -62,6 +62,7 @@ from app.modules.dispatch.repository import ACTIVE, DispatchRepository, ProHisto
 from app.modules.jobs.service import SYSTEM
 from app.modules.pros.service import AssignCandidate, DispatchCandidate, ProService
 from app.modules.requests.state_machine import RequestStateMachine, RequestStatus
+from app.modules.reviews.ratings import ProRatings
 from app.modules.service_areas.service import ServiceAreaService
 from app.modules.settings.service import SettingsService
 from app.modules.users.service import UserService
@@ -205,8 +206,11 @@ def _unfit(candidate: AssignCandidate) -> AssignRefusal | None:
 
 
 class DispatchService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, review_publish_after: timedelta) -> None:
+        """`review_publish_after`: REVIEW_PUBLISH_AFTER_DAYS: the ranking reads the pros'
+        published ratings (#78)."""
         self._session = session
+        self._ratings = ProRatings(session, review_publish_after)
         self._dispatches = DispatchRepository(session)
         self._requests = RequestStateMachine(session)
 
@@ -320,8 +324,14 @@ class DispatchService:
         by_id = {candidate.pro_id: candidate for candidate in found if candidate.user_id in active}
         offered = await self._dispatches.pro_ids_of(request_id)
         history = await self._dispatches.history(list(by_id))
+        # Ranked as the automatic dispatch ranks: by the published reviews' rating (#78), under
+        # REVIEW_PUBLISH_AFTER_DAYS, never the unread pro_profiles.rating_avg column.
+        ratings = await self._ratings.of({c.pro_id: c.user_id for c in by_id.values()})
         ranked = rank(
-            [DispatchCandidate(c.pro_id, c.user_id, c.rating_avg) for c in by_id.values()],
+            [
+                DispatchCandidate(c.pro_id, c.user_id, ratings[c.pro_id].average)
+                for c in by_id.values()
+            ],
             history,
         )
         return [
@@ -376,6 +386,9 @@ class DispatchService:
             [c.user_id for c in candidates], UserRole.PRO
         )
         candidates = [c for c in candidates if c.user_id in active]
+        # The rating is computed from the published reviews (#78), as every surface shows it.
+        ratings = await self._ratings.of({c.pro_id: c.user_id for c in candidates})
+        candidates = [replace(c, rating_avg=ratings[c.pro_id].average) for c in candidates]
         history = await self._dispatches.history([c.pro_id for c in candidates])
         by_id = {c.pro_id: c for c in candidates}
         return [by_id[pro_id] for pro_id in rank(candidates, history)]

@@ -48,8 +48,8 @@ VERIFICATION_NOT_FOUND: Final = 20404
 
 
 class PhoneVerifier(Protocol):
-    async def start(self, phone: str) -> None:
-        """Sends a code to the phone by SMS."""
+    async def start(self, phone: str, locale: str | None) -> None:
+        """Sends a code to the phone by SMS, in `locale` (#92); None: the number's default."""
         ...
 
     async def check(self, phone: str, code: str) -> bool:
@@ -87,8 +87,12 @@ class TwilioPhoneVerifier:
             timeout_seconds=settings.twilio_timeout_seconds,
         )
 
-    async def start(self, phone: str) -> None:
-        response = await self._post("Verifications", {"To": phone, "Channel": "sms"}, "start")
+    async def start(self, phone: str, locale: str | None) -> None:
+        data = {"To": phone, "Channel": "sms"}
+        if locale is not None:
+            # Twilio's text in the user's language (#92), instead of the number's country's.
+            data["Locale"] = locale
+        response = await self._post("Verifications", data, "start")
         error = _error_code(response)
         if response.status_code == 400 and error in INVALID_NUMBER_CODES:
             raise InvalidPhoneError

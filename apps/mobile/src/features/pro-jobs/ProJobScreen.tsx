@@ -21,6 +21,7 @@ import {
 } from "@/components/ui";
 import { announce } from "@/components/ui/focus";
 import { BackButton } from "@/features/auth/components/BackButton";
+import { ProCancelEntry } from "@/features/cancellation/ProCancelEntry";
 import { ChatEntry } from "@/features/chat";
 import { proDisputeKey } from "@/features/disputes/api";
 import { ReportedProblem } from "@/features/disputes/ReportedProblem";
@@ -115,6 +116,7 @@ function useAnnounceStep(job: ProJob | undefined): void {
  * full address with a way into the maps app, the job itself, and the before and after photos. One
  * primary action per step, under the scrolling page: On my way, I've arrived, Start job, Job's
  * done. Asked again on focus and on foreground, so a screen left open never acts on an old step.
+ * Until the work starts the pro may cancel it (`ProCancelEntry`, #69): the customer is never charged.
  */
 export function ProJobScreen() {
   const { t } = useTranslation();
@@ -212,6 +214,8 @@ export function ProJobScreen() {
               status={data.status}
               unread={data.unread_messages}
             />
+            {/* Scheduled or on the way: the job can still be called off (#69). */}
+            <ProCancelEntry job={data} />
             {photosFirst(data) ? null : <JobAddress job={data} />}
             {photosFirst(data) ? null : <JobAbout job={data} />}
             {/* One place in the tree at every step, so nothing in it starts over on Start job. */}

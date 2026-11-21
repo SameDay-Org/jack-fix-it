@@ -31,7 +31,8 @@ release(job_id), in four steps:
    that a create may reach Stripe, are stored before any call, and no transaction or lock is
    held across one.
 2. Stripe, with no transaction open. A retry (any attempt after the first) first lists the
-   request's transfer group and looks for a transfer whose metadata names the job: exactly one
+   request's transfer group and looks for a transfer whose metadata names the job (never a
+   tip's, kind "tip", #273 PR A2, in the same group): exactly one
    that fits the row (amount, currency, destination, not reversed) is adopted, so an answer
    lost in an earlier attempt never leads to a second create, however old the attempt. A
    transfer reversed in Stripe does not count (staff reversed a duplicate); one that was the
@@ -82,6 +83,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.integrations.stripe_errors import StripeCallError, StripeUnavailableError
+from app.integrations.stripe_payments import TIP_INTENT_KIND
 from app.integrations.stripe_transfers import StripeTransfers, TransferFacts
 from app.modules.disputes.service import (
     ReleasedDispute,
@@ -473,7 +475,13 @@ class TransferService:
             found = await stripe.list_transfers(group)
             if not found.complete:
                 raise _NeedsReviewError("listing_incomplete")
-            ours = [fact for fact in found.transfers if fact.job_id == str(attempt.job_id)]
+            # A tip's transfer in the same group (#273 PR A2) is never the job's, whatever its
+            # metadata says of a job.
+            ours = [
+                fact
+                for fact in found.transfers
+                if fact.job_id == str(attempt.job_id) and fact.kind != TIP_INTENT_KIND
+            ]
             live = [fact for fact in ours if not fact.reversed]
             if len(live) > 1:
                 raise _NeedsReviewError("several_transfers")
