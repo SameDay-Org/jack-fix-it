@@ -623,6 +623,24 @@ describe("JobPhotoSection on the pro's job screen", () => {
       await act(async () => fireEvent.press(screen.getByLabelText("Remove Before photo 1")));
       expect(isDisabled("pro-job-done")).toBe(false);
       expect(screen.queryByTestId("pro-job-done-message")).toBeNull();
+      // Nothing pending: no catcher in front of Job's done (#567).
+      expect(screen.queryByTestId("pro-job-done-blocked")).toBeNull();
+    });
+
+    it("a tap on the closed Job's done says to save the photos first and posts nothing (#567)", async () => {
+      await open(workingWith([photo(1)]));
+      await addUploaded("after", 1);
+      jest.mocked(apiPost).mockClear();
+      jest.mocked(AccessibilityInfo.announceForAccessibilityWithOptions).mockClear();
+
+      await act(async () => fireEvent.press(screen.getByTestId("pro-job-done")));
+
+      expect(isDisabled("pro-job-done")).toBe(true);
+      expect(AccessibilityInfo.announceForAccessibilityWithOptions).toHaveBeenCalledWith(
+        "Save your photos first.",
+        { queue: true },
+      );
+      expect(apiPost).not.toHaveBeenCalled();
     });
 
     it("while Job's done is out, adding and saving photos wait for its answer", async () => {

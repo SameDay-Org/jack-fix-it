@@ -2,9 +2,17 @@ import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { router, useIsFocused, useLocalSearchParams } from "expo-router";
 import type { TFunction } from "i18next";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentRef, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { Linking, RefreshControl, ScrollView, Text, useWindowDimensions, View } from "react-native";
+import {
+  Linking,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { sessionGeneration, useSessionGeneration } from "@/api";
@@ -19,7 +27,7 @@ import {
   StatusBadgeSkeleton,
   TextSkeleton,
 } from "@/components/ui";
-import { announce } from "@/components/ui/focus";
+import { announce, moveAccessibilityFocus } from "@/components/ui/focus";
 import { BackButton } from "@/features/auth/components/BackButton";
 import { ChatEntry } from "@/features/chat";
 import { proDisputeKey } from "@/features/disputes/api";
@@ -54,6 +62,8 @@ const RATEABLE: readonly ProJob["status"][] = ["confirmed", "paid_out"];
 const BEFORE_PHOTO_STEPS: readonly JobStep[] = ["onTheWay", "arrived", "working"];
 /** The dock's padding under its last control, above the bottom safe area (Tailwind 4, 16 dp). */
 const DOCK_PADDING = 16;
+/** Space kept above a Save button brought into view by a blocked Job's done (Tailwind 6, 24 dp). */
+const SAVE_REVEAL_MARGIN = 24;
 
 /** The customer's first name, or "the customer" in the middle of a sentence. */
 const nameOf = (t: TFunction, job: ProJob): string =>
@@ -143,6 +153,26 @@ export function ProJobScreen() {
   const docked = data !== undefined && !gone && DOCKED_STEPS.includes(jobStep(data));
   useAnnounceStep(data);
   const pull = usePullToRefresh(id, data?.status === "disputed", refetch);
+  const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
+  const beforeSave = useRef<ComponentRef<typeof View>>(null);
+  const afterSave = useRef<ComponentRef<typeof View>>(null);
+  // Job's done is closed while photos wait to be saved: a tap on it says so and brings the Save
+  // button of those photos into view, with the reader's focus on it (#567).
+  const showPendingSave = () => {
+    announce(t("proJobs.done.savePending"));
+    const target = (after.ready > 0 ? afterSave : beforeSave).current;
+    const scroll = scrollRef.current;
+    const content = scroll?.getInnerViewRef();
+    if (!target || !scroll || !content) return;
+    target.measureLayout(
+      content,
+      (_x, y) => {
+        scroll.scrollTo({ y: Math.max(0, y - SAVE_REVEAL_MARGIN), animated: true });
+        moveAccessibilityFocus(target);
+      },
+      () => undefined,
+    );
+  };
   // A refetch that finds the job past the way (cancelled, checked in elsewhere) ends its sharing.
   useEffect(() => {
     if (data) void followJob(data);
@@ -152,6 +182,7 @@ export function ProJobScreen() {
     // With the action dock, the dock pads the bottom safe area itself (its white runs to the edge).
     <Screen bar="light" edges={docked ? [] : undefined} testID="pro-job-screen">
       <ScrollView
+        ref={scrollRef}
         contentContainerClassName="flex-grow px-4 pb-6"
         refreshControl={
           <RefreshControl
@@ -215,14 +246,26 @@ export function ProJobScreen() {
             {photosFirst(data) ? null : <JobAddress job={data} />}
             {photosFirst(data) ? null : <JobAbout job={data} />}
             {/* One place in the tree at every step, so nothing in it starts over on Start job. */}
-            <JobPhotos job={data} before={before} after={after} now={now} held={jobDone.busy} />
+            <JobPhotos
+              job={data}
+              before={before}
+              after={after}
+              now={now}
+              held={jobDone.busy}
+              saveRefs={{ before: beforeSave, after: afterSave }}
+            />
             {photosFirst(data) ? <JobAddress job={data} /> : null}
             {photosFirst(data) ? <JobAbout job={data} /> : null}
           </View>
         )}
       </ScrollView>
       {docked && data ? (
-        <JobActions job={data} jobDone={jobDone} photosPending={before.pending || after.pending} />
+        <JobActions
+          job={data}
+          jobDone={jobDone}
+          photosPending={before.pending || after.pending}
+          onBlockedDone={showPendingSave}
+        />
       ) : null}
     </Screen>
   );
@@ -244,10 +287,15 @@ type JobPhotosProps = {
   now: number;
   /** Job's done is under way. */
   held: boolean;
+  /** Where each kind's Save button sits (#567). */
+  saveRefs: {
+    before: RefObject<ComponentRef<typeof View> | null>;
+    after: RefObject<ComponentRef<typeof View> | null>;
+  };
 };
 
 /** Before, then after: each editable while the job takes it, else its saved photos (if any). */
-function JobPhotos({ job, before, after, now, held }: JobPhotosProps) {
+function JobPhotos({ job, before, after, now, held, saveRefs }: JobPhotosProps) {
   const step = jobStep(job);
   return (
     <View className="gap-8">
@@ -257,6 +305,7 @@ function JobPhotos({ job, before, after, now, held }: JobPhotosProps) {
         now={now}
         editable={BEFORE_PHOTO_STEPS.includes(step)}
         held={held}
+        saveRef={saveRefs.before}
       />
       <JobPhotoSection
         job={job}
@@ -264,6 +313,7 @@ function JobPhotos({ job, before, after, now, held }: JobPhotosProps) {
         now={now}
         editable={step === "working"}
         held={held}
+        saveRef={saveRefs.after}
       />
     </View>
   );
@@ -516,14 +566,26 @@ function DoneAction({
   job,
   jobDone,
   photosPending,
+  onBlockedDone,
 }: {
   job: ProJob;
   jobDone: JobDone;
   photosPending: boolean;
+  onBlockedDone: () => void;
 }) {
   const { t } = useTranslation();
   const { state, busy, done } = jobDone;
   const message = doneMessage(t, job, state, photosPending);
+  const button = (
+    <Button
+      label={t(state === "slow" ? "proJobs.done.tryAgain" : "proJobs.done.action")}
+      size="lg"
+      disabled={!busy && (job.photos.after.length === 0 || photosPending)}
+      loading={busy}
+      onPress={done}
+      testID="pro-job-done"
+    />
+  );
 
   return (
     <>
@@ -538,14 +600,16 @@ function DoneAction({
           {message}
         </Text>
       ) : null}
-      <Button
-        label={t(state === "slow" ? "proJobs.done.tryAgain" : "proJobs.done.action")}
-        size="lg"
-        disabled={!busy && (job.photos.after.length === 0 || photosPending)}
-        loading={busy}
-        onPress={done}
-        testID="pro-job-done"
-      />
+      {!busy && photosPending ? (
+        // The button stays closed; a tap on it lands here and points at what to do (#567). Not an
+        // element of its own for assistive technology: the closed button and the line above it
+        // are what the reader hears.
+        <Pressable accessible={false} onPress={onBlockedDone} testID="pro-job-done-blocked">
+          {button}
+        </Pressable>
+      ) : (
+        button
+      )}
     </>
   );
 }
@@ -558,10 +622,12 @@ function JobActions({
   job,
   jobDone,
   photosPending,
+  onBlockedDone,
 }: {
   job: ProJob;
   jobDone: JobDone;
   photosPending: boolean;
+  onBlockedDone: () => void;
 }) {
   const { t } = useTranslation();
   const step = jobStep(job);
@@ -611,7 +677,12 @@ function JobActions({
           testID="pro-job-start"
         />
       ) : step === "working" ? (
-        <DoneAction job={job} jobDone={jobDone} photosPending={photosPending} />
+        <DoneAction
+          job={job}
+          jobDone={jobDone}
+          photosPending={photosPending}
+          onBlockedDone={onBlockedDone}
+        />
       ) : null}
     </View>
   );
