@@ -19,6 +19,11 @@ rules apply.
   wrong role is 403. Resources addressed by id call `ensure_owner` (404 for anyone else) or a
   feature rule, and carry a test proving user A cannot read or change user B's.
   `tests/test_route_permissions.py` fails CI on a route with no decision.
+- Sessions (#161): an access token names its refresh family (`sid`). Every authenticated
+  request reads the account (status and role) and whether that family is still live, never
+  cached, so logout, reuse detection, a password reset, a suspension or a demotion take effect
+  at the next request. Database reads only, no Redis: with the database down a request fails,
+  it never passes. A token without `sid` was issued before #161 and works until it expires.
 - Errors: raise an `AppError` subclass from `app/errors.py`; responses always have the shape
   `{"error": {"code", "message"}}`. Unexpected exceptions become a generic 500.
 - Logging: `logging.getLogger(__name__)`, an event-style message plus `extra={...}`; the JSON

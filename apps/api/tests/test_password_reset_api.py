@@ -50,7 +50,7 @@ from tests.conftest import (
     make_settings,
     wait_until_blocked,
 )
-from tests.test_auth_api import PASSWORD, login, register
+from tests.test_auth_api import PASSWORD, login, me, register
 
 EMAIL = "ana.reset@example.com"
 OTHER_EMAIL = "bruno.reset@example.com"
@@ -389,6 +389,30 @@ async def test_reset_success_changes_password_and_revokes_all_sessions(
     assert (await login(db_client, email=EMAIL, password=NEW_PASSWORD)).status_code == 200
     # Another user's session is untouched.
     assert (await refresh(db_client, others["refresh_token"])).status_code == 200
+
+
+async def test_reset_refuses_every_session_s_access_tokens_at_the_next_request(
+    committed: Committed, sender: FakeSender
+) -> None:
+    # The access tokens too, not only the refresh tokens: each names its session (#161).
+    client = committed.client
+    sessions = [
+        (await register(client, email=committed.email)).json(),
+        (await login(client, email=committed.email)).json(),
+    ]
+    await forgot(client, committed.email)
+    [email] = sender.sent
+    for session in sessions:
+        assert (await me(client, session["access_token"])).status_code == 200
+
+    assert (await reset(client, email.code, email=committed.email)).status_code == 204
+
+    for session in sessions:
+        refused = await me(client, session["access_token"])
+        assert refused.status_code == 401
+        assert refused.json()["error"]["code"] == "invalid_token"
+    new_session = (await login(client, email=committed.email, password=NEW_PASSWORD)).json()
+    assert (await me(client, new_session["access_token"])).status_code == 200
 
 
 async def test_reset_code_is_single_use(

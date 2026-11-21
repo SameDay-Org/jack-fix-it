@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select, text, update
+from sqlalchemy import exists, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.auth.models import RefreshToken
@@ -48,6 +48,20 @@ class RefreshTokenRepository:
             .execution_options(populate_existing=True)
         )
         return await self._session.scalar(statement)
+
+    async def family_is_live(self, family_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+        """True while the user's family has a token not revoked yet: the session an access
+        token's `sid` names is still open (#161). A rotation revokes the spent token and adds its
+        successor in one commit, so a live family always shows one; logout, reuse detection and
+        revoke_all_for_user leave none. One read on ix_refresh_tokens_live_family_id, no lock."""
+        statement = select(
+            exists().where(
+                RefreshToken.family_id == family_id,
+                RefreshToken.user_id == user_id,
+                RefreshToken.revoked_at.is_(None),
+            )
+        )
+        return bool(await self._session.scalar(statement))
 
     async def revoke_family(self, family_id: uuid.UUID, now: datetime) -> None:
         """Revokes every token of the family that is not revoked yet, in one UPDATE."""
