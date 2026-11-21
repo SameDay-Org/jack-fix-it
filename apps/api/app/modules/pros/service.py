@@ -54,7 +54,6 @@ class AssignCandidate:
 
     pro_id: uuid.UUID
     user_id: uuid.UUID
-    rating_avg: Decimal | None  # NULL until the first review
     approved: bool
     payouts_enabled: bool
     in_category: bool
@@ -358,7 +357,6 @@ class ProService:
             AssignCandidate(
                 pro_id=row.id,
                 user_id=row.user_id,
-                rating_avg=row.rating_avg,
                 approved=True,
                 payouts_enabled=row.payouts_enabled,
                 in_category=True,
@@ -387,7 +385,6 @@ class ProService:
         return AssignCandidate(
             pro_id=profile.id,
             user_id=profile.user_id,
-            rating_avg=profile.rating_avg,
             approved=profile.verification_status is ProVerificationStatus.APPROVED,
             payouts_enabled=profile.payouts_enabled,
             in_category=in_category,
