@@ -14909,6 +14909,7 @@
         "type": "string",
         "enum": [
           "job_updates",
+          "messages",
           "quotes_and_opportunities",
           "reminders",
           "marketing",

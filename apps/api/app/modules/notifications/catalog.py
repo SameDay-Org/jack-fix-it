@@ -5,8 +5,9 @@ accepted (to its pro); #65 the job's steps and a booking whose payment was cance
 job confirmed (to its pro); #69 a job cancelled by its customer (to the pro, and to the
 customer with the refund in neutral words, no timing); #75 a problem reported (to the pro);
 #76 its resolution (to both sides, one message per decision, never the admin's note); #280
-payouts set up (to an approved pro); #273 a tip received (to the pro: never the customer's name
-or the amount, which a lock screen would show). The On my
+payouts set up (to an approved pro); #73 a new chat message (to the other side, never its
+text); #273 a tip received (to the pro: never the customer's name or the amount, which a lock
+screen would show). The On my
 way copy points to the app for the arrival code: the code itself never leaves the customer's job
 view. `push.test.*` is a neutral message.
 """
@@ -104,6 +105,8 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 ),
                 "push.payouts_enabled.title": "Payouts are set up",
                 "push.payouts_enabled.body": "You can receive requests now.",
+                "push.chat_message.title": "New message",
+                "push.chat_message.body": "You have a new message about job {public_code}.",
                 "push.tip_received.title": "You received a tip",
                 "push.tip_received.body": "The customer left you a tip for job {public_code}.",
             }
@@ -200,6 +203,8 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
                 ),
                 "push.payouts_enabled.title": "Tus pagos están listos",
                 "push.payouts_enabled.body": "Ya puedes recibir solicitudes.",
+                "push.chat_message.title": "Nuevo mensaje",
+                "push.chat_message.body": "Tienes un mensaje nuevo sobre el trabajo {public_code}.",
                 "push.tip_received.title": "Recibiste una propina",
                 "push.tip_received.body": (
                     "El cliente te dejó una propina por el trabajo {public_code}."
