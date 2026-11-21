@@ -25,7 +25,10 @@ from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
 from tests.helpers import as_status_writer
 
-LOCK_WAIT_DEADLINE_SECONDS = 5
+# How long a test waits for one backend to be seen waiting on another's lock. Generous on
+# purpose: it bounds a polled condition, so a pass is as fast as before, and only a machine
+# under load (or a real bug) gets near it; 5 s failed under CI load (#448).
+LOCK_WAIT_DEADLINE_SECONDS = 30
 NOW = datetime(2026, 10, 21, 12, 0, tzinfo=UTC)
 
 
