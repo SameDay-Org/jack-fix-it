@@ -9970,6 +9970,85 @@
         }
       }
     },
+    "/v1/requests/{request_id}/receipt": {
+      "get": {
+        "tags": [
+          "receipts"
+        ],
+        "summary": "The receipt of my job",
+        "description": "The proof of payment of the request's job, from the moment its payment went through:\nthe service, the tax when there is some, the tip once it went through and each amount\nreturned to the payment method, the total paid, the card's brand and last 4 digits, and\nwhere the money stands. Never the platform's fee or the pro's payout.",
+        "operationId": "get_receipt_v1_requests__request_id__receipt_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing, invalid or expired token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers have receipts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no request of the caller with this id; receipt_not_available: its job's payment has not gone through yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/pros/{pro_id}": {
       "get": {
         "tags": [
@@ -14818,6 +14897,7 @@
         "type": "string",
         "enum": [
           "job_updates",
+          "messages",
           "quotes_and_opportunities",
           "reminders",
           "marketing",
@@ -16561,6 +16641,360 @@
         ],
         "title": "Receipt",
         "description": "How far a message got with its recipient, the participant who did not send it: sent,\ndelivered (their app fetched it) or seen (they marked it read). From the recipient's read\nmarker and deliveries (#331)."
+      },
+      "ReceiptAddress": {
+        "properties": {
+          "line1": {
+            "type": "string",
+            "title": "Line1"
+          },
+          "city": {
+            "type": "string",
+            "title": "City"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "line1",
+          "city",
+          "state"
+        ],
+        "title": "ReceiptAddress",
+        "description": "The customer's own address, on the in-app receipt only: line 1, city and state."
+      },
+      "ReceiptCategory": {
+        "properties": {
+          "slug": {
+            "type": "string",
+            "title": "Slug"
+          },
+          "names": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Names"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "slug",
+          "names"
+        ],
+        "title": "ReceiptCategory"
+      },
+      "ReceiptIssuer": {
+        "properties": {
+          "legal_name": {
+            "type": "string",
+            "title": "Legal Name"
+          },
+          "support_email": {
+            "type": "string",
+            "title": "Support Email"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "legal_name",
+          "support_email"
+        ],
+        "title": "ReceiptIssuer",
+        "description": "Who issues the receipt (Q-R1): the API's settings, never the app's."
+      },
+      "ReceiptLine": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ReceiptLineKind",
+            "description": "The app names the line by its kind."
+          },
+          "amount_cents": {
+            "type": "integer",
+            "title": "Amount Cents",
+            "description": "Integer cents; negative for an amount returned."
+          },
+          "at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At",
+            "description": "When it went back, for a returned amount; else null."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "amount_cents",
+          "at"
+        ],
+        "title": "ReceiptLine"
+      },
+      "ReceiptLineKind": {
+        "type": "string",
+        "enum": [
+          "service",
+          "tax",
+          "tip",
+          "returned"
+        ],
+        "title": "ReceiptLineKind"
+      },
+      "ReceiptOut": {
+        "properties": {
+          "receipt_number": {
+            "type": "string",
+            "title": "Receipt Number",
+            "description": "The request's public code: one receipt per job.",
+            "examples": [
+              "JF-000124"
+            ]
+          },
+          "paid_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Paid At",
+            "description": "When the job's payment went through."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReceiptStatus"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptCategory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pro_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pro Name",
+            "description": "The pro's public name; null when none can be shown.",
+            "examples": [
+              "Dan R."
+            ]
+          },
+          "scheduled_start_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Scheduled Start At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At",
+            "description": "When the pro marked the job done."
+          },
+          "address": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptAddress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptLine"
+            },
+            "type": "array",
+            "title": "Lines"
+          },
+          "total_paid_cents": {
+            "type": "integer",
+            "title": "Total Paid Cents",
+            "description": "Service plus tax plus tip, minus what went back."
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "description": "Stripe's lower-case currency code.",
+            "examples": [
+              "usd"
+            ]
+          },
+          "payment_method": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptPaymentMethod"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null until Stripe's charge was read, and for a payment it gave no card for: the app then says Card."
+          },
+          "tip": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptTip"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether a tip can still be added and until when; null for a job that takes no tip."
+          },
+          "issuer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptIssuer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who issues the receipt; null until both values are set on the server."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "receipt_number",
+          "paid_at",
+          "status",
+          "category",
+          "pro_name",
+          "scheduled_start_at",
+          "completed_at",
+          "address",
+          "lines",
+          "total_paid_cents",
+          "currency",
+          "payment_method",
+          "tip",
+          "issuer"
+        ],
+        "title": "ReceiptOut",
+        "description": "A job's receipt, from the frozen amounts: the price and tax as charged, the tip once it\nwent through and each amount that went back. Never the platform's fee or the pro's payout,\nand no Stripe id."
+      },
+      "ReceiptPaymentMethod": {
+        "properties": {
+          "brand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brand",
+            "description": "Stripe's brand code.",
+            "examples": [
+              "visa"
+            ]
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4",
+            "examples": [
+              "4242"
+            ]
+          },
+          "wallet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wallet",
+            "description": "Stripe's wallet type.",
+            "examples": [
+              "apple_pay"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "brand",
+          "last4",
+          "wallet"
+        ],
+        "title": "ReceiptPaymentMethod",
+        "description": "The card that paid, as Stripe's charge describes it: never more than this."
+      },
+      "ReceiptStatus": {
+        "type": "string",
+        "enum": [
+          "paid",
+          "under_review",
+          "partly_returned",
+          "returned"
+        ],
+        "title": "ReceiptStatus",
+        "description": "Where the receipt's money stands."
+      },
+      "ReceiptTip": {
+        "properties": {
+          "can_tip": {
+            "type": "boolean",
+            "title": "Can Tip",
+            "description": "Whether a tip can still be added (the job's tip window)."
+          },
+          "closes_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closes At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "can_tip",
+          "closes_at"
+        ],
+        "title": "ReceiptTip"
       },
       "RefreshTokenRequest": {
         "properties": {
