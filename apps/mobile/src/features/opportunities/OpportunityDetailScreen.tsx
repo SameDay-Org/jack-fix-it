@@ -6,8 +6,11 @@ import { ScrollView, Text, View } from "react-native";
 
 import { Button, Card, IconTile, Screen, Skeleton, TextSkeleton } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
+import { useCategories } from "@/features/home/useCategories";
 import { markOpportunityViewed } from "@/features/pro-home/useOpportunities";
+import { formatLocale } from "@/features/quotes/format";
 import { useSettledError } from "@/features/quotes/useRequestQuotes";
+import { AnswerList, answerRows } from "@/features/request/AnswerList";
 import { withPeriod } from "@/features/request/period";
 
 import { categoryLabel, categoryTileProps, formatDay, locationLabel, sentAgo } from "./format";
@@ -30,7 +33,8 @@ const FACT_ROWS = 3;
 /**
  * One opportunity, read-only (`/opportunities/[id]`, where the new-request push lands): the
  * request's code and category, the facts a pro may see before payment (city and ZIP, preferred
- * date, when it was sent), the description, and the photos and videos. Its one action, "Send a
+ * date, when it was sent), the description, the customer's answers to the category's questions
+ * (#468), and the photos and videos. Its one action, "Send a
  * quote", stays under the scrolling request and opens the quote form over it.
  */
 export function OpportunityDetailScreen() {
@@ -196,11 +200,44 @@ function OpportunityBody({ opportunity, now, refresh }: OpportunityBodyProps) {
           </Text>
         ) : null}
       </View>
+      <Answers opportunity={opportunity} />
       {refresh && mediaMissing ? (
         <MediaUnavailable refresh={refresh} />
       ) : (
         <OpportunityMedia media={opportunity.media} pending={opportunity.media_pending} now={now} />
       )}
+    </View>
+  );
+}
+
+/**
+ * The customer's answers to the category's questions (#468), labelled as they were asked, in the
+ * app's language, the way the customer's own Review step lists them. The labels come from the
+ * active categories (read once per session); with no answer, or no questions known for the
+ * category, nothing shows.
+ */
+function Answers({ opportunity }: { opportunity: OpportunityDetail }) {
+  const { t } = useTranslation();
+  // Asked only when there is an answer to label: most of the time Home has read them already.
+  const categories = useCategories({
+    enabled: Object.keys(opportunity.intake_answers).length > 0,
+  }).data;
+  const locale = formatLocale();
+  const questions =
+    categories?.find((category) => category.id === opportunity.category?.id)?.intake_questions ??
+    [];
+  if (answerRows(t, questions, opportunity.intake_answers, locale).length === 0) return null;
+  return (
+    <View className="gap-3" testID="opportunity-answers">
+      <Text accessibilityRole="header" className="text-headline text-navy-900">
+        {t("opportunities.detail.answers")}
+      </Text>
+      <AnswerList
+        questions={questions}
+        answers={opportunity.intake_answers}
+        locale={locale}
+        testIDPrefix="opportunity-answer"
+      />
     </View>
   );
 }
