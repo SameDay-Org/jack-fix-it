@@ -15,7 +15,7 @@ from typing import Any, Final
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
@@ -147,6 +147,28 @@ async def test_a_served_zip_makes_one_received_request_for_a_guest_with_its_cont
     )
     # Never dispatched: no dispatch task, before or after the commit.
     assert all("dispatch" not in str(job) for job in queue.jobs.values())
+
+
+@pytest.mark.parametrize("utm", [None, {}, {"source": None}])
+async def test_a_request_without_a_campaign_stores_sql_null(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, served: None, utm: object
+) -> None:
+    """No UTM, an empty one, or one whose keys are all null: the column is SQL NULL, never a
+    JSON null (#86 review)."""
+    data = body()
+    if utm is None:
+        del data["utm"]
+    else:
+        data["utm"] = utm
+
+    assert (await send(db_client, data)).status_code == 201
+
+    [request] = await web_requests(db_session)
+    stored = await db_session.execute(
+        text("SELECT utm IS NULL, jsonb_typeof(utm) FROM service_requests WHERE id = :id"),
+        {"id": request.id},
+    )
+    assert stored.one() == (True, None)
 
 
 async def test_a_replay_answers_the_same_code_and_another_body_is_refused(

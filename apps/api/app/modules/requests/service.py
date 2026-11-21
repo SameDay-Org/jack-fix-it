@@ -34,7 +34,7 @@ from typing import Final
 
 from pydantic import JsonValue
 from redis.exceptions import RedisError
-from sqlalchemy import Select, Subquery
+from sqlalchemy import Select, Subquery, null
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -296,7 +296,9 @@ class ServiceRequestService:
                 preferred_period=preferred_period,
                 language=guest.locale,
                 origin=RequestOrigin.WEB,
-                utm=lead.utm.model_dump(exclude_none=True) if lead.utm else None,
+                # No campaign: SQL NULL, never a JSON null (#86; the app's create still
+                # stores JSON null, out of this PR's scope).
+                utm=(lead.utm.model_dump(exclude_none=True) if lead.utm else None) or null(),
             )
         )
         return CreatedLead(request.id, request.public_code, address_id)
