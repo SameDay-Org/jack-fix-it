@@ -1250,6 +1250,8 @@ def test_every_reviews_route_is_a_no_store_route() -> None:
         ("POST", "/v1/jobs/{job_id}/reviews"): True,
         ("GET", "/v1/jobs/{job_id}/reviews/mine"): True,
         ("GET", "/v1/users/me/rating"): True,
+        ("GET", "/v1/pros/{pro_id}"): True,
+        ("GET", "/v1/pros/{pro_id}/reviews"): True,
     }
 
 

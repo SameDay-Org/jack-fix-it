@@ -581,6 +581,8 @@ class Settings(BaseSettings):
     ops_action_window_seconds: int = Field(default=60, gt=0)
     # The most pros a request's eligible list names for a manual assignment (#82).
     ops_eligible_pros_limit: int = Field(default=50, gt=0)
+    # Hours a request whose pro cancelled its job stays under problems in the queue (#69).
+    ops_pro_cancel_attention_hours: int = Field(default=72, gt=0)
     # The IANA time zone "scheduled today" is read in, as Postgres names it.
     business_time_zone: str = Field(
         default="America/New_York", pattern=r"^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$"
@@ -602,6 +604,9 @@ class Settings(BaseSettings):
     # Days after a job's confirmation at which a review of it counts for its target even if
     # the target wrote none (the publication rule; Cesar may adjust the window).
     review_publish_after_days: int = Field(default=14, gt=0)
+    # Reads of pros' public profiles and reviews per user per window (#78).
+    pro_public_read_limit: int = Field(default=120, gt=0)
+    pro_public_read_window_seconds: int = Field(default=60, gt=0)
     # The original of a redacted chat message (#72, Cesar 2026-11-07): kept encrypted for staff
     # only (app.crypto), deleted after CHAT_ORIGINAL_RETENTION_DAYS. CHAT_ORIGINAL_KEYS is a JSON
     # object {key_id: base64 32-byte key}; CHAT_ORIGINAL_ACTIVE_KEY_ID names the key new originals

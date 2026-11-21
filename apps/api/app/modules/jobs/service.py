@@ -468,6 +468,11 @@ class JobPartiesReader:
         review's publication window is read in the reviews' own query (#77)."""
         return JobRepository.confirmations()
 
+    async def completed_counts(self, pro_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, int]:
+        """How many jobs each pro completed: confirmed by the customer or the auto-confirm,
+        paid out since included (is_reviewable); a pro with none is left out. One query (#78)."""
+        return await self._jobs.completed_counts(pro_ids)
+
     async def parties(self, job_id: uuid.UUID, *, lock: bool = False) -> JobParties | None:
         """The job's parties, or None for an unknown job: for staff, who may read any job.
         One statement. With `lock`, the job row is held FOR NO KEY UPDATE until the caller's

@@ -1,7 +1,7 @@
 """tips: the customer's tip for the pro on a confirmed job (#273)
 
 Revision ID: d128d274eb0a
-Revises: da885dda5080
+Revises: 920fe99e6f1d
 Create Date: 2026-11-19 17:00:00.000000
 
 """
@@ -14,7 +14,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "d128d274eb0a"
-down_revision: str | Sequence[str] | None = "da885dda5080"
+down_revision: str | Sequence[str] | None = "920fe99e6f1d"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
