@@ -31,6 +31,8 @@ export function item(extra: Partial<TicketItem> = {}): TicketItem {
     role: "customer",
     topic: "payment",
     job_id: null,
+    job_request_id: null,
+    job_request_code: null,
     status: "open",
     created_at: "2026-11-07T14:30:00Z",
     ...extra,

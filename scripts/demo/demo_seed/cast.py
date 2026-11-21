@@ -339,3 +339,11 @@ TICKETS: Final = (
     ("app_problem", "Photos take a long time to upload when I'm on mobile data."),
     ("account", "How do I change the email on my account?"),
 )
+# The BDC's work: the agent's internal notes on the urgent request they hold, and the admin's
+# follow-ups on the request waiting on its customer (one overdue, one due later today).
+BDC_NOTES: Final = (
+    "Called the customer: no answer. Left a voicemail.",
+    "Second call, no answer again. Trying once more after lunch.",
+)
+FOLLOWUP_OVERDUE: Final = "Call the customer back about the photos they promised."
+FOLLOWUP_TODAY: Final = "Check whether the photos came in, then classify the request."

@@ -132,6 +132,13 @@ class Timeline:
         self._noted: dict[RowKey, Row] = {}
         self._began = datetime.now(UTC)
 
+    async def start(self) -> None:
+        """Takes the request's rows as they are now as already seen: on a request whose story
+        is told, only what is written after this is dated."""
+        async with self._sessions() as session:
+            self._seen = await self._read(session)
+        self._began = datetime.now(UTC)
+
     def ahead(self, distance: timedelta) -> datetime:
         """A real time for the step about to run to send (a proposed start): its mark lands
         it exactly `distance` after the step's `at`."""
