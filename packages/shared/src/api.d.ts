@@ -2293,6 +2293,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/requests/{request_id}/receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The receipt of my job
+         * @description The proof of payment of the request's job, from the moment its payment went through:
+         *     the service, the tax when there is some, the tip once it went through and each amount
+         *     returned to the payment method, the total paid, the card's brand and last 4 digits, and
+         *     where the money stands. Never the platform's fee or the pro's payout.
+         */
+        get: operations["get_receipt_v1_requests__request_id__receipt_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pros/{pro_id}": {
         parameters: {
             query?: never;
@@ -4657,7 +4680,7 @@ export interface components {
          * PreferenceGroup
          * @enum {string}
          */
-        PreferenceGroup: "job_updates" | "quotes_and_opportunities" | "reminders" | "marketing" | "account_and_security";
+        PreferenceGroup: "job_updates" | "messages" | "quotes_and_opportunities" | "reminders" | "marketing" | "account_and_security";
         /**
          * PreferredPeriod
          * @description When in the preferred day the customer would like the visit (#237). Pros propose the
@@ -5480,6 +5503,154 @@ export interface components {
          * @enum {string}
          */
         Receipt: "sent" | "delivered" | "seen";
+        /**
+         * ReceiptAddress
+         * @description The customer's own address, on the in-app receipt only: line 1, city and state.
+         */
+        ReceiptAddress: {
+            /** Line1 */
+            line1: string;
+            /** City */
+            city: string;
+            /** State */
+            state: string;
+        };
+        /** ReceiptCategory */
+        ReceiptCategory: {
+            /** Slug */
+            slug: string;
+            /** Names */
+            names: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * ReceiptIssuer
+         * @description Who issues the receipt (Q-R1): the API's settings, never the app's.
+         */
+        ReceiptIssuer: {
+            /** Legal Name */
+            legal_name: string;
+            /** Support Email */
+            support_email: string;
+        };
+        /** ReceiptLine */
+        ReceiptLine: {
+            /** @description The app names the line by its kind. */
+            kind: components["schemas"]["ReceiptLineKind"];
+            /**
+             * Amount Cents
+             * @description Integer cents; negative for an amount returned.
+             */
+            amount_cents: number;
+            /**
+             * At
+             * @description When it went back, for a returned amount; else null.
+             */
+            at: string | null;
+        };
+        /**
+         * ReceiptLineKind
+         * @enum {string}
+         */
+        ReceiptLineKind: "service" | "tax" | "tip" | "returned";
+        /**
+         * ReceiptOut
+         * @description A job's receipt, from the frozen amounts: the price and tax as charged, the tip once it
+         *     went through and each amount that went back. Never the platform's fee or the pro's payout,
+         *     and no Stripe id.
+         */
+        ReceiptOut: {
+            /**
+             * Receipt Number
+             * @description The request's public code: one receipt per job.
+             * @example JF-000124
+             */
+            receipt_number: string;
+            /**
+             * Paid At
+             * Format: date-time
+             * @description When the job's payment went through.
+             */
+            paid_at: string;
+            status: components["schemas"]["ReceiptStatus"];
+            category: components["schemas"]["ReceiptCategory"] | null;
+            /**
+             * Pro Name
+             * @description The pro's public name; null when none can be shown.
+             * @example Dan R.
+             */
+            pro_name: string | null;
+            /**
+             * Scheduled Start At
+             * Format: date-time
+             */
+            scheduled_start_at: string;
+            /**
+             * Completed At
+             * @description When the pro marked the job done.
+             */
+            completed_at: string | null;
+            address: components["schemas"]["ReceiptAddress"] | null;
+            /** Lines */
+            lines: components["schemas"]["ReceiptLine"][];
+            /**
+             * Total Paid Cents
+             * @description Service plus tax plus tip, minus what went back.
+             */
+            total_paid_cents: number;
+            /**
+             * Currency
+             * @description Stripe's lower-case currency code.
+             * @example usd
+             */
+            currency: string;
+            /** @description null until Stripe's charge was read, and for a payment it gave no card for: the app then says Card. */
+            payment_method: components["schemas"]["ReceiptPaymentMethod"] | null;
+            /** @description Whether a tip can still be added and until when; null for a job that takes no tip. */
+            tip: components["schemas"]["ReceiptTip"] | null;
+            /** @description Who issues the receipt; null until both values are set on the server. */
+            issuer: components["schemas"]["ReceiptIssuer"] | null;
+        };
+        /**
+         * ReceiptPaymentMethod
+         * @description The card that paid, as Stripe's charge describes it: never more than this.
+         */
+        ReceiptPaymentMethod: {
+            /**
+             * Brand
+             * @description Stripe's brand code.
+             * @example visa
+             */
+            brand: string | null;
+            /**
+             * Last4
+             * @example 4242
+             */
+            last4: string | null;
+            /**
+             * Wallet
+             * @description Stripe's wallet type.
+             * @example apple_pay
+             */
+            wallet: string | null;
+        };
+        /**
+         * ReceiptStatus
+         * @description Where the receipt's money stands.
+         * @enum {string}
+         */
+        ReceiptStatus: "paid" | "under_review" | "partly_returned" | "returned";
+        /** ReceiptTip */
+        ReceiptTip: {
+            /**
+             * Can Tip
+             * @description Whether a tip can still be added (the job's tip window).
+             */
+            can_tip: boolean;
+            /** Closes At */
+            closes_at: string | null;
+        };
         /** RefreshTokenRequest */
         RefreshTokenRequest: {
             /**
@@ -14237,6 +14408,64 @@ export interface operations {
             };
             /** @description not_configured: payments are not configured; payments_unavailable: Stripe is not reachable or asked to retry later; nothing changed, retry later. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_receipt_v1_requests__request_id__receipt_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers have receipts. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id; receipt_not_available: its job's payment has not gone through yet. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

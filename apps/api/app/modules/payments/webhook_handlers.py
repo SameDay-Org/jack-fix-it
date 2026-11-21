@@ -4,10 +4,10 @@ Each reads the event's PaymentIntent and hands it to PaymentReconciler (reconcil
 the payment status the event stands for, and the metadata payment_id it may adopt the intent for
 (#296; anything but a string there is read as none). A handler never commits: the worker does
 (#40). What the reconciliation did that people hear about (#65), it announces after that commit
-(AfterCommit): a job booked pushes the customer and the pro; a canceled payment that reopened
-the quotes pushes the customer. An event whose object is not a PaymentIntent with an id, an
-integer amount and a currency is malformed: logged (the event id and type) and raised, so it
-ends failed for staff.
+(AfterCommit): a job booked pushes the customer and the pro, and queues the payment's
+receipt email (#62); a canceled payment that reopened the quotes pushes the customer. An event
+whose object is not a PaymentIntent with an id, an integer amount and a currency is malformed:
+logged (the event id and type) and raised, so it ends failed for staff.
 
 A PaymentIntent whose metadata names a kind (`kind`, #273: a tip's) is not a job payment's: the
 registry routes its events to that kind's handler (webhooks/handlers.py), and these handlers
@@ -37,6 +37,7 @@ from app.modules.payments.reconciliation import (
     PaymentReconciler,
     Reconciled,
 )
+from app.modules.receipts.queue import enqueue_payment_receipt
 from app.modules.webhooks.events import AfterCommit, StripeEvent, StripeEventHandler
 from app.queue import JobQueue
 
@@ -121,6 +122,8 @@ async def announce(outcome: Reconciled, queue: JobQueue, timeout_seconds: float)
             public_code=outcome.public_code,
             timeout_seconds=timeout_seconds,
         )
+        # Once per booking: a replayed event books nothing, so it queues nothing.
+        await enqueue_payment_receipt(queue, outcome.payment_id, timeout_seconds)
     elif isinstance(outcome, BookingReopened):
         await push_booking_not_completed(
             queue,

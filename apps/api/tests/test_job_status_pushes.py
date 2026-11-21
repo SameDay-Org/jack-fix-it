@@ -512,23 +512,25 @@ async def test_a_booked_job_pushes_the_customer_and_the_pro_after_the_commit(
         f"push:job_scheduled:{job_id}": push(
             pro_user, "job_scheduled", job_id, code, f"/jobs/{job_id}"
         ),
+        # The payment's receipt email (#62).
+        f"payment-receipt:{market.payment_id}": ("send_payment_receipt", (str(market.payment_id),)),
     }
-    # Both queued once the job and the processed row were committed.
-    assert queue.seen == [(1, WebhookEventStatus.PROCESSED, PaymentStatus.SUCCEEDED)] * 2
+    # All three queued once the job and the processed row were committed.
+    assert queue.seen == [(1, WebhookEventStatus.PROCESSED, PaymentStatus.SUCCEEDED)] * 3
 
 
 async def test_a_repeated_or_late_event_pushes_nothing_more(market: Market) -> None:
     event_id = await posted(market, SUCCEEDED)
     queue = CheckingQueue(market=market)
     assert await run(market, event_id, queue) == "processed"
-    assert len(queue.before) == 2
+    assert len(queue.before) == 3  # the two pushes and the receipt email (#62)
 
     # The same event again: the row is processed, the run is skipped.
     assert await run(market, event_id, queue) == "skipped"
     # Another succeeded event for the intent: the payment is succeeded already, no new job.
     assert await run(market, await posted(market, SUCCEEDED), queue) == "processed"
 
-    assert len(queue.before) == 2
+    assert len(queue.before) == 3
 
 
 async def test_a_rolled_back_handler_pushes_nothing_and_its_retry_pushes_once(
@@ -551,8 +553,12 @@ async def test_a_rolled_back_handler_pushes_nothing_and_its_retry_pushes_once(
     monkeypatch.undo()
     assert await run(market, event_id, queue, job_try=2) == "processed"
     job_id, _, _ = await booked(market)
-    assert sorted(queue.jobs) == [f"push:job_booked:{job_id}", f"push:job_scheduled:{job_id}"]
-    assert len(queue.before) == 2
+    assert sorted(queue.jobs) == [
+        f"payment-receipt:{market.payment_id}",
+        f"push:job_booked:{job_id}",
+        f"push:job_scheduled:{job_id}",
+    ]
+    assert len(queue.before) == 3
 
 
 async def test_no_push_when_the_worker_commit_fails(
@@ -571,9 +577,9 @@ async def test_no_push_when_the_worker_commit_fails(
 
     assert queue.before == []
     assert (await market.state()).jobs == []
-    # The retry commits, then pushes.
+    # The retry commits, then pushes (and queues the receipt).
     assert await run(market, event_id, queue, job_try=2) == "processed"
-    assert len(queue.before) == 2
+    assert len(queue.before) == 3
 
 
 @pytest.mark.parametrize(
@@ -593,7 +599,9 @@ async def test_a_failed_push_enqueue_never_fails_the_event(
         )
 
     assert outcome == "processed"
-    assert len(broken.before) == 2  # each push tried once
+    assert len(broken.before) == 3  # each push tried once, and the receipt email (#62)
+    [receipt] = records(caplog, "payment_receipt_enqueue_failed")
+    assert ids_only(receipt) == {"payment_id": str(market.payment_id)}
     assert (await market.event_row(event_id)).status is WebhookEventStatus.PROCESSED
     job_id, pro_user, _ = await booked(market)
     assert sorted(
@@ -677,8 +685,12 @@ async def test_a_succeeded_event_that_adopts_its_intent_still_pushes_both(market
     assert await run(market, await posted(market, SUCCEEDED), queue) == "processed"
 
     job_id, _, _ = await booked(market)
-    assert sorted(queue.jobs) == [f"push:job_booked:{job_id}", f"push:job_scheduled:{job_id}"]
-    assert queue.seen == [(1, WebhookEventStatus.PROCESSED, PaymentStatus.SUCCEEDED)] * 2
+    assert sorted(queue.jobs) == [
+        f"payment-receipt:{market.payment_id}",
+        f"push:job_booked:{job_id}",
+        f"push:job_scheduled:{job_id}",
+    ]
+    assert queue.seen == [(1, WebhookEventStatus.PROCESSED, PaymentStatus.SUCCEEDED)] * 3
 
 
 async def test_a_canceled_payment_that_reopens_nothing_pushes_nothing(market: Market) -> None:

@@ -25,6 +25,7 @@ from app.config import Settings
 from app.db import get_session
 from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.integrations.stripe_payments import (
+    CardFacts,
     CreatedCustomer,
     FoundPaymentIntents,
     FoundTipIntents,
@@ -170,6 +171,9 @@ class FakeStripePayments:
     cancels: list[tuple[str, str]] = field(default_factory=list)
     cancel_refused: bool = False
     on_cancel_intent: Callable[[], Awaitable[None]] | None = None
+    # The card each PaymentIntent was paid with, as card_of reads it (#62); none by default.
+    cards: dict[str, CardFacts] = field(default_factory=dict)
+    card_reads: list[str] = field(default_factory=list)
     # Tip intents (#510 round 1), as tip_intent and search_tip_intents read them: what each
     # create sent, by PaymentIntent id. `tip_statuses` is Stripe's status of one intent (else
     # `intent_status`; an accepted cancel makes it canceled), `failed_intents` the ones with a
@@ -312,6 +316,12 @@ class FakeStripePayments:
         if not self.cancel_refused:
             self.tip_statuses[payment_intent_id] = "canceled"
         return not self.cancel_refused
+
+    async def card_of(self, payment_intent_id: str) -> CardFacts | None:
+        if "card_of" in self.errors:
+            raise self.errors["card_of"]
+        self.card_reads.append(payment_intent_id)
+        return self.cards.get(payment_intent_id)
 
     def tip_now(self, facts: TipIntentFacts) -> TipIntentFacts:
         """The intent as Stripe holds it now: its status and its last payment error."""

@@ -46,6 +46,7 @@ from stripe.params import (
     EphemeralKeyCreateParams,
     PaymentIntentCancelParams,
     PaymentIntentCreateParams,
+    PaymentIntentRetrieveParams,
     PaymentIntentSearchParams,
 )
 from stripe.params import (
@@ -108,6 +109,17 @@ class PaymentIntentFacts:
     currency: str
     customer_id: str | None
     payment_id: str | None
+
+
+@dataclass(frozen=True)
+class CardFacts:
+    """The card a succeeded PaymentIntent was paid with, for a receipt (#62): Stripe's brand
+    ("visa"), the last 4 digits and the wallet that carried it ("apple_pay"), each None when
+    Stripe gives none. Never the card's number, expiry or holder."""
+
+    brand: str | None
+    last4: str | None
+    wallet: str | None
 
 
 @dataclass(frozen=True)
@@ -190,6 +202,11 @@ class StripePayments(Protocol):
     async def cancel_payment_intent(self, payment_intent_id: str, *, idempotency_key: str) -> bool:
         """Cancels an unpaid PaymentIntent (abandoned); False when Stripe refuses because it is
         processing, succeeded or canceled already (see the module doc)."""
+        ...
+
+    async def card_of(self, payment_intent_id: str) -> CardFacts | None:
+        """The card the intent's latest charge was paid with (#62); None when it has no
+        charge or the charge was not paid with a card."""
         ...
 
     async def tip_intent(self, payment_intent_id: str) -> TipIntentFacts:
@@ -356,6 +373,16 @@ class StripePaymentsClient:
             raise_typed(error)
         return True
 
+    async def card_of(self, payment_intent_id: str) -> CardFacts | None:
+        params: PaymentIntentRetrieveParams = {"expand": ["latest_charge"]}
+        try:
+            intent = await self._client.v1.payment_intents.retrieve_async(
+                payment_intent_id, params=params
+            )
+        except stripe.StripeError as error:
+            raise_typed(error)
+        return _card(intent)
+
     async def tip_intent(self, payment_intent_id: str) -> TipIntentFacts:
         try:
             intent = await self._client.v1.payment_intents.retrieve_async(payment_intent_id)
@@ -377,6 +404,24 @@ class StripePaymentsClient:
             intents=tuple(_tip_facts(intent) for intent in page.data),
             complete=not page.has_more,
         )
+
+
+def _card(intent: stripe.PaymentIntent) -> CardFacts | None:
+    """The card of the intent's expanded latest charge, read defensively: anything missing is
+    None, never an error (the receipt then says "Card")."""
+    charge = getattr(intent, "latest_charge", None)
+    details = getattr(charge, "payment_method_details", None)
+    card = getattr(details, "card", None)
+    if card is None:
+        return None
+    brand = getattr(card, "brand", None)
+    last4 = getattr(card, "last4", None)
+    wallet = getattr(getattr(card, "wallet", None), "type", None)
+    return CardFacts(
+        brand=brand if isinstance(brand, str) else None,
+        last4=last4 if isinstance(last4, str) and len(last4) == 4 and last4.isdigit() else None,
+        wallet=wallet if isinstance(wallet, str) else None,
+    )
 
 
 def _tip_facts(intent: stripe.PaymentIntent) -> TipIntentFacts:
