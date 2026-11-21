@@ -388,8 +388,16 @@ async def test_messages_in_one_transaction_keep_their_order(
 
 @pytest.mark.parametrize("settings", [make_settings(chat_message_rate_limit=3)])
 async def test_messages_are_rate_limited_per_user_per_job(
-    db_client: httpx.AsyncClient, db_session: AsyncSession, world: JobWorld, settings: Settings
+    app: FastAPI,
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    settings: Settings,
 ) -> None:
+    # One fixed window for the whole test (#448): on the real clock, a run slowed by load can
+    # cross the end of a window between two sends and start counting again.
+    limiter = InMemoryRateLimiter(clock=lambda: T0.timestamp())
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
     job = await make_job(db_session, world)
     other_job = await make_job(db_session, world)
 
