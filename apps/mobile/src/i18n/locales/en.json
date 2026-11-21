@@ -670,6 +670,17 @@
       },
       "error": {
         "title": "We couldn't load this profile"
+      },
+      "reviews": {
+        "title": "Reviews",
+        "empty": "No reviews yet.",
+        "more": "Show more",
+        "moreLabel": "Show more reviews",
+        "failed": "We couldn't load the reviews.",
+        "moreFailed": "We couldn't load more reviews.",
+        "anonymous": "A customer",
+        "label": "{{reviewer}}, {{rating}} out of 5, {{day}}",
+        "loading": "Loading reviews"
       }
     },
     "notAcceptable": "This quote can't be accepted anymore.",

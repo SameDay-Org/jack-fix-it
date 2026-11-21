@@ -670,6 +670,17 @@
       },
       "error": {
         "title": "No pudimos cargar este perfil"
+      },
+      "reviews": {
+        "title": "Reseñas",
+        "empty": "Todavía no hay reseñas.",
+        "more": "Ver más",
+        "moreLabel": "Ver más reseñas",
+        "failed": "No pudimos cargar las reseñas.",
+        "moreFailed": "No pudimos cargar más reseñas.",
+        "anonymous": "Un cliente",
+        "label": "{{reviewer}}, {{rating}} de 5, {{day}}",
+        "loading": "Cargando reseñas"
       }
     },
     "notAcceptable": "Este presupuesto ya no se puede aceptar.",
