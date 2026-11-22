@@ -287,6 +287,36 @@ describe("QuoteFormScreen: the form", () => {
     );
   });
 
+  it.each([
+    ["morning", "The customer prefers Fri, Oct 30 · Morning."],
+    ["evening", "The customer prefers Fri, Oct 30 · Evening."],
+    ["flexible", "The customer prefers Fri, Oct 30."],
+  ] as const)(
+    "names the customer's preferred period after the day: %s (#360)",
+    async (period, text) => {
+      const client = seededClient();
+      client.setQueryData(opportunityQueryKey(DISPATCH_ID), detail({ preferred_period: period }));
+      jest.mocked(apiGet).mockResolvedValue(detail({ preferred_period: period }));
+      await renderForm(client);
+      expect(screen.getByTestId("quote-preferred")).toHaveTextContent(text);
+    },
+  );
+
+  it("names the preferred period in Spanish too (#360)", async () => {
+    const client = seededClient();
+    client.setQueryData(opportunityQueryKey(DISPATCH_ID), detail({ preferred_period: "morning" }));
+    jest.mocked(apiGet).mockResolvedValue(detail({ preferred_period: "morning" }));
+    await act(() => i18n.changeLanguage("es"));
+    try {
+      await renderForm(client);
+      expect(screen.getByTestId("quote-preferred")).toHaveTextContent(
+        /^El cliente prefiere el .+ · Por la mañana\.$/,
+      );
+    } finally {
+      await act(() => i18n.changeLanguage("en"));
+    }
+  });
+
   it("opens on the next whole hour when the preferred day is past, and never steps back past now", async () => {
     const client = seededClient();
     client.setQueryData(opportunityQueryKey(DISPATCH_ID), detail({ preferred_date: null }));

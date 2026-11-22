@@ -8,7 +8,8 @@ import { useMediaSourceChoice } from "./mediaSource";
 /**
  * The "Camera or library" choice, rendered by a sheet route presented with
  * `sheetOptions("fitToContents")`. The two choices are full-width buttons in the body, so they
- * never squeeze into one row on a narrow phone or at a large font. Choosing answers the waiting
+ * never squeeze into one row on a narrow phone or at a large font, and their labels wrap rather
+ * than being cut there (#441). Choosing answers the waiting
  * `chooseMediaSource`; the camera or picker opens over this sheet, and the caller closes it after.
  */
 export function MediaSourceSheet() {
@@ -27,6 +28,7 @@ export function MediaSourceSheet() {
       <Button
         label={t("media.source.library")}
         size="lg"
+        wrap
         onPress={() => choose("library")}
         testID="media-source-library"
       />
@@ -34,6 +36,7 @@ export function MediaSourceSheet() {
         label={t("media.source.camera")}
         size="lg"
         variant="secondary"
+        wrap
         onPress={() => choose("camera")}
         testID="media-source-camera"
       />

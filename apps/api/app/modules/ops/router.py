@@ -392,8 +392,10 @@ async def staff_eligible_pros(
             "this id, or its account is no longer an active pro."
         ),
         status.HTTP_409_CONFLICT: _error(
-            "request_held: another agent holds the request. invalid_transition: the request "
-            "is accepted, expired or cancelled. request_not_classified: it has no category "
+            "request_held: another agent holds the request. request_without_account: a web "
+            "request made without an account (#86), never sent to a pro. invalid_transition: "
+            "the request is accepted, expired or cancelled. request_not_classified: it has no "
+            "category "
             "yet. One code per reason the pro cannot take it: pro_already_offered (they have, "
             "or had, this request), pro_not_approved, pro_payouts_disabled, "
             "pro_category_mismatch, pro_out_of_area. Nothing was written."

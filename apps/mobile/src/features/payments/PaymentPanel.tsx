@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { useFocusEffect } from "expo-router";
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
@@ -6,16 +7,18 @@ import { ActivityIndicator, Text, View } from "react-native";
 import { Button, Notice, Skeleton, StatusBadge } from "@/components/ui";
 import { NotificationsPrompt } from "@/features/notifications/NotificationsPrompt";
 import { formatMoney } from "@/features/quotes/format";
+import type { PaymentLine } from "@/features/quotes/quoteText";
 import { continuousCorners, tokens } from "@/theme";
 
 import {
   takeAutoPay,
   useAutoPayPending,
+  useConfirming,
   usePaymentSummary,
   type PaymentSummary,
 } from "./paymentStore";
 import { useJobConfirmation } from "./useJobConfirmation";
-import type { CustomerJob } from "./useRequestJob";
+import { jobQueryOptions, type CustomerJob } from "./useRequestJob";
 import { usePayQuote, type PayFailure } from "./usePayQuote";
 
 export type PaymentPanelProps = {
@@ -55,6 +58,25 @@ const SHOWS_PAID = {
   refunded: false,
   cancelled: false,
 } as const satisfies Record<CustomerJob["status"], boolean>;
+
+/**
+ * What the accepted quote's spoken summary says of its payment (#373), in step with this panel:
+ * "Payment comes next" while it offers Pay, "paid" while it shows Paid, and nothing while it
+ * looks the job up or confirms a payment (it says so itself), nor once the job was cancelled or
+ * refunded. It reads what the panel's own look at the job found: an observer of that query that
+ * never fetches, with the panel's options (the same session), so it cannot change what the
+ * panel asks or when.
+ */
+export function usePaymentLine(requestId: string, quoteId: string): PaymentLine {
+  const confirming = useConfirming(quoteId);
+  const { data: job, isError } = useQuery({
+    ...jobQueryOptions(requestId, confirming?.generation),
+    enabled: false,
+  });
+  if (job) return SHOWS_PAID[job.status] ? "paid" : "none";
+  if (confirming) return "none";
+  return job === null || isError ? "next" : "none";
+}
 
 // Nothing for the customer to fix, so no alarm: the info tint. A failed payment is the danger one.
 const CALM_FAILURES: ReadonlySet<PayFailure> = new Set([

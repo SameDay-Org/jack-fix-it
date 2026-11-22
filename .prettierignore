@@ -2,6 +2,8 @@
 pnpm-lock.yaml
 packages/shared/openapi.json
 packages/shared/src/api.d.ts
+# Email snapshots: byte-exact renders the API tests compare against (#92)
+apps/api/tests/email_snapshots/
 
 # Role prompts are kept verbatim
 docs/agents/*.md

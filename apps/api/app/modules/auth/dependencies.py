@@ -1,9 +1,12 @@
 """FastAPI dependencies for auth. Protect a route with `Depends(get_current_user)`."""
 
+import asyncio
+import logging
 from typing import Annotated
 
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
@@ -12,7 +15,7 @@ from app.db import get_session
 from app.integrations.email import EmailSender, get_email_sender
 from app.integrations.sms_verify import PhoneVerifier, get_phone_verifier
 from app.integrations.storage import StorageProvider, get_storage_provider
-from app.modules.auth.errors import InvalidTokenError
+from app.modules.auth.errors import InvalidTokenError, VerificationUnavailableError
 from app.modules.auth.password_reset import (
     PasswordResetConfig,
     PasswordResetService,
@@ -32,6 +35,7 @@ from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount
 from app.rate_limit import (
     IdentifierHasher,
+    RateLimitedError,
     RateLimiter,
     enforce_limit,
     get_identifier_hasher,
@@ -41,6 +45,8 @@ from app.web_service import caller_ip, limit_per_caller_ip
 
 # auto_error=False: a missing or non-Bearer header becomes our 401 invalid_token, not FastAPI's.
 _bearer = HTTPBearer(auto_error=False, bearerFormat="JWT")
+
+logger = logging.getLogger(__name__)
 
 
 def get_auth_config(settings: Annotated[Settings, Depends(get_app_settings)]) -> AuthConfig:
@@ -134,7 +140,13 @@ def get_phone_service(
     verifier: Annotated[PhoneVerifier, Depends(get_phone_verifier)],
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> PhoneVerificationService:
-    return PhoneVerificationService(session, users, verifier, settings.phone_allowed_country_codes)
+    return PhoneVerificationService(
+        session,
+        users,
+        verifier,
+        settings.phone_allowed_country_codes,
+        settings.phone_excluded_prefixes,
+    )
 
 
 async def _limit_phone(
@@ -169,6 +181,43 @@ async def limit_phone_send(
     await _limit_phone(
         limiter, hasher, settings, "phone_send", user, data.phone, settings.phone_otp_send_limit
     )
+
+
+async def limit_phone_send_daily(
+    data: PhoneSendRequest,
+    user: CurrentUser,
+    limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    hasher: Annotated[IdentifierHasher, Depends(get_identifier_hasher)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+) -> None:
+    """The daily budgets of codes sent (#526): per user, per number and per number range (the
+    first PHONE_OTP_PREFIX_LENGTH characters: SMS pumping rotates through one range), each
+    per PHONE_OTP_SEND_DAILY_WINDOW_SECONDS. Numbers enter the keys only as keyed hashes.
+    Fails closed, unlike the per-minute limits: when a count cannot be taken, nothing is sent
+    (503 verification_unavailable)."""
+    prefix = data.phone[: settings.phone_otp_prefix_length]
+    budgets = (
+        ("phone_send_daily_user", str(user.id), settings.phone_otp_send_daily_limit),
+        ("phone_send_daily_phone", hasher(data.phone), settings.phone_otp_send_daily_limit),
+        ("phone_send_daily_prefix", hasher(prefix), settings.phone_otp_send_daily_prefix_limit),
+    )
+    for scope, identifier, limit in budgets:
+        try:
+            async with asyncio.timeout(settings.rate_limit_timeout_seconds):
+                result = await limiter.hit(
+                    scope,
+                    identifier,
+                    limit=limit,
+                    window_seconds=settings.phone_otp_send_daily_window_seconds,
+                )
+        except (RedisError, OSError):  # OSError includes TimeoutError
+            logger.error("phone_send_daily_unavailable", extra={"user_id": str(user.id)})
+            raise VerificationUnavailableError from None
+        if not result.allowed:
+            logger.warning(
+                "phone_send_daily_cap_reached", extra={"user_id": str(user.id), "scope": scope}
+            )
+            raise RateLimitedError(result.retry_after_seconds)
 
 
 async def limit_phone_verify(

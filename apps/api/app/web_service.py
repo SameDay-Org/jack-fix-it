@@ -12,6 +12,10 @@ The auth routes' per-IP limits count the same way (#530, `caller_ip`): the admin
 refresh and logout are called by the web's server, and counted by its one address every panel
 visitor shared a bucket, so one anonymous script could lock the staff out and sign them out.
 
+Two public routes the app and the web both call (the ZIP check and the waitlist join, #86) take
+the forwarded address the same way, only behind a valid key (`caller_ip`), but never
+refuse a call without one: the app's own calls count against their socket address.
+
 Logs name the refusal only: never a key, an address or a header's value.
 """
 
@@ -97,7 +101,8 @@ def caller_ip(request: Request, settings: Settings) -> str:
 
 def limit_per_caller_ip(scope: str) -> Callable[..., Awaitable[None]]:
     """A dependency allowing AUTH_RATE_LIMIT_REQUESTS per caller_ip per window on one route:
-    rate_limit.limit_per_ip, for the routes the web's server calls on a visitor's behalf."""
+    rate_limit.limit_per_ip, for the routes the web's server calls on a visitor's behalf (the
+    auth routes, #530; the ZIP check, #86)."""
 
     async def dependency(
         request: Request,

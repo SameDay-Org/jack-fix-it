@@ -19,6 +19,20 @@ import type { CustomerQuote } from "./useRequestQuotes";
  */
 export type QuoteState = "accepted" | "expired" | "open" | "closed";
 
+/**
+ * What an accepted quote's summary says of its payment (#373): that it comes next (Pay is what
+ * the card offers), that it is paid (the job is booked), or nothing: while the job is first
+ * looked up or the payment confirmed (the card says so itself), and once the job was cancelled or
+ * refunded (where the money stands is not the card's to say).
+ */
+export type PaymentLine = "next" | "paid" | "none";
+
+const ACCEPTED_KEYS = {
+  next: "quotes.acceptedNote",
+  paid: "quotes.acceptedPaid",
+  none: "quotes.acceptedOnly",
+} as const satisfies Record<PaymentLine, string>;
+
 export function quoteStateOf(quote: CustomerQuote, now: number, anyAccepted: boolean): QuoteState {
   if (quote.status === "accepted") return "accepted";
   if (quote.status !== "pending" || expiryAt(quote.expires_at, now).kind === "expired") {
@@ -65,6 +79,7 @@ export function quoteText(
   state: QuoteState,
   now: number,
   locale: string = formatLocale(),
+  paymentLine: PaymentLine = "next",
 ): QuoteText {
   const { pro } = quote;
   const name = proName(t, quote);
@@ -91,7 +106,7 @@ export function quoteText(
     rating === null ? t("quotes.notRated") : t("quotes.rated", { rating }),
     jobs,
     years,
-    state === "accepted" ? t("quotes.acceptedNote") : expiry,
+    state === "accepted" ? t(ACCEPTED_KEYS[paymentLine]) : expiry,
     quote.approach ? t("quotes.approach.summary", { approach: quote.approach }) : null,
   ]
     .filter((part) => part !== null)
@@ -101,7 +116,12 @@ export function quoteText(
 }
 
 /** `quoteText` in the app's language, redrawn as `now` moves. */
-export function useQuoteText(quote: CustomerQuote, state: QuoteState, now: number): QuoteText {
+export function useQuoteText(
+  quote: CustomerQuote,
+  state: QuoteState,
+  now: number,
+  paymentLine?: PaymentLine,
+): QuoteText {
   const { t } = useTranslation();
-  return quoteText(t, quote, state, now);
+  return quoteText(t, quote, state, now, formatLocale(), paymentLine);
 }

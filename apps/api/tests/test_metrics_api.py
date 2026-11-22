@@ -31,7 +31,8 @@ from app.modules.metrics.service import MetricsConfig, MetricsService
 from app.modules.requests.models import ServiceRequest
 from app.modules.reviews.models import Review, ReviewAuthorRole
 from app.money import partial_refund_cents
-from tests.conftest import make_settings
+from app.rate_limit import get_rate_limiter
+from tests.conftest import InMemoryRateLimiter, make_settings
 from tests.job_world import (
     CUSTOMER_EMAIL,
     CUSTOMER_FIRST,
@@ -476,8 +477,13 @@ async def test_only_agents_and_admins_read_and_every_answer_is_no_store(
 
 @pytest.mark.parametrize("settings", [make_settings(metrics_read_limit=2)])
 async def test_reads_are_limited_per_staff_member(
-    db_client: httpx.AsyncClient, world: JobWorld
+    app: FastAPI, db_client: httpx.AsyncClient, world: JobWorld
 ) -> None:
+    # One fixed window for the whole test: on the real clock, a run can cross the end of a
+    # window between two reads and start counting again (#584).
+    limiter = InMemoryRateLimiter(clock=lambda: NOW.timestamp())
+    app.dependency_overrides[get_rate_limiter] = lambda: limiter
+
     answers = [await get(db_client, world) for _ in range(3)]
     other = await db_client.get(PATH, headers=world.admin.headers)
 

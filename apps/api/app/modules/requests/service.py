@@ -34,7 +34,7 @@ from typing import Final
 
 from pydantic import JsonValue
 from redis.exceptions import RedisError
-from sqlalchemy import Select, Subquery
+from sqlalchemy import Select, Subquery, null
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,7 +44,7 @@ from app.errors import NotFoundError
 from app.idempotency import body_fingerprint, same_body
 from app.integrations.storage import Storage
 from app.modules.addresses.geocode import enqueue_geocode
-from app.modules.addresses.schemas import AddressArea, AddressOut
+from app.modules.addresses.schemas import AddressArea, AddressIn, AddressOut
 from app.modules.addresses.service import AddressPlace, AddressService
 from app.modules.auth.permissions import ensure_owner
 from app.modules.categories.intake import InvalidAnswersError, validate_answers
@@ -84,6 +84,7 @@ from app.modules.requests.schemas import (
     RequestOut,
     RequestPage,
     RequestSummary,
+    UtmIn,
 )
 from app.modules.service_areas.schemas import zip5
 from app.modules.service_areas.service import ServiceAreaService
@@ -130,6 +131,27 @@ class CreatedRequest:
 
     request: RequestOut
     created: bool
+
+
+@dataclass(frozen=True)
+class WebLead:
+    """A request made on the web without an account (#86), as the visitor typed it: what the
+    app's create takes, without media."""
+
+    description: str
+    category_id: uuid.UUID | None
+    address: AddressIn
+    preferred_date: date | None
+    preferred_period: PreferredPeriod | None
+    intake_answers: dict[str, JsonValue]
+    utm: UtmIn | None
+
+
+@dataclass(frozen=True)
+class CreatedLead:
+    request_id: uuid.UUID
+    public_code: str
+    address_id: uuid.UUID
 
 
 @dataclass(frozen=True)
@@ -247,6 +269,45 @@ class ServiceRequestService:
         if self._config.geocode_on_save:
             await self._queue_geocode(request.id, address_id)
         return CreatedRequest(request=await self._detail(request), created=True)
+
+    async def create_web_lead(self, guest: UserAccount, lead: WebLead) -> CreatedLead:
+        """A web request (#86) for its guest customer, in the caller's transaction (flushes,
+        never commits): origin web, received, after the app's own checks (a date not past, the
+        intake's size and the category's questions, a served ZIP), with its UTM. Never
+        dispatched, so nothing is queued here: the caller queues the address's geocoding once
+        it commits (queue_geocode)."""
+        if lead.preferred_date is not None and lead.preferred_date < datetime.now(UTC).date():
+            raise InvalidRequestError
+        preferred_period = _stored_period(lead.preferred_date, lead.preferred_period)
+        if _intake_size(lead.intake_answers) > self._config.intake_max_bytes:
+            raise InvalidRequestError
+        if not await self._service_areas.is_served(lead.address.zip_code):
+            raise ZipNotServedError
+        intake_answers = await self._intake_answers(lead.category_id, lead.intake_answers)
+        address_id = await self._addresses.create(guest.id, lead.address)
+        request = await self._requests.add(
+            ServiceRequest(
+                customer_id=guest.id,
+                category_id=lead.category_id,
+                address_id=address_id,
+                description=lead.description,
+                intake_answers=intake_answers,
+                preferred_date=lead.preferred_date,
+                preferred_period=preferred_period,
+                language=guest.locale,
+                origin=RequestOrigin.WEB,
+                # No campaign: SQL NULL, never a JSON null (#86; the app's create still
+                # stores JSON null, out of this PR's scope).
+                utm=(lead.utm.model_dump(exclude_none=True) if lead.utm else None) or null(),
+            )
+        )
+        return CreatedLead(request.id, request.public_code, address_id)
+
+    async def queue_geocode(self, request_id: uuid.UUID, address_id: uuid.UUID) -> None:
+        """After a web request's commit (#86): its address's geocoding, as the app's create
+        queues it, when configured. Never fails the caller."""
+        if self._config.geocode_on_save:
+            await self._queue_geocode(request_id, address_id)
 
     async def _replay(
         self, user: UserAccount, earlier: ServiceRequest, fingerprint: str
@@ -650,10 +711,12 @@ async def undispatched_requests(
     with a category (among `category_ids` when given), at an address among `address_ids` (the
     addresses module's subquery) when given, created after `created_after`, that no dispatch
     reached (their id not in `dispatched`, the dispatch module's own subquery), oldest first by
-    (created_at, id), after the keyset `after` when given. Ids and times only."""
+    (created_at, id), after the keyset `after` when given. Never a guest's (a web request
+    without an account, #86). Ids and times only."""
     rows = await ServiceRequestRepository(session).undispatched(
         dispatched,
         statuses,
+        guests=UserService.guest_ids(),
         created_after=created_after,
         limit=limit,
         category_ids=category_ids,

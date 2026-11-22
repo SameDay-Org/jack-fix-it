@@ -2,6 +2,9 @@ import { getLocales } from "expo-localization";
 import { createInstance } from "i18next";
 import { initReactI18next } from "react-i18next";
 
+// The storage alone, not the session barrel: the catalogs load before anything else.
+import { languageHintStorage } from "@/api/tokenStorage";
+
 import en from "./locales/en.json";
 import es from "./locales/es.json";
 
@@ -24,11 +27,20 @@ export function languageOf(code: string | null | undefined): Language | null {
 }
 
 /**
- * The device's language when we support it, English otherwise: what the app starts in and what a
- * signed-out app runs in. A signed-in account's saved language replaces it (`AccountLanguage`).
+ * The device's language when we support it, English otherwise: what a signed-out app runs in, and
+ * what it starts in when no account is signed in on this device. A signed-in account's saved
+ * language replaces it (`AccountLanguage`).
  */
 export function deviceLanguage(): Language {
   return languageOf(getLocales()[0]?.languageCode) ?? fallbackLanguage;
+}
+
+/**
+ * What the app starts in: the saved language of the account signed in on this device (#378), so
+ * the launch intro already speaks it while the session is restored; else the device's.
+ */
+function startLanguage(): Language {
+  return languageOf(languageHintStorage.readNow()) ?? deviceLanguage();
 }
 
 // initReactI18next registers this instance for useTranslation(); no provider needed.
@@ -36,7 +48,7 @@ const i18n = createInstance();
 
 void i18n.use(initReactI18next).init({
   resources,
-  lng: deviceLanguage(),
+  lng: startLanguage(),
   fallbackLng: fallbackLanguage,
   initAsync: false, // resources are bundled, so the first render already has them
   interpolation: { escapeValue: false }, // React already escapes output
