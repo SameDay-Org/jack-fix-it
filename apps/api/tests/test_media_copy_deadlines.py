@@ -51,14 +51,15 @@ FAST: dict[str, object] = {
 # far from its own bound: a database step has 2 s (on CI a write slower than FAST's 0.2 s was cut
 # mid-query, and its session failed every later try: 3 retries, not 1), and the upload stage's
 # download and image transform 1 s each. The job is the shortest the settings accept,
-# 2 + (6 x 1 + 2) + 4 = 14 s. A stall its step did not cut would hold its try until then, and
-# the test would fail on run_job's 15 s bound; a passing run takes about 3 s.
+# 2 + (7 x 1 + 2) + 4 = 15 s (#182: seven tool runs per file). A stall its step did not cut would
+# hold its try until then, and the test would fail on run_job's 20 s bound; a passing run takes
+# about 3 s.
 STALL_ONLY: dict[str, object] = {
     **FAST,
     "media_sanitize_timeout_seconds": 1.0,
     "media_sanitize_overhead_seconds": 2.0,
     "media_sanitize_settle_seconds": 4.0,
-    "media_sanitize_job_timeout_seconds": 14,
+    "media_sanitize_job_timeout_seconds": 15,
 }
 # For the tests on the real clock, FAST three times over (#448): under load a database step can
 # take most of a 0.1 s step, and a retry found no time left to start its file (one upload seen,
@@ -196,7 +197,7 @@ async def run_job(
     await redis.enqueue_job(
         "sanitize_request_media", str(request_id), _job_id=job_id, _job_try=job_try
     )
-    async with asyncio.timeout(15):
+    async with asyncio.timeout(20):
         await worker.async_run()
     return await redis.zscore(redis.default_queue_name, job_id) is not None
 
