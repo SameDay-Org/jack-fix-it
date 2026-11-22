@@ -19,7 +19,7 @@ from app.rate_limit import (
     get_identifier_hasher,
     get_rate_limiter,
 )
-from app.web_service import visitor_address
+from app.web_service import caller_ip
 
 router = APIRouter(prefix="/waitlist", tags=["waitlist"])
 
@@ -50,7 +50,7 @@ async def limit_waitlist_join(
 ) -> None:
     """Per visitor address (the web service's forwarded one behind its key, #86; else the
     caller's), then per contact; a contact enters the key only as a keyed hash."""
-    identifiers = [("ip", visitor_address(request, settings))]
+    identifiers = [("ip", caller_ip(request, settings))]
     identifiers += [("contact", hasher(contact)) for contact in (data.email, data.phone) if contact]
     for kind, identifier in identifiers:
         await enforce_limit(

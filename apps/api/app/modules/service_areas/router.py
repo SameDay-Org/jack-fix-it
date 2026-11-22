@@ -8,7 +8,7 @@ from app.errors import ErrorResponse
 from app.modules.service_areas.schemas import ZIP_INPUT_PATTERN, RegionOut, ServedCheckOut
 from app.modules.service_areas.service import ServiceAreaService
 from app.rate_limit import limit_per_ip
-from app.web_service import limit_per_visitor
+from app.web_service import limit_per_caller_ip
 
 router = APIRouter(prefix="/service-areas", tags=["catalog"])
 
@@ -46,7 +46,7 @@ async def list_service_areas(
     response_model=ServedCheckOut,
     summary="Is this ZIP served?",
     # Per visitor: the web's request flow asks it for its visitors (#86).
-    dependencies=[Depends(limit_per_visitor("catalog_zip_check"))],
+    dependencies=[Depends(limit_per_caller_ip("catalog_zip_check"))],
     responses={
         status.HTTP_422_UNPROCESSABLE_CONTENT: {
             "model": ErrorResponse,

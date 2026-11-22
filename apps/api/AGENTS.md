@@ -302,7 +302,8 @@ them idempotent: they can run twice.
   visitor's address from `X-JFI-Client-IP` for per-address limits. Never read a client's
   `X-Forwarded-For`; both headers are scrubbed from Sentry (`observability._CREDENTIAL_HEADERS`).
   Public routes the app and the web both call (the ZIP check, the waitlist join) count
-  `visitor_address`: the forwarded address behind a valid key, else the socket's, never a 401.
+  `caller_ip` (`app.web_service`, as the auth routes do): the forwarded address behind a valid
+  key, else the socket's, never a 401.
   `POST /v1/web/requests` checks the key and caps the body (`Content-Length`,
   `WEB_REQUEST_MAX_BODY_BYTES`) before FastAPI reads it (`WebServiceBodyRoute`).
 
