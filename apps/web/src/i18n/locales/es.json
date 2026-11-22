@@ -402,6 +402,25 @@
       "android": "Android",
       "badge": "Muy pronto"
     },
+    "interest": {
+      "title": "¿Quieres saber cuándo sale?",
+      "hint": "Déjanos tu correo y te enviaremos un aviso cuando la app esté en las tiendas.",
+      "label": "Correo electrónico",
+      "consent": "Solo usaremos tu correo para avisarte que la app ya salió.",
+      "privacy": "Privacidad",
+      "submit": "Avísame",
+      "sending": "Enviando…",
+      "joined": "Ya estás en la lista. Te escribiremos cuando la app esté en las tiendas.",
+      "honeypot": "Deja este campo vacío",
+      "errors": {
+        "invalid_email": "Escribe un correo como nombre@ejemplo.com.",
+        "retry": "No se envió. Pulsa Avísame otra vez.",
+        "stale": "Esta página estuvo abierta un buen rato. Pulsa Avísame otra vez.",
+        "rate_limited": "Demasiados intentos desde aquí. Espera unos minutos y vuelve a intentarlo.",
+        "rate_limited_in": "Demasiados intentos desde aquí. Vuelve a intentarlo en {{minutes}}\u00a0min.",
+        "unavailable": "No pudimos guardar tu correo ahora. Inténtalo de nuevo en un momento."
+      }
+    },
     "faq": {
       "eyebrow": "Apoyo cuando lo necesites",
       "title": "Preguntas, con respuesta.",

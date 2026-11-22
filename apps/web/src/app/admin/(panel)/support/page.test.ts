@@ -73,8 +73,14 @@ describe("support list page", () => {
     api(() =>
       Response.json({
         items: [
-          item({ job_id: JOB_ID }),
+          item({
+            job_id: JOB_ID,
+            job_request_id: "5e9d0c1b-1111-4222-8333-944455556666",
+            job_request_code: "JF-000102",
+          }),
           item({ id: OTHER_ID, user_first_name: null, role: "pro", topic: "app_problem" }),
+          // A job the API names no request for: no badge either.
+          item({ id: "9a9a9a9a-1111-4222-8333-944455556666", job_id: JOB_ID }),
         ],
         next_cursor: null,
       }),
@@ -90,6 +96,10 @@ describe("support list page", () => {
       expect(page).toContain(text);
     }
     for (const text of ["No name on file", "Pro", "App problem"]) expect(page).toContain(text);
+    // The job by its request code (#503), never its raw id; nothing for the ticket without one.
+    expect(page).toContain("JF-000102");
+    expect(page).not.toContain(JOB_ID);
+    expect(page.match(/About a job/g)).toHaveLength(1);
     expect(page).toContain(`href="/admin/support/${TICKET_ID}"`);
     expect(page).toContain(`href="/admin/support/${OTHER_ID}"`);
     // The filter in use is marked, and the time carries its zone.

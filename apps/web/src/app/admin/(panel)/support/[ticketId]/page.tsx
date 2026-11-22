@@ -10,9 +10,13 @@ import { ApiError, apiGet } from "@/lib/api";
 import { requireStaff, staffAuth } from "@/lib/session";
 
 import { LocalTime } from "../../local-time";
+import { requestHref } from "../../queue/queue";
 import { StatusBadge } from "../status-badge";
 import { isUuid, SUPPORT_PATH, type Ticket } from "../tickets";
 import { StatusControl } from "./status-control";
+
+const REQUEST_LINK =
+  "rounded-sm font-mono font-semibold text-navy-900 underline outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2";
 
 /** The ticket, or why there is none to show. */
 async function loadTicket(
@@ -85,10 +89,16 @@ export default async function TicketPage({ params }: { params: Promise<{ ticketI
                   </dd>
                 </>
               ) : null}
-              {ticket.job_id ? (
+              {/* The job by its request code, a link to the request's card (#503); nothing
+                  when the API names none. Never the raw job id: staff cannot act on it. */}
+              {ticket.job_request_id && ticket.job_request_code ? (
                 <>
                   <dt className="text-gray-500">{t("admin.support.detail.job")}</dt>
-                  <dd className="font-mono text-xs break-all">{ticket.job_id}</dd>
+                  <dd>
+                    <Link href={requestHref(ticket.job_request_id)} className={REQUEST_LINK}>
+                      {ticket.job_request_code}
+                    </Link>
+                  </dd>
                 </>
               ) : null}
               {ticket.app_version || ticket.platform ? (
