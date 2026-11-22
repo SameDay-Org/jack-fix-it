@@ -85,7 +85,7 @@ export function FinishedJob({
           </Text>
           <ProblemsLine job={job} requestId={requestId} push={push} />
         </View>
-        <PaidRow job={job} />
+        <PaidRow job={job} requestId={requestId} />
         <BeforePhotos photos={job.photos} updatedAt={updatedAt} refetch={refetch} />
         <JobTimeline items={timelineOf(t, job, now)} />
       </Sheet>

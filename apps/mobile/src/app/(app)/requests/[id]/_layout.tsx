@@ -19,6 +19,7 @@ export default function RequestLayout() {
       <Stack.Screen name="photos" options={{ presentation: "fullScreenModal" }} />
       <Stack.Screen name="report" />
       <Stack.Screen name="cancel" />
+      <Stack.Screen name="receipt" />
       <Stack.Screen name="report-media-source" options={sheetOptions("fitToContents")} />
     </Stack>
   );
