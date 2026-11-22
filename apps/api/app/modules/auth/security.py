@@ -75,7 +75,7 @@ def create_access_token(
 ) -> str:
     """`session_id` is the refresh family the token belongs to (`sid`): revoking the family
     revokes the token (#161). The API always passes one; None mints the shape of a token issued
-    before #161, without `sid`, which only tests mint."""
+    before #161, without `sid`, which only tests and the local demo seed (scripts/demo) mint."""
     issued_at = int(now.timestamp())
     claims = {
         "sub": str(user_id),

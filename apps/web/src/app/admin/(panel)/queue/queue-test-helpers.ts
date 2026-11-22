@@ -58,7 +58,9 @@ export function card(extra: Partial<RequestCard> = {}): RequestCard {
       phone: "+13055550181",
       email: "ana.probe+81@example.com",
       language: "es",
+      has_account: true,
     },
+    utm: null,
     address: {
       line1: "742 Evergreen Terrace",
       line2: "Apt 81",
@@ -90,6 +92,8 @@ export function card(extra: Partial<RequestCard> = {}): RequestCard {
     notes: [],
     followups: [],
     actions_allowed: true,
+    info_requested_at: null,
+    allowed_status_changes: ["reviewing", "cancelled"],
     ...extra,
   };
 }

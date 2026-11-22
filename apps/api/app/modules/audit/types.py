@@ -20,6 +20,8 @@ REASON_MAX_LENGTH: Final = 500
 class AuditAction(StrEnum):
     PAYMENT_INTENT_ADOPT = "payment.adopt_intent"
     PAYMENT_INTENT_ALLOW_NEW = "payment.allow_new_intent"
+    # A tip's lost PaymentIntent create Stripe never made, cleared by staff (#273, #510).
+    TIP_INTENT_ALLOW_NEW = "tip.allow_new_intent"
     PAYOUT_ACCOUNT_ADOPT = "pro_profile.adopt_payout_account"
     PAYOUT_ACCOUNT_ALLOW_NEW = "pro_profile.allow_new_payout_account"
     # A staff read of a job's chat that returned at least one original (#72).
@@ -47,6 +49,13 @@ class AuditAction(StrEnum):
     REQUEST_CLASSIFY = "service_request.classify"
     REQUEST_FOLLOWUP_SCHEDULE = "service_request.schedule_followup"
     REQUEST_FOLLOWUP_DONE = "service_request.followup_done"
+    # The BDC asked the customer for more information, resumed the request, or changed its
+    # status (#82 part 2).
+    REQUEST_ASK_INFO = "service_request.ask_info"
+    REQUEST_RESUME = "service_request.resume"
+    REQUEST_CHANGE_STATUS = "service_request.change_status"
+    # The BDC offered the request to a pro they chose (#82 part 2).
+    REQUEST_ASSIGN_PRO = "service_request.assign_pro"
     # A staff read of a dispute: both sides' text and the photos' URLs (#76).
     DISPUTE_READ = "dispute.read"
     # An admin resolved a dispute: released, partly released or refunded money (#76). For a
@@ -73,6 +82,7 @@ class AuditAction(StrEnum):
 
 class AuditEntityType(StrEnum):
     PAYMENT = "payment"
+    TIP = "tip"
     PRO_PROFILE = "pro_profile"
     PRO_DOCUMENT = "pro_document"
     JOB = "job"

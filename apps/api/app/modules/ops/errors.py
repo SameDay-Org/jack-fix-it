@@ -62,3 +62,62 @@ class FollowupNotFoundError(NotFoundError):
 
     code = "followup_not_found"
     message = "Follow-up not found."
+
+
+class RequestNotClassifiedError(ConflictError):
+    """A pro is assigned by hand only once the request has a category: there is nothing to
+    match the pro against before (#82). Classify it first."""
+
+    code = "request_not_classified"
+    message = "Classify the request before assigning a pro."
+
+
+class ProNotFoundError(NotFoundError):
+    """No pro profile with this id, or its account is no longer an active pro (#82)."""
+
+    code = "pro_not_found"
+    message = "Pro not found."
+
+
+class ProNotApprovedError(ConflictError):
+    """A manual assignment to a pro staff have not approved (#82). Each reason a pro cannot
+    take a request has its own code, so the panel says which (82-web-plan.md section 5)."""
+
+    code = "pro_not_approved"
+    message = "This pro is not approved."
+
+
+class ProPayoutsDisabledError(ConflictError):
+    """A manual assignment to a pro who cannot be paid out yet (#82)."""
+
+    code = "pro_payouts_disabled"
+    message = "This pro's payouts are not enabled."
+
+
+class ProCategoryMismatchError(ConflictError):
+    """A manual assignment to a pro who does not list the request's category (#82)."""
+
+    code = "pro_category_mismatch"
+    message = "This pro does not take this category."
+
+
+class RequestWithoutAccountError(ConflictError):
+    """A manual assignment of a web request whose customer has no account (#86): a pro's
+    quote could never be accepted. The BDC calls the customer, who requests in the app."""
+
+    code = "request_without_account"
+    message = "This request was made without an account: it cannot be sent to a pro."
+
+
+class ProOutOfAreaError(ConflictError):
+    """A manual assignment to a pro who does not serve the request's ZIP (#82)."""
+
+    code = "pro_out_of_area"
+    message = "This pro does not serve this area."
+
+
+class ProAlreadyOfferedError(ConflictError):
+    """The pro already has (or had) this request: it is never sent to a pro twice (#82)."""
+
+    code = "pro_already_offered"
+    message = "This pro already has this request."

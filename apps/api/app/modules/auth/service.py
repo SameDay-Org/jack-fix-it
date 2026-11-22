@@ -165,13 +165,21 @@ class AuthService:
 
     async def login(self, data: LoginRequest) -> AuthResponse:
         credentials = await self._users.get_credentials_by_email(data.email)
+        # A guest (#86, a web request's customer) never signs in: refused like a wrong password.
+        guest = credentials is not None and credentials.account.status is UserStatus.GUEST
         # One Argon2 verify on every path, so the timing does not tell whether the email exists.
         # No lock before it: a wrong password never waits on, or holds, the user row, so
         # concurrency cannot tell a known email from an unknown one either.
-        stored_hash = credentials.password_hash if credentials else security.DUMMY_PASSWORD_HASH
+        stored_hash = (
+            credentials.password_hash
+            if credentials is not None and not guest
+            else security.DUMMY_PASSWORD_HASH
+        )
         matches = await asyncio.to_thread(security.verify_password, stored_hash, data.password)
-        if credentials is None or not matches:
-            reason = "unknown_email" if credentials is None else "bad_password"
+        if credentials is None or guest or not matches:
+            reason = (
+                "unknown_email" if credentials is None else "guest" if guest else "bad_password"
+            )
             logger.info("auth_login_failed", extra={"reason": reason})
             raise InvalidCredentialsError
         # The password matched: lock the user row until the session is committed, and check

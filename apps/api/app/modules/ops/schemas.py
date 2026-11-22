@@ -110,6 +110,11 @@ class CardCustomer(BaseModel):
     phone: str | None = Field(description="E.164, when the account has one.")
     email: str
     language: str = Field(description="The language the request was written in, e.g. en or es.")
+    has_account: bool = Field(
+        description="False for a request made on the web without an account (#86): the name, "
+        "email and phone are the ones the visitor gave, and the customer cannot sign in; such "
+        "a request is never sent to a pro."
+    )
 
 
 class CardMedia(BaseModel):
@@ -153,6 +158,10 @@ class RequestCard(QueueItem):
     asked, the media, the quotes and the job. Reading it is recorded in the audit log."""
 
     customer: CardCustomer
+    utm: dict[str, str] | None = Field(
+        description="The campaign the request came from (source, medium, campaign, term, "
+        "content), as stored (#86)."
+    )
     address: AddressOut = Field(description="As the customer typed it.")
     description: str = Field(description="As the customer typed it: it may hold contacts.")
     intake_answers: dict[str, JsonValue]
@@ -175,6 +184,18 @@ class RequestCard(QueueItem):
         default=True,
         description="Whether the caller may act on this request now (#82): it is unassigned, "
         "held by them, or they are an admin. The API stays the guard (409 request_held).",
+    )
+    info_requested_at: datetime | None = Field(
+        default=None,
+        description="When the BDC asked the customer for more information (#82): the request "
+        "waits in reviewing and no re-dispatch takes it until staff resume it, change its "
+        "status or assign a pro. Null when it is not on hold.",
+    )
+    allowed_status_changes: list[RequestStatus] = Field(
+        default_factory=list,
+        description="The statuses staff may move the request to now (#82), from the request "
+        "state machine's staff edges: never finding_pro, which dispatch owns. The API stays "
+        "the guard (409 invalid_transition).",
     )
 
 
@@ -222,6 +243,98 @@ class ContactedOut(BaseModel):
 
     id: uuid.UUID
     first_contact_at: datetime
+
+
+class MoreInfoIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: PlainNote = Field(
+        description="What the BDC asks the customer, kept as an internal note: plain text, 1 to "
+        "2000 characters (staff only, never logged)."
+    )
+
+
+class MoreInfoOut(BaseModel):
+    """The request on hold in reviewing, and the question as a note."""
+
+    id: uuid.UUID
+    status: RequestStatus
+    info_requested_at: datetime
+    note: "NoteOut"
+    customer_notified: bool = Field(
+        description="Whether the customer was messaged. Always false today: no channel takes a "
+        "staff message to the customer yet, so the agent reaches the customer themselves."
+    )
+
+
+class ResumeOut(BaseModel):
+    """The request off hold: the next re-dispatch sweep (REDISPATCH_SWEEP_MINUTES) takes it
+    when it is received or reviewing with a category and no offer yet."""
+
+    id: uuid.UUID
+    status: RequestStatus
+    info_requested_at: None = None
+
+
+class StatusChangeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    to: RequestStatus = Field(description="One of the card's allowed_status_changes.")
+    reason: PlainNote = Field(
+        description="Why, kept as an internal note: plain text, 1 to 2000 characters."
+    )
+
+
+class StatusChangeOut(BaseModel):
+    id: uuid.UUID
+    status: RequestStatus
+    note: "NoteOut"
+
+
+class AssignIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pro_id: uuid.UUID = Field(
+        description="The pro's profile id, from the request's eligible-pros list."
+    )
+
+
+class AssignOut(BaseModel):
+    """The request offered to the pro: finding a pro now if it was received or reviewing, else
+    where it was. Off hold."""
+
+    id: uuid.UUID
+    status: RequestStatus
+    pro_id: uuid.UUID
+    info_requested_at: None = None
+
+
+class EligibleProOut(BaseModel):
+    """A pro staff may weigh for the request: approved, in its category and its area. No
+    contact, no last name."""
+
+    id: uuid.UUID = Field(description="The pro's profile id: what an assignment takes.")
+    name: str | None = Field(
+        description="First name and last initial, as customers see the pro; null when the "
+        "account has no usable name."
+    )
+    categories: list[CategorySummary]
+    payouts_enabled: bool = Field(
+        description="False: the pro cannot be paid out yet, and an assignment is refused "
+        "(pro_payouts_disabled)."
+    )
+    already_offered: bool = Field(
+        description="True: the pro has (or had) this request, and an assignment is refused "
+        "(pro_already_offered)."
+    )
+
+
+class EligiblePros(BaseModel):
+    """Best ranked first, as dispatch ranks pros. Empty for a request with no category, or
+    one past quoting (accepted, expired, cancelled)."""
+
+    items: list[EligibleProOut]
+    more: bool = Field(description="True when more pros match than OPS_ELIGIBLE_PROS_LIMIT lists.")
 
 
 class ClassifyIn(BaseModel):

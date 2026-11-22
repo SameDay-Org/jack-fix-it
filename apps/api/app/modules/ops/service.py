@@ -38,12 +38,13 @@ from app.modules.audit.types import (
     AuditEntityType,
     ReaderNotStaffError,
 )
+from app.modules.cancellations.service import pro_cancelled_job_ids
 from app.modules.categories.schemas import CategorySummary
 from app.modules.categories.service import CategoryService
 from app.modules.dispatch.opportunities import sign_safe_media
 from app.modules.jobs.service import JobStaffReader, JobStatus, StaffJob
 from app.modules.jobs.transitions import CUSTOMER_STATUS
-from app.modules.ops.actions import OpsRecords
+from app.modules.ops.actions import OpsRecords, status_changes
 from app.modules.ops.errors import (
     InvalidQueueQueryError,
     QueueRequestNotFoundError,
@@ -75,6 +76,7 @@ from app.modules.requests.queue import (
     QueueFilters,
     QueueRules,
     QueueSources,
+    RequestOrigin,
     RequestQueueReader,
     RequestStatus,
 )
@@ -83,6 +85,7 @@ from app.modules.service_areas.schemas import zip5
 from app.modules.support.service import SupportTicketService
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount, UserRole
+from app.modules.web_requests.service import WebRequestContacts
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +101,8 @@ class OpsConfig:
     quote_waiting_minutes: int
     time_zone: str
     url_ttl_seconds: int
+    # How long a request whose pro cancelled its job stays under problems (#69).
+    pro_cancel_attention_hours: int
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "OpsConfig":
@@ -108,6 +113,7 @@ class OpsConfig:
             quote_waiting_minutes=settings.ops_quote_waiting_minutes,
             time_zone=settings.business_time_zone,
             url_ttl_seconds=settings.download_url_ttl_seconds,
+            pro_cancel_attention_hours=settings.ops_pro_cancel_attention_hours,
         )
 
 
@@ -137,6 +143,9 @@ class OpsQueueService:
             quote_starts=QuoteReader.starts(),
             pending_quotes=QuoteReader.pending_by_request(),
             open_ticket_jobs=SupportTicketService.open_job_ids(),
+            pro_cancelled_jobs=pro_cancelled_job_ids(
+                timedelta(hours=config.pro_cancel_attention_hours)
+            ),
             zips=AddressService.zips(),
             problem_job_statuses=(JobStatus.DISPUTED,),
             active_job_statuses=_VISIT_AHEAD,
@@ -207,6 +216,8 @@ class OpsQueueService:
         card.actions_allowed = (
             holder is None or holder.id == viewer.id or viewer.role is UserRole.ADMIN
         )
+        card.info_requested_at = row.info_requested_at
+        card.allowed_status_changes = list(status_changes(row.status))
         # Committed before the answer: an audit write that fails answers 500, so no contact
         # is shown unaudited.
         try:
@@ -305,6 +316,10 @@ class OpsQueueService:
     async def _items(self, rows: list[QueuedRequest]) -> list[QueueItem]:
         requests = rows
         names = await self._users.public_names({request.customer_id for request in requests})
+        # A web request's guest has no name: the one the visitor gave is its contact's (#86).
+        contacts = await WebRequestContacts(self._session).of_requests(
+            [request.id for request in requests if request.origin is RequestOrigin.WEB]
+        )
         agents = await self._agents({request.assigned_agent_id for request in requests})
         categories = {
             category.id: category
@@ -316,7 +331,9 @@ class OpsQueueService:
         return [
             self._item(
                 row,
-                customer_name=names.get(row.customer_id),
+                customer_name=contacts[row.id].first_name
+                if row.id in contacts
+                else names.get(row.customer_id),
                 category=categories.get(row.category_id) if row.category_id else None,
                 agent=agents.get(row.assigned_agent_id) if row.assigned_agent_id else None,
                 media_count=media.get(row.id, 0),
@@ -359,6 +376,8 @@ class OpsQueueService:
         address = await self._addresses.get(request.address_id)
         if customer is None or address is None:  # pragma: no cover - foreign keys hold both
             raise QueueRequestNotFoundError
+        contacts = await WebRequestContacts(self._session).of_requests([request.id])
+        contact = contacts.get(request.id)
         ttl = self._config.url_ttl_seconds
         expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
         safe = await self._media.safe_media(request.id)
@@ -389,7 +408,20 @@ class OpsQueueService:
                 phone=customer.phone,
                 email=customer.email,
                 language=request.language,
+                has_account=True,
+            )
+            if contact is None
+            else CardCustomer(
+                # A web request's guest (#86): who to call is the contact the visitor gave.
+                id=customer.id,
+                first_name=contact.first_name,
+                last_name=None,
+                phone=contact.phone,
+                email=contact.email,
+                language=request.language,
+                has_account=False,
             ),
+            utm=request.utm,
             address=address,
             description=request.description,
             intake_answers=request.intake_answers,

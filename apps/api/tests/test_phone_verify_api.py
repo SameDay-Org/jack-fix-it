@@ -13,7 +13,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.types import Message, Receive, Scope, Send
 
@@ -67,16 +67,18 @@ class FakeVerifier:
     """Twilio Verify stand-in: CODE is right for every number unless told otherwise."""
 
     started: list[str] = field(default_factory=list)
+    locales: list[str | None] = field(default_factory=list)  # each start's, in order
     checked: list[tuple[str, str]] = field(default_factory=list)
     error: Exception | None = None
     on_start: Callable[[str], None] | None = None
 
-    async def start(self, phone: str) -> None:
+    async def start(self, phone: str, locale: str | None) -> None:
         if self.on_start:
             self.on_start(phone)
         if self.error:
             raise self.error
         self.started.append(phone)
+        self.locales.append(locale)
 
     async def check(self, phone: str, code: str) -> bool:
         if self.error:
@@ -106,8 +108,8 @@ class Caller:
     headers: dict[str, str]
 
 
-async def sign_up(client: httpx.AsyncClient, name: str) -> Caller:
-    body = (await register(client, email=f"{name}@example.com")).json()
+async def sign_up(client: httpx.AsyncClient, name: str, locale: str = "en") -> Caller:
+    body = (await register(client, email=f"{name}@example.com", locale=locale)).json()
     return Caller(body["user"]["id"], {"Authorization": f"Bearer {body['access_token']}"})
 
 
@@ -146,6 +148,35 @@ async def test_send_202_for_valid_phone(
     assert response.status_code == 202
     assert response.content == b""
     assert verifier.started == [PHONE]
+    assert verifier.locales == ["en"]
+
+
+@pytest.mark.parametrize("locale", ["en", "es"])
+async def test_the_code_is_sent_in_the_users_language(
+    db_client: httpx.AsyncClient, verifier: FakeVerifier, locale: str
+) -> None:
+    """#92: Twilio's text in the language of the account, read when the code is sent."""
+    caller = await sign_up(db_client, f"lang-{locale}", locale=locale)
+
+    response = await send(db_client, caller)
+
+    assert response.status_code == 202
+    assert verifier.locales == [locale]
+
+
+async def test_a_stored_locale_the_app_does_not_speak_leaves_the_numbers_default(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, verifier: FakeVerifier
+) -> None:
+    caller = await sign_up(db_client, "lang-other")
+    await db_session.execute(
+        update(User).where(User.id == uuid.UUID(caller.id)).values(locale="pt")
+    )
+    await db_session.flush()
+
+    response = await send(db_client, caller)
+
+    assert response.status_code == 202
+    assert verifier.locales == [None]
 
 
 @pytest.mark.parametrize(

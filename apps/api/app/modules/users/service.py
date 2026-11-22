@@ -29,6 +29,8 @@ from app.modules.users.names import safe_first_name, safe_public_name
 from app.modules.users.repository import UserRepository
 from app.modules.users.types import (
     DELETED_USER_NAME,
+    GUEST_EMAIL_DOMAIN,
+    GUEST_PASSWORD_HASH,
     KEEP,
     ContactPoints,
     Keep,
@@ -54,16 +56,60 @@ class UserService:
         self._users = UserRepository(session)
 
     @staticmethod
+    def guest_ids() -> Select[uuid.UUID]:
+        """The ids of the guests, the customers of web requests (#86), as a statement: the
+        dispatch sweep leaves their requests out."""
+        return UserRepository.guest_ids()
+
+    async def is_guest(self, user_id: uuid.UUID) -> bool:
+        """Whether the user is a guest (#86): a web request's customer, never dispatched."""
+        return await self._users.is_guest(user_id)
+
+    async def create_guest(self, locale: Locale) -> UserAccount:
+        """Inserts a guest customer for one web request (#86), in the caller's transaction:
+        no name, no phone, an email no one receives, a hash no password verifies (types). It
+        can never sign in; the request's web contact holds who to call."""
+        for attempt in range(1, public_codes.MAX_TRIES + 1):
+            user = User(
+                email=f"guest-{uuid.uuid4().hex}@{GUEST_EMAIL_DOMAIN}",
+                password_hash=GUEST_PASSWORD_HASH,
+                role=UserRole.CUSTOMER,
+                locale=locale,
+                status=UserStatus.GUEST,
+                public_code=public_codes.generate_public_code(),
+            )
+            savepoint = await self._session.begin_nested()
+            try:
+                await self._users.add(user)
+            except IntegrityError as exc:
+                await savepoint.rollback()
+                if violated_constraint(exc) == _PUBLIC_CODE_UNIQUE_CONSTRAINT:
+                    logger.warning("public_code_collision", extra={"attempt": attempt})
+                    continue
+                raise
+            await savepoint.commit()
+            return _to_account(user)
+        raise PublicCodeExhaustedError
+
+    @staticmethod
+    def active_ids_of_role(role: UserRole) -> Select[uuid.UUID]:
+        """The ids of the active (not suspended) accounts with `role`, as a statement for
+        another module's query: one statement then decides who may be shown (#78)."""
+        return UserRepository.active_ids_of_role(role)
+
+    @staticmethod
     def photo_keys_among(keys: Collection[str]) -> Select[str | None]:
         """The upload keys among `keys` that a user holds as their ID photo (#250), as a
         statement (the uploads sweep of unreferenced uploads, #191)."""
         return UserRepository.photo_keys_among(keys)
 
     async def active_ids_with_role(
-        self, user_ids: Collection[uuid.UUID], role: UserRole
+        self, user_ids: Collection[uuid.UUID], role: UserRole, *, lock: bool = False
     ) -> set[uuid.UUID]:
-        """The ids among `user_ids` of active (not suspended) accounts with `role`."""
-        return await self._users.active_ids_with_role(user_ids, role)
+        """The ids among `user_ids` of active (not suspended) accounts with `role`. `lock`:
+        those accounts' rows FOR SHARE until the caller's transaction ends (#511), so a role or
+        status change committed first is read, and one made after waits for that commit."""
+        return await self._users.active_ids_with_role(user_ids, role, lock=lock)
 
     async def ids_with_role(
         self, user_ids: Collection[uuid.UUID], role: UserRole
