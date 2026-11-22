@@ -7900,7 +7900,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description validation_error: not an E.164 number, or a country code that is not allowed. */
+            /** @description validation_error: not an E.164 number, or a country code or number range that is not allowed. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -7914,6 +7914,15 @@ export interface operations {
                 headers: {
                     /** @description Seconds until the current limit window ends. */
                     "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description verification_unavailable: the daily count of codes cannot be taken; nothing was sent, retry later. */
+            503: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {
