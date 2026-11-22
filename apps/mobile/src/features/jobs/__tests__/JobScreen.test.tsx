@@ -893,6 +893,16 @@ describe("JobScreen, the finished job (#66)", () => {
     expect(screen.queryByTestId("job-problems")).toBeNull();
   });
 
+  it("with the custom tip's keyboard up, a tap on a button acts and a drag puts it away (#273)", async () => {
+    answerJob(CONFIRMED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Job confirmed");
+
+    const scroll = screen.getByTestId("job-scroll");
+    expect(scroll.props.keyboardShouldPersistTaps).toBe("handled");
+    expect(scroll.props.keyboardDismissMode).toBe("on-drag");
+  });
+
   it("a photo opens full screen at that photo", async () => {
     answerJob(FINISHED_JOB);
     await renderWithQuery(<JobScreen />);
