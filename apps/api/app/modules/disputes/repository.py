@@ -129,6 +129,17 @@ class DisputeRepository:
         await self._session.flush()
         return dispute
 
+    async def exists_for(self, job_id: uuid.UUID) -> bool:
+        """Whether the job has a dispute, whatever its status."""
+        statement = select(Dispute.id).where(Dispute.job_id == job_id)
+        return (await self._session.scalar(statement)) is not None
+
+    @staticmethod
+    def all_jobs() -> Subquery:
+        """The job (`job_id`) of every dispute, whatever its status, for another module's
+        query."""
+        return select(Dispute.job_id.label("job_id")).subquery()
+
     async def is_open_for(self, job_id: uuid.UUID) -> bool:
         statement = select(Dispute.id).where(
             Dispute.job_id == job_id, Dispute.status == DisputeStatus.OPEN

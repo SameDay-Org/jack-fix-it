@@ -13,6 +13,7 @@ from arq.worker import Function
 
 from app.config import get_settings
 from app.db import create_engine, create_session_factory
+from app.integrations.email import ResendEmailSender
 from app.integrations.expo_push import ExpoPushSender
 from app.integrations.mapbox import provider_from_settings
 from app.integrations.storage import S3Storage, StorageNotConfiguredError
@@ -37,8 +38,14 @@ from app.modules.payments.transfer_tasks import (
     release_transfer,
 )
 from app.modules.quotes.tasks import expire_quotes
+from app.modules.receipts.tasks import send_payment_receipt, send_tip_receipt
 from app.modules.requests.tasks import sanitize_task
 from app.modules.tips.tasks import cancel_unpaid_tips
+from app.modules.tips.transfer_tasks import (
+    check_tip_transfer_reversals,
+    release_succeeded_tips,
+    release_tip_transfer,
+)
 from app.modules.uploads.tasks import sweep_orphan_uploads
 from app.modules.webhooks.tasks import process_stripe_event
 from app.observability import configure_logging, init_sentry
@@ -62,6 +69,13 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["engine"] = engine
     ctx["session_factory"] = create_session_factory(engine)
     ctx["push_sender"] = ExpoPushSender.from_settings(settings)
+    # The receipt emails (#62). Without RESEND_API_KEY and EMAIL_FROM (allowed outside staging
+    # and production) none is sent: receipts.tasks logs it, and the receipt stays in the app.
+    ctx["email_sender"] = (
+        ResendEmailSender.from_settings(settings)
+        if settings.resend_api_key is not None and settings.email_from is not None
+        else None
+    )
     try:
         ctx["storage"] = S3Storage.from_settings(settings)
     except StorageNotConfiguredError:
@@ -134,9 +148,17 @@ class WorkerSettings:
         # One run per queued confirmation; it never raises, and the sweep below takes whatever
         # a run could not finish.
         discarding_result(release_transfer, max_tries=1),
+        # A tip's transfer (#273 PR A2): one try, as the job's; its sweep is the retry.
+        discarding_result(release_tip_transfer, max_tries=1),
         # One run per cancel (#69); it never raises, and the sweep below makes whatever a run
         # could not.
         discarding_result(refund_cancellation, max_tries=1),
+        # One run per payment or tip (#62), tried again by ARQ while Resend or Stripe is
+        # unavailable (receipts.tasks raises Retry until its last try).
+        discarding_result(
+            send_payment_receipt, max_tries=get_settings().receipt_email_max_attempts
+        ),
+        discarding_result(send_tip_receipt, max_tries=get_settings().receipt_email_max_attempts),
     )
     # A cron job keeps no result by default (ARQ's cron keep_result is 0); stated anyway.
     cron_jobs = (
@@ -223,6 +245,23 @@ class WorkerSettings:
         # cadence and timeout: read-only Stripe calls, never a create.
         cron(
             check_transfer_reversals,
+            minute=every(get_settings().transfer_release_sweep_minutes),
+            timeout=get_settings().transfer_release_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        # The tips' transfers (#273 PR A2), on the job transfers' cadence, timeout and batch:
+        # the net under the release queued when a tip succeeds, and the recovery of the read
+        # after each create.
+        cron(
+            release_succeeded_tips,
+            minute=every(get_settings().transfer_release_sweep_minutes),
+            timeout=get_settings().transfer_release_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
+        cron(
+            check_tip_transfer_reversals,
             minute=every(get_settings().transfer_release_sweep_minutes),
             timeout=get_settings().transfer_release_sweep_timeout_seconds,
             keep_result=0,

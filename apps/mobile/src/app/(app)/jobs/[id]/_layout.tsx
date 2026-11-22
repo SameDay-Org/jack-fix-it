@@ -14,6 +14,7 @@ export default function ProJobLayout() {
       <Stack.Screen name="on-the-way" options={sheetOptions("fitToContents")} />
       <Stack.Screen name="check-in" options={sheetOptions("fitToContents")} />
       <Stack.Screen name="share-location" />
+      <Stack.Screen name="cancel" />
       <Stack.Screen name="media-source" options={sheetOptions("fitToContents")} />
     </Stack>
   );

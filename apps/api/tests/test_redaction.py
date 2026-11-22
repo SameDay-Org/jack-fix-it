@@ -46,7 +46,7 @@ from tests.contact_overlaps import (
     PHONE_EMAIL_OVERLAPS,
 )
 from tests.glue_variants import all_glue_cases
-from tests.helpers import TIMED_RUNS, best_seconds_without_gc, seconds_without_gc
+from tests.helpers import TIMED_RUNS, seconds_without_gc
 
 POSITIVE: list[tuple[str, list[str]]] = [
     # Emails: plain, spaced, spelled out (EN and ES), bracketed.
@@ -1257,7 +1257,7 @@ def test_a_unit_or_direction_alone_stays_unmasked(line: str, text: str) -> None:
 def test_hostile_inputs_against_odd_street_lines_finish_quickly(line: str, text: str) -> None:
     known = KnownValues(streets=(line,))
 
-    assert best_seconds_without_gc(lambda: redact_text(text[:2000], known)) < 0.25
+    assert_fast(lambda: redact_text(text[:2000], known))
 
 
 # Round 5 review (#172): the known street became a token scan. A dotted direction without its
@@ -1376,8 +1376,8 @@ def test_long_or_repetitive_streets_finish_quickly(line: str, text: str) -> None
     known = KnownValues(streets=(line,))
     text = text[:2000]
 
-    assert best_seconds_without_gc(lambda: redact_known(text, known)) < 0.05
-    assert best_seconds_without_gc(lambda: redact_text(text, known)) < 0.25
+    assert_fast(lambda: redact_known(text, known), 0.05)
+    assert_fast(lambda: redact_text(text, known))
 
 
 # The scan reads word pieces and judges what stands between them: a period, a slash or an
@@ -1607,7 +1607,7 @@ HOSTILE: list[str] = [
 def test_hostile_inputs_finish_quickly(text: str) -> None:
     # Both passes, with known values that look like the hostile runs.
     assert len(text) <= 2100
-    assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
+    assert_fast(lambda: redact_text(text, KNOWN))
 
 
 @pytest.mark.parametrize(
@@ -1615,7 +1615,7 @@ def test_hostile_inputs_finish_quickly(text: str) -> None:
     ["3 0 5 " * 333, "742 " * 500, "evergreen " * 200, "3-0-5-" * 333, "jane.doe77 at " * 140],
 )
 def test_hostile_inputs_against_the_known_values_finish_quickly(text: str) -> None:
-    assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
+    assert_fast(lambda: redact_text(text, KNOWN))
 
 
 @pytest.mark.parametrize(
@@ -1641,7 +1641,7 @@ def test_hostile_inputs_against_the_known_values_finish_quickly(text: str) -> No
 )
 def test_many_marks_after_exempt_word_is_fast(text: str) -> None:
     """The mark runs are possessive (_MARKED) and the body counts characters, not marks."""
-    assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
+    assert_fast(lambda: redact_text(text, KNOWN))
 
 
 MARKED_LETTER = "é" + chr(0x0483)  # a non-ASCII letter with a mark: 2,500 of them is 5,000 chars
@@ -1690,7 +1690,7 @@ def test_many_unicode_letters_with_marks_are_fast(text: str) -> None:
     after a mark, so a marked token is scanned once, the counted bodies stay possessive, and
     the spelled-dot chains are scanned once per run."""
     assert len(text) >= 5000
-    assert best_seconds_without_gc(lambda: redact_text(text, KNOWN)) < 0.25
+    assert_fast(lambda: redact_text(text, KNOWN))
 
 
 # #300: a full parallel run stretched one 10,000-character call to 3.56 s, past develop's time
@@ -1748,6 +1748,29 @@ def assert_within_the_floor_budget(text: str) -> None:
         if rounds[-1].fits(budget):
             return
     pytest.fail(f"over the floor budget in all {TIMED_RUNS} rounds: {rounds}")
+
+
+# The reference's time on the dev machine (CPU seconds): budgets given in seconds there are
+# read in references.
+_REFERENCE_SECONDS: Final = 0.16
+
+
+def assert_fast(work: Callable[[], object], seconds: float = 0.25) -> None:
+    """`work` within `seconds` as measured on the dev machine, read on this thread's CPU time in
+    units of the reference timed just before it, as the floor budget is (#300). These budgets
+    read the wall clock before and failed under load (#448): a full parallel run stretches
+    every call. The first round that fits passes; backtracking (quadratic and worse) misses the
+    budget in every round."""
+    in_references = seconds / _REFERENCE_SECONDS
+    rounds: list[tuple[float, float]] = []
+    while len(rounds) < TIMED_RUNS:
+        reference = _cpu_seconds(lambda: _REFERENCE_PATTERN.search(_REFERENCE_TEXT))
+        took = _cpu_seconds(work)
+        rounds.append((reference, took))
+        # The smallest reference so far: a round that read it high cannot loosen its budget.
+        if took < in_references * min(done for done, _ in rounds):
+            return
+    pytest.fail(f"over {seconds} s (in references) in all {TIMED_RUNS} rounds: {rounds}")
 
 
 @pytest.mark.parametrize(
@@ -1882,7 +1905,7 @@ def test_reverse_handle_whitespace_is_linear(length: int) -> None:
     of spaces is not split between them again and again when no platform follows."""
     text = "a" + " " * (length - 2) + "b"
 
-    assert best_seconds_without_gc(lambda: redact_contacts(text)) < 0.25
+    assert_fast(lambda: redact_contacts(text))
     for handle, expected in [
         ("j.doe.fixit (insta)", f"{MASK})"),
         ("j.doe.fixit(insta)", f"{MASK})"),
@@ -2066,7 +2089,7 @@ def test_the_recovery_of_cut_contacts_is_fast(unit: str, length: int) -> None:
     more, and each span finds the next email or URL mask by bisection."""
     text = (unit * (length // len(unit) + 1))[:length]
 
-    assert best_seconds_without_gc(lambda: redact_contacts(text)) < 0.25
+    assert_fast(lambda: redact_contacts(text))
 
 
 # Fix round 5 on #240: the safety floor (Cesar's decision). redact_contacts also masks every

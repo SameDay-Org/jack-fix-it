@@ -209,8 +209,16 @@ export function jobText(
     case "cancelled":
       // Refunded shows as cancelled (glossary), but the job was not called off: the customer's
       // report was resolved and the payment went back (#472).
-      return job.status === "refunded"
-        ? { headline: t("jobs.headline.refunded"), support: t("jobs.support.refunded") }
+      if (job.status === "refunded") {
+        return { headline: t("jobs.headline.refunded"), support: t("jobs.support.refunded") };
+      }
+      // The pro called it off: it costs the customer nothing, and a new request finds another
+      // pro (the API closes this one for good, #69).
+      return job.cancellation?.cancelled_by === "pro"
+        ? {
+            headline: t("jobs.headline.cancelledByPro", { name: lead }),
+            support: t("jobs.support.cancelledByPro"),
+          }
         : { headline: t("jobs.headline.cancelled"), support: t("jobs.support.cancelled") };
   }
 }

@@ -765,6 +765,29 @@ async def test_send_push_muted_group_sends_nothing(
     assert sent_to(sender) == {BUSY: 1, OK: 1}
 
 
+async def test_muting_messages_silences_the_chat_and_not_the_jobs_steps(
+    ctx: dict[str, Any],
+    db_session: AsyncSession,
+    sender: FakeSender,
+    redis: Redis,
+    prefix: str,
+) -> None:
+    """The messages group (#73) is the chat's alone: a user who mutes it still hears the job."""
+    user = await make_user(db_session, "en", OK)
+    await set_preference(db_session, user, "messages", False)
+
+    await push(ctx, user, "chat_message:1", **kind_keys("chat_message"))
+    await push(ctx, user, "job_on_the_way:1", **kind_keys("job_on_the_way"))
+
+    assert await statuses(redis, prefix, "chat_message:1") == ["failed"]  # muted
+    assert sent_to(sender) == {OK: 1}  # the job's step only
+    await set_preference(db_session, user, "job_updates", False)
+    await set_preference(db_session, user, "messages", True)
+    await push(ctx, user, "chat_message:2", **kind_keys("chat_message"))
+    await push(ctx, user, "job_on_the_way:2", **kind_keys("job_on_the_way"))
+    assert sent_to(sender) == {OK: 2}  # the chat's, the step muted now
+
+
 async def test_receipt_resend_while_muted_sends_nothing(
     ctx: dict[str, Any],
     db_session: AsyncSession,

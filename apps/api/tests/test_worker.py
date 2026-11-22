@@ -28,6 +28,10 @@ from app.modules.payments.transfer_tasks import check_transfer_reversals, releas
 from app.modules.quotes.tasks import expire_quotes
 from app.modules.requests.tasks import SANITIZE_SPARE_TRIES
 from app.modules.tips.tasks import cancel_unpaid_tips
+from app.modules.tips.transfer_tasks import (
+    check_tip_transfer_reversals,
+    release_succeeded_tips,
+)
 from app.modules.uploads.tasks import sweep_orphan_uploads
 from app.worker import WorkerSettings, every
 from tests.conftest import make_settings
@@ -100,6 +104,11 @@ def test_registration_keeps_names_tries_and_timeouts() -> None:
         "geocode_address": (1, None),
         # One run per queued confirmation (#68): the sweep is its retry.
         "release_transfer": (1, None),
+        # One run per tip that succeeded (#273 PR A2): its sweep is the retry.
+        "release_tip_transfer": (1, None),
+        # Tried again while Resend or Stripe is unavailable (#62).
+        "send_payment_receipt": (get_settings().receipt_email_max_attempts, None),
+        "send_tip_receipt": (get_settings().receipt_email_max_attempts, None),
         # One run per cancel (#69): the sweep is its retry.
         "refund_cancellation": (1, None),
     }
@@ -177,6 +186,19 @@ def test_cron_jobs_keep_names_cadences_and_timeouts() -> None:
         # The reversal check's recovery (#416 r2): the release sweep's cadence and timeout.
         "cron:check_transfer_reversals": (
             check_transfer_reversals,
+            every(get_settings().transfer_release_sweep_minutes),
+            get_settings().transfer_release_sweep_timeout_seconds,
+            1,
+        ),
+        # The tips' transfers (#273 PR A2): the job transfers' cadence and timeout.
+        "cron:release_succeeded_tips": (
+            release_succeeded_tips,
+            every(get_settings().transfer_release_sweep_minutes),
+            get_settings().transfer_release_sweep_timeout_seconds,
+            1,
+        ),
+        "cron:check_tip_transfer_reversals": (
+            check_tip_transfer_reversals,
             every(get_settings().transfer_release_sweep_minutes),
             get_settings().transfer_release_sweep_timeout_seconds,
             1,
