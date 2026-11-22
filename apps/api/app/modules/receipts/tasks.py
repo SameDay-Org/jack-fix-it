@@ -32,10 +32,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.email_layout import EmailContent, SenderIdentity
 from app.integrations.email import EmailSender, EmailUnavailableError
 from app.integrations.stripe_errors import StripeCallError
 from app.integrations.stripe_payments import CardFacts, StripePayments
-from app.modules.auth.email_copy import EmailContent
 from app.modules.jobs.service import JobReceiptReader
 from app.modules.payments.receipt_reader import PaymentReceiptReader
 from app.modules.receipts.email_copy import (
@@ -186,12 +186,6 @@ async def _facts(
     category = None
     if out.category is not None:
         category = out.category.names.get(locale) or out.category.names.get("en")
-    config = ReceiptConfig.from_settings(settings)
-    issuer = tuple(
-        value
-        for value in (config.legal_name, config.support_email, config.mailing_address)
-        if value is not None
-    )
     when = await _local(session, settings.business_time_zone, out.scheduled_start_at)
     first_name = (await users.first_names([account.id])).get(account.id)
     facts = ReceiptEmailFacts(
@@ -206,7 +200,7 @@ async def _facts(
         lines=tuple(lines),
         total_cents=sum(cents for _, cents in lines),
         card=None,
-        issuer=issuer,
+        sender=SenderIdentity.from_settings(settings),
     )
     return account.email, facts
 
