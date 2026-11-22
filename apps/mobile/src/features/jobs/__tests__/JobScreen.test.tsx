@@ -599,6 +599,34 @@ describe("JobScreen", () => {
       screen.getByText("$153.42 is going back to your payment method. It's being processed."),
     ).toBeTruthy();
     expect(previewCalls()).toBe(0);
+    // The customer called it off: no new request offered.
+    expect(screen.queryByTestId("job-new-request")).toBeNull();
+  });
+
+  it("a job its pro cancelled gives everything back and offers a new request from Home (#69)", async () => {
+    answerJob({
+      ...CANCELLED,
+      cancellation: {
+        cancelled_by: "pro",
+        reason_code: "cannot_make_it",
+        cancelled_at: at(-30),
+        customer_total_cents: 18_050,
+        fee_cents: 0,
+        refund_cents: 18_050,
+        refund_status: "pending",
+      },
+    });
+    await renderWithQuery(<JobScreen />);
+    await loaded("Dan cancelled this job");
+    expect(
+      screen.getByText("This costs you nothing. You can start a new request to find another pro."),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("$180.50 is going back to your payment method. It's being processed."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Cancelling cost/)).toBeNull();
+    await act(async () => fireEvent.press(screen.getByRole("button", { name: "New request" })));
+    expect(router.dismissTo).toHaveBeenCalledWith("/");
   });
 
   it("the pro row opens the pro's profile over the job", async () => {
@@ -863,6 +891,16 @@ describe("JobScreen, the finished job (#66)", () => {
 
     expect(screen.getByRole("button", { name: "View messages" })).toBeTruthy();
     expect(screen.queryByTestId("job-problems")).toBeNull();
+  });
+
+  it("with the custom tip's keyboard up, a tap on a button acts and a drag puts it away (#273)", async () => {
+    answerJob(CONFIRMED_JOB);
+    await renderWithQuery(<JobScreen />);
+    await headline("Job confirmed");
+
+    const scroll = screen.getByTestId("job-scroll");
+    expect(scroll.props.keyboardShouldPersistTaps).toBe("handled");
+    expect(scroll.props.keyboardDismissMode).toBe("on-drag");
   });
 
   it("a photo opens full screen at that photo", async () => {

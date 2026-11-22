@@ -6995,6 +6995,16 @@ export interface components {
              * @description The job the ticket is about, if any.
              */
             job_id: string | null;
+            /**
+             * Job Request Id
+             * @description The request of the ticket's job, for the panel's request page; null without a job (#503).
+             */
+            job_request_id: string | null;
+            /**
+             * Job Request Code
+             * @description That request's public code, as staff name and search it; null without a job (#503).
+             */
+            job_request_code: string | null;
             status: components["schemas"]["TicketStatus"];
             /**
              * Created At
@@ -7028,6 +7038,16 @@ export interface components {
              * @description The job the ticket is about, if any.
              */
             job_id: string | null;
+            /**
+             * Job Request Id
+             * @description The request of the ticket's job, for the panel's request page; null without a job (#503).
+             */
+            job_request_id: string | null;
+            /**
+             * Job Request Code
+             * @description That request's public code, as staff name and search it; null without a job (#503).
+             */
+            job_request_code: string | null;
             status: components["schemas"]["TicketStatus"];
             /**
              * Created At
@@ -7995,7 +8015,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description validation_error: not an E.164 number, or a country code that is not allowed. */
+            /** @description validation_error: not an E.164 number, or a country code or number range that is not allowed. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -8009,6 +8029,15 @@ export interface operations {
                 headers: {
                     /** @description Seconds until the current limit window ends. */
                     "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description verification_unavailable: the daily count of codes cannot be taken; nothing was sent, retry later. */
+            503: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {

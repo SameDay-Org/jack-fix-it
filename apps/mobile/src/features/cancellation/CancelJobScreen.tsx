@@ -1,17 +1,19 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { uuid } from "expo";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { useRef, useState, type ComponentRef, type ReactNode } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { KeyboardAvoidingView, ScrollView, Text, View } from "react-native";
 import { useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { sessionGeneration } from "@/api";
-import { Button, ChoiceCard, Input, Notice, Screen, TextSkeleton } from "@/components/ui";
+import { Button, ChoiceCard, Input, Notice, Screen } from "@/components/ui";
 import { announce } from "@/components/ui/focus";
 import { BackButton } from "@/features/auth/components/BackButton";
 import { isJobRefusal, jobHref, useCustomerJob } from "@/features/jobs/api";
+import { proNames, type CustomerJob } from "@/features/jobs/phase";
 import { isUuid } from "@/features/quotes/navigation";
 import { lengthCounter } from "@/features/request/counter";
 
@@ -29,11 +31,35 @@ import {
   type Cancellation,
 } from "./api";
 import { costStatement, moneyLines } from "./CancellationStatus";
+import { CancelHeader, CancelSkeleton, CancelState } from "./CancelState";
 import { NOTE_MAX } from "./config";
 
 const TALK_TO_JACK = "/help/contact";
 /** The failures after which the same cancel goes again: the button says "Try again". */
 const SEND_AGAIN: ReadonlySet<CancelFailure> = new Set(["offline", "rateLimited", "failed"]);
+
+/**
+ * A cancelled job's words: the pro's cancel (read with the job, or the answer to a cancel sent
+ * here after the pro had called it off: the API answers with theirs), the customer's own cancel
+ * sent here, or one read with the job.
+ */
+function cancelledText(
+  t: TFunction,
+  job: CustomerJob | undefined,
+  cancellation: Pick<Cancellation, "cancelled_by">,
+  sentHere: boolean,
+): { title: string; body: string } {
+  if (cancellation.cancelled_by === "pro") {
+    const name = job ? proNames(t, job).lead : t("jobs.pro.fallback");
+    return {
+      title: t("jobs.headline.cancelledByPro", { name }),
+      body: t("jobs.support.cancelledByPro"),
+    };
+  }
+  return sentHere
+    ? { title: t("cancellation.sent.title"), body: t("cancellation.sent.body") }
+    : { title: t("jobs.headline.cancelled"), body: "" };
+}
 
 /**
  * "Cancel job" (`/requests/[id]/cancel`, #69): one full screen over the job. Why (one of four
@@ -68,36 +94,32 @@ export function CancelJobScreen() {
   let body: ReactNode;
   if (!valid || (job.data === undefined && isJobRefusal(job.error))) {
     body = (
-      <State
-        requestId={id}
+      <CancelState
+        back={jobHref(id)}
         title={t("jobs.notFound.title")}
         body={t("jobs.notFound.body")}
         testID="cancel-gone"
       >
         <Button label={t("jobs.notFound.home")} onPress={() => router.dismissTo("/")} />
-      </State>
+      </CancelState>
     );
   } else if (cancelled) {
+    const text = cancelledText(t, job.data, cancelled, sentHere !== null);
     body = (
-      <State
-        requestId={id}
-        title={t(sentHere ? "cancellation.sent.title" : "jobs.headline.cancelled")}
-        body={sentHere ? t("cancellation.sent.body") : ""}
-        testID="cancel-sent"
-      >
+      <CancelState back={jobHref(id)} title={text.title} body={text.body} testID="cancel-sent">
         {moneyLines(t, cancelled, sentHere?.currency).map((line) => (
           <Text key={line} className="text-body text-navy-900">
             {line}
           </Text>
         ))}
         <Button label={t("cancellation.sent.back")} size="lg" onPress={back} testID="cancel-back" />
-      </State>
+      </CancelState>
     );
   } else if (job.data && (!cancellable || refusal)) {
     const copy = refusal === "needsReview" ? "review" : "closed";
     body = (
-      <State
-        requestId={id}
+      <CancelState
+        back={jobHref(id)}
         title={t(`cancellation.${copy}.title`)}
         body={t(`cancellation.${copy}.body`)}
         testID="cancel-closed"
@@ -108,7 +130,7 @@ export function CancelJobScreen() {
           testID="cancel-talk"
         />
         <Button label={t("cancellation.sent.back")} variant="secondary" onPress={back} />
-      </State>
+      </CancelState>
     );
   } else if (job.data && preview.data && (sending || !failed)) {
     body = (
@@ -120,7 +142,11 @@ export function CancelJobScreen() {
         preview={preview.data}
         onSent={(cancellation) => {
           setSent({ requestId: id, cancellation });
-          announce(t("cancellation.sent.title"));
+          const text = cancelledText(t, job.data, cancellation, true);
+          // The pro's cancel, made first, is said in full: its title alone reads as the customer's.
+          announce(
+            cancellation.cancelled_by === "pro" ? `${text.title}. ${text.body}` : text.title,
+          );
         }}
         onChanged={reread}
         onSending={(on) => setSendingFor(on ? id : null)}
@@ -130,8 +156,8 @@ export function CancelJobScreen() {
   } else if (job.isError || preview.isError) {
     const copy = limited ? "busy" : "loadFailed";
     body = (
-      <State
-        requestId={id}
+      <CancelState
+        back={jobHref(id)}
         title={t(`cancellation.${copy}.title`)}
         body={t(`cancellation.${copy}.body`)}
         announced
@@ -144,64 +170,16 @@ export function CancelJobScreen() {
           onPress={job.data ? reread : () => void job.refetch()}
           testID="cancel-retry"
         />
-      </State>
+      </CancelState>
     );
   } else {
-    body = <FormSkeleton requestId={id} />;
+    body = <CancelSkeleton back={jobHref(id)} />;
   }
 
   return (
     <Screen bar="light" testID="cancel-screen">
       {body}
     </Screen>
-  );
-}
-
-function Header({ title, intro }: { title: string; intro: string }) {
-  return (
-    <View className="gap-2">
-      <Text accessibilityRole="header" className="text-title-1 text-navy-900">
-        {title}
-      </Text>
-      {intro ? <Text className="text-body text-gray-500">{intro}</Text> : null}
-    </View>
-  );
-}
-
-type StateProps = {
-  requestId: string;
-  title: string;
-  body: string;
-  children: ReactNode;
-  /** Said aloud when it shows: it can take the place of the form the reader was in. */
-  announced?: boolean;
-  testID: string;
-};
-
-/** A state of the whole screen: what happened, then what the customer can do. */
-function State({ requestId, title, body, children, announced = false, testID }: StateProps) {
-  useEffect(() => {
-    if (announced) announce(`${title}. ${body}`);
-  }, [announced, title, body]);
-  return (
-    <ScrollView contentContainerClassName="flex-grow gap-6 px-4 pb-6 pt-2" testID={testID}>
-      <BackButton fallbackHref={jobHref(requestId)} />
-      <Header title={title} intro={body} />
-      <View className="gap-4">{children}</View>
-    </ScrollView>
-  );
-}
-
-function FormSkeleton({ requestId }: { requestId: string }) {
-  return (
-    <View className="gap-6 px-4 pt-2" testID="cancel-loading">
-      <BackButton fallbackHref={jobHref(requestId)} />
-      <TextSkeleton type="title-1" width="60%" />
-      <TextSkeleton type="body" sample="Tell us why, and check what it costs." />
-      {CANCEL_REASONS.map((reason) => (
-        <TextSkeleton key={reason} type="headline" width="70%" />
-      ))}
-    </View>
   );
 }
 
@@ -315,7 +293,7 @@ function CancelForm({
         testID="cancel-form"
       >
         <BackButton fallbackHref={jobHref(requestId)} />
-        <Header title={t("cancellation.title")} intro={t("cancellation.intro")} />
+        <CancelHeader title={t("cancellation.title")} intro={t("cancellation.intro")} />
 
         <View
           className="gap-3"

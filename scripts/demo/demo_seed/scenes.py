@@ -37,6 +37,7 @@ from demo_seed.flows import Catalog, Checkout
 from demo_seed.history import Case, CaseRun, Closing, Ending, Lived, People
 from demo_seed.stripe_standins import stand_in_id
 from demo_seed.stripe_test import CardCheckout
+from demo_seed.timeline import Timeline
 from demo_seed.world import Actor, Gateways, SeedError, World
 
 MARKER_KEY: Final = "demo_seed"
@@ -49,6 +50,18 @@ _DAN: Final = 0
 # A job "scheduled today" starts this long from now, never past the day's end.
 _TODAY_LEAD: Final = timedelta(hours=3)
 _BEFORE_MIDNIGHT: Final = timedelta(minutes=20)
+# A visit the seed proposes days ahead starts in the day (Relay's N9): between these hours in
+# the business time zone, else at the morning hour of that day.
+_DAY_FIRST_HOUR: Final = 9
+_DAY_LAST_HOUR: Final = 18
+_MORNING_HOUR: Final = 10
+# The BDC's work, each piece after its request was made: the agent's first note this long
+# before the second; the admin's overdue follow-up set this long ago, due this long after; the
+# one due today never due sooner than this (in the day's last minutes).
+_NOTE_BEFORE: Final = timedelta(minutes=40)
+_OVERDUE_SET: Final = timedelta(hours=4)
+_OVERDUE_LEAD: Final = timedelta(hours=2)
+_TODAY_MIN_LEAD: Final = timedelta(minutes=5)
 # The requests the queue's "New" tab opens with.
 _FRESH_CATEGORY: Final = cast.MARIA_CATEGORIES[0]
 
@@ -73,6 +86,14 @@ class Stripe:
     test: Gateways | None = None
     test_checkout: CardCheckout | None = None
     test_accounts: AccountReader | None = None
+
+
+@dataclass(frozen=True)
+class _QueueScenes:
+    """The queue's requests the BDC's notes and follow-ups go on."""
+
+    waiting_customer: flows.RequestRef  # unclassified, the BDC asked its customer for more
+    held: flows.RequestRef  # urgent, never contacted, held by the agent
 
 
 @dataclass
@@ -145,7 +166,8 @@ async def build(world: World, options: Options, stripe: Stripe) -> Summary:
     jamie = await _jamie(world, options, stripe)
     jamies = People(customers=[(jamie, cast.JAMIE, cast.JAMIE_HOME)], pros=pros, admin=admin)
     confirmed, problem = await _jamies_jobs(world, catalog, jamies, stripe, summary, now)
-    await _queue(world, catalog, people, jamies, stripe, agent, summary, now)
+    queue_scenes = await _queue(world, catalog, people, jamies, stripe, agent, summary, now)
+    await _bdc_work(world, admin, agent, queue_scenes)
     await _tickets(world, jamie, pros["handyman"][_DAN], customers[0][0], confirmed)
     if problem.job_id is None or confirmed.job_id is None:
         raise SeedError("the video's jobs were not booked")
@@ -338,8 +360,9 @@ async def _queue(
     agent: Actor,
     summary: Summary,
     now: datetime,
-) -> None:
-    """The requests that make each tab of the operations queue worth opening."""
+) -> _QueueScenes:
+    """The requests that make each tab of the operations queue worth opening. Returns the
+    two the BDC's notes and follow-ups go on."""
     start_today = await _later_today(world, now)
     runner = CaseRun(world, people, catalog, stripe.stand_in_checkout)
     # Scheduled today: two paid jobs whose visit is still ahead.
@@ -368,7 +391,9 @@ async def _queue(
         contact_after=timedelta(minutes=3),
         quote_after=timedelta(hours=8),
     )
-    await runner.run(waiting, now - timedelta(minutes=40), now + timedelta(days=2))
+    await runner.run(
+        waiting, now - timedelta(minutes=40), await _in_the_day(world, now + timedelta(days=2))
+    )
     # Waiting on its customer: unclassified, the BDC asked for more.
     asked = Case(
         name="queue-waiting-customer",
@@ -380,7 +405,9 @@ async def _queue(
         ending=Ending.NO_QUOTE,
         contact_after=timedelta(minutes=4),
     )
-    await runner.run(asked, now - timedelta(hours=5), now + timedelta(days=3))
+    waiting_customer = await runner.run(
+        asked, now - timedelta(hours=5), await _in_the_day(world, now + timedelta(days=3))
+    )
     # Urgent: past the first-contact time and never contacted. The agent holds one.
     late = now - timedelta(minutes=world.settings.ops_first_contact_sla_minutes * 9)
     unsorted = Case(
@@ -392,7 +419,9 @@ async def _queue(
         amount_cents=0,
         ending=Ending.NO_QUOTE,
     )
-    held = await runner.run(unsorted, late - timedelta(hours=2), now + timedelta(days=2))
+    held = await runner.run(
+        unsorted, late - timedelta(hours=2), await _in_the_day(world, now + timedelta(days=2))
+    )
     await flows.claim(world, agent, held.request)
     overdue = Case(
         name="queue-urgent",
@@ -403,7 +432,7 @@ async def _queue(
         amount_cents=0,
         ending=Ending.NO_QUOTE,
     )
-    await runner.run(overdue, late, now + timedelta(days=2))
+    await runner.run(overdue, late, await _in_the_day(world, now + timedelta(days=2)))
     # Jamie's request with two quotes to compare (Dan's and Sam's).
     compare = Case(
         name="jamie-quotes",
@@ -418,7 +447,7 @@ async def _queue(
         second_quote_after=timedelta(minutes=30),
     )
     quotes = await CaseRun(world, jamies, catalog, stripe.stand_in_checkout).run(
-        compare, now - timedelta(hours=3), now + timedelta(days=2)
+        compare, now - timedelta(hours=3), await _in_the_day(world, now + timedelta(days=2))
     )
     summary.quotes_code = quotes.request.public_code
     # New: just in, nobody holds them. Only Maria offers the category, so they wait for her.
@@ -426,6 +455,40 @@ async def _queue(
         summary.fresh_codes.append(
             await fresh_request(world, catalog, people, index, f"queue-new-{index}")
         )
+    return _QueueScenes(waiting_customer=waiting_customer.request, held=held.request)
+
+
+async def _bdc_work(world: World, admin: Actor, agent: Actor, scenes: _QueueScenes) -> None:
+    """The BDC's work, through the API (the holder rule, the follow-up's range and the audit
+    apply), each piece dated after its request was made:
+
+    - the agent's two internal notes on the urgent request they hold, the first 40 minutes
+      before the second;
+    - the admin's two follow-ups on the request waiting on its customer: one set 4 hours ago
+      and due 2 hours later, so overdue now, and one due later today. The follow-ups page
+      lists both and its badge counts both (due by the end of today, overdue included).
+
+    What happened earlier is lived now and dated back, as the history is (timeline); the audit
+    rows keep the time the seed ran."""
+    first, second = cast.BDC_NOTES
+    notes = Timeline(world.sessions, scenes.held.id)
+    await notes.start()
+    await flows.add_note(world, agent, scenes.held, first)
+    await notes.mark(datetime.now(UTC) - _NOTE_BEFORE)
+    await notes.flush()
+    await flows.add_note(world, agent, scenes.held, second)
+
+    waiting = scenes.waiting_customer
+    followups = Timeline(world.sessions, waiting.id)
+    await followups.start()
+    await flows.schedule_followup(
+        world, admin, waiting, followups.ahead(_OVERDUE_LEAD), cast.FOLLOWUP_OVERDUE
+    )
+    await followups.mark(datetime.now(UTC) - _OVERDUE_SET)
+    await followups.flush()
+    now = datetime.now(UTC)
+    due = max(await _later_today(world, now), now + _TODAY_MIN_LEAD)
+    await flows.schedule_followup(world, admin, waiting, due, cast.FOLLOWUP_TODAY)
 
 
 async def fresh_request(
@@ -443,7 +506,8 @@ async def fresh_request(
     )
     runner = CaseRun(world, people, catalog, _NoCheckout())
     now = datetime.now(UTC)
-    return (await runner.run(fresh, now, now + timedelta(days=2))).request.public_code
+    start = await _in_the_day(world, now + timedelta(days=2))
+    return (await runner.run(fresh, now, start)).request.public_code
 
 
 class _NoCheckout:
@@ -451,6 +515,29 @@ class _NoCheckout:
 
     async def charge(self, payment_intent_id: str) -> PaymentIntentFacts:
         raise SeedError("this run does not pay")
+
+
+async def _in_the_day(world: World, at: datetime) -> datetime:
+    """`at` when it falls between _DAY_FIRST_HOUR and _DAY_LAST_HOUR in the business time
+    zone, else _MORNING_HOUR of that day there (Relay's N9: seeded in the evening, a quote must
+    not propose a visit at night). For starts days ahead: the morning stays in the future."""
+    statement = text(
+        "SELECT CASE WHEN extract(hour FROM timezone(:zone, CAST(:at AS timestamptz))) "
+        "BETWEEN CAST(:first AS integer) AND CAST(:last AS integer) - 1 "
+        "THEN CAST(:at AS timestamptz) "
+        "ELSE timezone(:zone, date_trunc('day', timezone(:zone, CAST(:at AS timestamptz))) "
+        "+ make_interval(hours => CAST(:morning AS integer))) END"
+    )
+    parameters = {
+        "zone": world.settings.business_time_zone,
+        "at": at,
+        "first": _DAY_FIRST_HOUR,
+        "last": _DAY_LAST_HOUR,
+        "morning": _MORNING_HOUR,
+    }
+    async with world.session() as session:
+        moved: datetime = (await session.execute(statement, parameters)).scalar_one()
+    return moved
 
 
 async def _later_today(world: World, now: datetime) -> datetime:

@@ -457,7 +457,7 @@
             "description": "Accepted; a code is on its way by SMS."
           },
           "422": {
-            "description": "validation_error: not an E.164 number, or a country code that is not allowed.",
+            "description": "validation_error: not an E.164 number, or a country code or number range that is not allowed.",
             "content": {
               "application/json": {
                 "schema": {
@@ -486,6 +486,16 @@
                 }
               }
             },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "verification_unavailable: the daily count of codes cannot be taken; nothing was sent, retry later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -20200,6 +20210,31 @@
             "title": "Job Id",
             "description": "The job the ticket is about, if any."
           },
+          "job_request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Id",
+            "description": "The request of the ticket's job, for the panel's request page; null without a job (#503)."
+          },
+          "job_request_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Code",
+            "description": "That request's public code, as staff name and search it; null without a job (#503)."
+          },
           "status": {
             "$ref": "#/components/schemas/TicketStatus"
           },
@@ -20218,6 +20253,8 @@
           "role",
           "topic",
           "job_id",
+          "job_request_id",
+          "job_request_code",
           "status",
           "created_at"
         ],
@@ -20267,6 +20304,31 @@
             ],
             "title": "Job Id",
             "description": "The job the ticket is about, if any."
+          },
+          "job_request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Id",
+            "description": "The request of the ticket's job, for the panel's request page; null without a job (#503)."
+          },
+          "job_request_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Code",
+            "description": "That request's public code, as staff name and search it; null without a job (#503)."
           },
           "status": {
             "$ref": "#/components/schemas/TicketStatus"
@@ -20330,6 +20392,8 @@
           "role",
           "topic",
           "job_id",
+          "job_request_id",
+          "job_request_code",
           "status",
           "created_at",
           "message",

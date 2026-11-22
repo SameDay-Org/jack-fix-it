@@ -8,7 +8,11 @@
  * - Only a server action or a route handler may write cookies, so a server component that
  *   finds an expired access token redirects to `/admin/session/refresh`, which refreshes once
  *   (rotating both cookies) and comes back; any failure ends at `/admin/session/end`, which
- *   clears the cookies and goes to the login.
+ *   clears the cookies and goes to the login. Except a refresh the API cannot answer just now
+ *   (429, 503, no answer in time): the cookies stay and `/admin/session/busy` says so (#530).
+ * - The auth calls (login, refresh, logout) carry the web service's key and the visitor's
+ *   address (`visitorForwarding`), so the API's per-address limits count each visitor and not
+ *   this server (#530).
  * - Each login gets a random session id. `jfi_sid` holds `<sid>.<user id>` and only login
  *   sets it; the token cookies hold `<sid>.<token>`, and a refresh writes the new tokens under
  *   the same sid, never the marker. Tokens count only under the current login's sid (compared
@@ -34,7 +38,8 @@ import { cache } from "react";
 import type { components } from "@jack/shared";
 
 import { ApiError, apiGet, apiPost } from "./api";
-import { PATH_HEADER, safeReturnPath, withReturn } from "./return-path";
+import { forwardingHeaders } from "./public-form/visitor";
+import { PATH_HEADER, RETURN_PARAM, safeReturnPath, withReturn } from "./return-path";
 
 export type User = components["schemas"]["UserOut"];
 export type AuthResponse = components["schemas"]["AuthResponse"];
@@ -51,6 +56,13 @@ export const PANEL_PATH = "/admin";
 export const LOGIN_PATH = "/admin/login";
 export const REFRESH_PATH = "/admin/session/refresh";
 export const END_PATH = "/admin/session/end";
+/** Where the panel waits when the API could not renew the session just now (#530). */
+export const BUSY_PATH = "/admin/session/busy";
+/** The busy page's wait before its one retry (`?wait=`), and the refresh route's mark on it. */
+export const WAIT_PARAM = "wait";
+export const RETRIED_PARAM = "retried";
+/** The longest API wait (Retry-After, seconds) the busy page retries after by itself (#530). */
+export const BUSY_AUTO_RETRY_MAX_SECONDS = 5;
 const STAFF_ROLES: ReadonlySet<string> = new Set(["agent", "admin"]);
 const DEPLOYED: ReadonlySet<string> = new Set(["staging", "production"]);
 
@@ -167,10 +179,19 @@ export function mayChangeSession(request: NextRequest): boolean {
   return fromThisSite(request) && SESSION_COOKIES.some((name) => request.cookies.has(name));
 }
 
+/**
+ * What the panel's auth calls (login, refresh, logout) add for the API's per-address limits
+ * (#530): the web service's key and the visitor's address from the edge's header, built here on
+ * the server. Nothing the browser sent is passed on. Only in a server action or a route handler.
+ */
+export async function visitorForwarding(): Promise<RequestInit> {
+  return { headers: forwardingHeaders(await headers()) };
+}
+
 /** Revokes the session's refresh token on the API, best effort: it never throws. */
 export async function revoke(refreshToken: string): Promise<void> {
   try {
-    await apiPost("/v1/auth/logout", { refresh_token: refreshToken });
+    await apiPost("/v1/auth/logout", { refresh_token: refreshToken }, await visitorForwarding());
   } catch {
     // The cookies are cleared either way; an unrevoked token expires on its own.
   }
@@ -256,9 +277,14 @@ export async function staffAuth(): Promise<RequestInit> {
  */
 export async function staffActionAuth(): Promise<RequestInit> {
   let session = await readStaffSession();
-  if (session === REFRESH_PATH && (await refreshStaffSession()) === PANEL_PATH) {
+  if (session === REFRESH_PATH) {
+    const refreshed = await refreshStaffSession();
+    // The API is busy: the session stays, and the person waits on the busy page (#530).
+    if (typeof refreshed !== "string") {
+      redirect(busyPath(await requestedPanelPath(), refreshed.retryAfterSeconds));
+    }
     // Renewed: REFRESHED_COOKIE is set now, so a token still refused ends the session.
-    session = await readStaffSession();
+    if (refreshed === PANEL_PATH) session = await readStaffSession();
   }
   if (typeof session === "string") {
     await endSession();
@@ -268,22 +294,55 @@ export async function staffActionAuth(): Promise<RequestInit> {
 }
 
 /**
- * Route handler side of the refresh: one `POST /v1/auth/refresh`, then both cookies rotate.
- * Returns where to go next: the panel on success, the login otherwise (session cleared). With
- * no refresh cookie it clears nothing: there is nothing to clear. A refresh token of another
- * login (or none) goes to the session end. The new tokens keep the login's sid; the session
- * marker is never written here.
+ * A refresh the API could not answer just now (#530): a 429 or a 503 (with its Retry-After, in
+ * seconds, when it gave one), or no answer at all (down, timed out). The session is kept.
  */
-export async function refreshStaffSession(): Promise<string> {
+export type SessionBusy = { busy: true; retryAfterSeconds: number | null };
+
+function busyOf(failure: unknown): SessionBusy | null {
+  if (!(failure instanceof ApiError)) return { busy: true, retryAfterSeconds: null };
+  if (failure.status !== 429 && failure.status !== 503) return null;
+  return { busy: true, retryAfterSeconds: failure.retryAfterSeconds };
+}
+
+/**
+ * The busy page, carrying the page that was asked for and, when the API's wait is short
+ * (1 to BUSY_AUTO_RETRY_MAX_SECONDS), the wait before the page's one retry. Null: no retry.
+ */
+export function busyPath(returnPath: string | null, waitSeconds: number | null): string {
+  const query = new URLSearchParams();
+  if (returnPath !== null) query.set(RETURN_PARAM, returnPath);
+  if (waitSeconds !== null && waitSeconds >= 1 && waitSeconds <= BUSY_AUTO_RETRY_MAX_SECONDS) {
+    query.set(WAIT_PARAM, String(waitSeconds));
+  }
+  const search = query.toString();
+  return search ? `${BUSY_PATH}?${search}` : BUSY_PATH;
+}
+
+/**
+ * Route handler side of the refresh: one `POST /v1/auth/refresh`, then both cookies rotate.
+ * Returns where to go next: the panel on success, the login when the API refused the refresh
+ * (session cleared). When the API is busy (`SessionBusy`: 429, 503, no answer) nothing is
+ * cleared: the staff member is still signed in (#530). With no refresh cookie it clears
+ * nothing: there is nothing to clear. A refresh token of another login (or none) goes to the
+ * session end. The new tokens keep the login's sid; the session marker is never written here.
+ */
+export async function refreshStaffSession(): Promise<string | SessionBusy> {
   const jar = await cookies();
   if (!jar.get(REFRESH_COOKIE)) return LOGIN_PATH;
   const login = loginOf(jar.get(SESSION_COOKIE)?.value);
   const refreshToken = login && tokenOf(jar, REFRESH_COOKIE, login);
   if (!login || !refreshToken) return END_PATH;
+  const forwarding = await visitorForwarding();
   let tokens: AuthResponse;
   try {
-    tokens = await apiPost("/v1/auth/refresh", { refresh_token: refreshToken });
-  } catch {
+    tokens = await apiPost("/v1/auth/refresh", { refresh_token: refreshToken }, forwarding);
+  } catch (failure) {
+    // A 429, a 503 or no answer is the API's moment, not the session's end: the cookies stay
+    // (the API answers a retried refresh token within its grace, #152). Anything else (a 401:
+    // the refresh token is no longer valid) ends the session, as before.
+    const busy = busyOf(failure);
+    if (busy) return busy;
     await clearSession();
     return LOGIN_PATH;
   }

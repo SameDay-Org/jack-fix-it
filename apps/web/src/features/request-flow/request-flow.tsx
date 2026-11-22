@@ -41,6 +41,57 @@ import type {
 /** The steps of the flow, in order. The waitlist is a way out of the first, not a step. */
 export type StepId = "zip" | "describe" | "questions";
 
+/** What the flow can show: a step, or the waitlist. */
+type Screen = StepId | "waitlist";
+const SCREENS: readonly Screen[] = ["zip", "describe", "questions", "waitlist"];
+
+/**
+ * The query parameter that names the screen (none for the ZIP step), so the browser's Back and
+ * Forward move between the screens the visitor saw, instead of leaving the page (#86).
+ */
+export const STEP_PARAM = "step";
+
+function screenOf(search: string): Screen {
+  const value = new URLSearchParams(search).get(STEP_PARAM);
+  return SCREENS.find((screen) => screen === value) ?? "zip";
+}
+
+/** The key, in a history entry's state, of the page load that made the entry. */
+const FLOW_STATE_KEY = "jfiRequestFlow";
+
+/** An id for this page load's entries: not a secret, only different from an earlier load's. */
+function newLoadId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+/**
+ * A history entry's state with this page load's mark, keeping whatever else it holds: the
+ * router keeps its own keys there, and an entry without them makes it reload the page on Back.
+ * (The page's first write can come before the router wraps the History API.)
+ */
+function entryState(load: string): Record<string, unknown> {
+  const current: unknown = window.history.state;
+  const kept = typeof current === "object" && current !== null ? current : {};
+  return { ...kept, [FLOW_STATE_KEY]: load };
+}
+
+/** Whether a history entry was made by this page load. */
+function isOwnEntry(state: unknown, load: string): boolean {
+  return (
+    typeof state === "object" &&
+    state !== null &&
+    (state as Record<string, unknown>)[FLOW_STATE_KEY] === load
+  );
+}
+
+/** This page's address with `screen` in its query; every other parameter is kept. */
+function screenUrl(screen: Screen): string {
+  const url = new URL(window.location.href);
+  if (screen === "zip") url.searchParams.delete(STEP_PARAM);
+  else url.searchParams.set(STEP_PARAM, screen);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 /** The steps a visitor goes through: the questions only for a service that asks some. */
 export function stepsFor(category: RequestCategory | null): StepId[] {
   return category && category.questions.length > 0
@@ -77,9 +128,11 @@ type Problem = { id: string | null; message: string };
  */
 export function RequestFlow(props: RequestFlowProps) {
   const { text, categories } = props;
-  const [step, setStep] = useState<StepId | "waitlist">("zip");
+  const [step, setStep] = useState<Screen>("zip");
   const [zip, setZip] = useState("");
   const [area, setArea] = useState("");
+  /** The last ZIP check's answer for `area`: served or not; null before any. */
+  const [served, setServed] = useState<boolean | null>(null);
   const [description, setDescription] = useState("");
   const [categoryId, setCategoryId] = useState(props.initialCategoryId);
   const [answers, setAnswers] = useState<Record<string, IntakeAnswers>>({});
@@ -93,10 +146,50 @@ export function RequestFlow(props: RequestFlowProps) {
 
   const category = categories?.find((item) => item.id === categoryId) ?? null;
   const steps = stepsFor(category);
-  const go = (next: StepId | "waitlist") => {
+  /** Whether `screen` can show with what the visitor has given so far. */
+  const reachable = (screen: Screen): boolean => {
+    if (screen === "zip") return true;
+    if (screen === "waitlist") return served === false;
+    if (screen === "describe") return served === true;
+    return served === true && steps.includes("questions") && descriptionFits(description);
+  };
+  // Each move is a history entry of this page load (marked with its id), so the browser's Back
+  // and Forward go through the screens the visitor saw. A screen that cannot show any more (a
+  // ZIP checked again, the description emptied, another service) is passed over with one more
+  // step back: going back, that reaches the screen before it; going forward, the screen the
+  // visitor was on.
+  const [load] = useState(newLoadId);
+  const go = (next: Screen) => {
     moved.current = true;
+    window.history.pushState(entryState(load), "", screenUrl(next));
     setStep(next);
   };
+  const latest = useRef({ step, reachable });
+  useEffect(() => {
+    latest.current = { step, reachable };
+  });
+  useEffect(() => {
+    // Nothing typed survives a reload: the page starts again at the ZIP, whatever the address
+    // named, and this entry becomes the first of this page load.
+    const path = window.location.pathname;
+    window.history.replaceState(entryState(load), "", screenUrl("zip"));
+    function onPopState(event: PopStateEvent) {
+      if (window.location.pathname !== path) return; // another page: not the flow's to handle
+      const target = screenOf(window.location.search);
+      const { step: current, reachable: canShow } = latest.current;
+      // A screen from before a reload (nothing it showed is kept), or one that cannot show any
+      // more: one more step back passes over it.
+      if (!isOwnEntry(event.state, load) || !canShow(target)) {
+        window.history.back();
+        return;
+      }
+      if (target === current) return;
+      moved.current = true;
+      setStep(target);
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [load]);
   const progress = (id: StepId) =>
     fill(text.progress, { current: steps.indexOf(id) + 1, total: steps.length });
   const after = (id: StepId): StepId | null => steps[steps.indexOf(id) + 1] ?? null;
@@ -117,6 +210,7 @@ export function RequestFlow(props: RequestFlowProps) {
         onOtherZip={() => go("zip")}
         onServed={() => {
           setServedNow(true);
+          setServed(true);
           go("describe");
         }}
       />
@@ -135,6 +229,7 @@ export function RequestFlow(props: RequestFlowProps) {
         onAnswer={(result) => {
           setArea(result.zip);
           setServedNow(false);
+          setServed(result.kind === "served");
           go(result.kind === "served" ? "describe" : "waitlist");
         }}
       />

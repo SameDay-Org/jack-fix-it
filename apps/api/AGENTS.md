@@ -208,6 +208,9 @@ them idempotent: they can run twice.
 
 - **Media copies (#173).** `sanitize_request_media` makes a privacy-safe copy of each request
   photo and video (no EXIF, GPS, XMP or video tags) under an opaque `m/<32 hex><ext>` key.
+  A video's copy also drops every SEI unit from its bitstream (a drone's or dashcam's GPS,
+  #182), and one whose HEVC decoder configuration still holds user data fails; a codec
+  without a SEI filter in `sanitize.py` is never copied, whatever `MEDIA_VIDEO_CODECS` says.
   Only a `ready` copy may ever be shown to a pro; a `failed` one never is. Videos need the
   ffmpeg binary: the Docker image installs it, and so does CI. Locally the video tests skip
   without it. ARQ ends a job at its timeout for good (no retry), so every step of the job is

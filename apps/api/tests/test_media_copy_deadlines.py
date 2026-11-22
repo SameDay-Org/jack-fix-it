@@ -13,6 +13,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Final
 
 import pytest
 from arq.connections import ArqRedis
@@ -35,8 +36,8 @@ from tests.test_dispatch import sessions_of
 from tests.test_media_copies import Media, MemoryStorage, gps_jpeg, make_media, row
 from tests.test_schema_requests_jobs import add
 
-# Steps of 0.1 s and a job of 2 s: one file's budget is 6 x 0.1 + 0.2 (its write) = 0.8 s, and
-# the job needs 0.2 (the query) + 0.8 + 0.5 (the settle reserve) = 1.5 s at least.
+# Steps of 0.1 s and a job of 2 s: one file's budget is 7 x 0.1 + 0.2 (its write) = 0.9 s, and
+# the job needs 0.2 (the query) + 0.9 + 0.5 (the settle reserve) = 1.6 s at least.
 FAST: dict[str, object] = {
     "media_sanitize_timeout_seconds": 0.1,
     "media_sanitize_overhead_seconds": 0.2,
@@ -44,6 +45,35 @@ FAST: dict[str, object] = {
     "media_sanitize_job_timeout_seconds": 2,
     "media_sanitize_max_tries": 2,
     "media_sanitize_retry_seconds": 1,
+}
+# The stalled-transfer test on the real worker counts tries, so only the stall may reach a bound.
+# It never ends: its 1 s step always cuts it, however loaded the machine. Every other step stays
+# far from its own bound: a database step has 2 s (on CI a write slower than FAST's 0.2 s was cut
+# mid-query, and its session failed every later try: 3 retries, not 1), and the upload stage's
+# download and image transform 1 s each. The job is the shortest the settings accept,
+# 2 + (7 x 1 + 2) + 4 = 15 s (#182: seven tool runs per file). A stall its step did not cut would
+# hold its try until then, and the test would fail on run_job's 20 s bound; a passing run takes
+# about 3 s.
+STALL_ONLY: dict[str, object] = {
+    **FAST,
+    "media_sanitize_timeout_seconds": 1.0,
+    "media_sanitize_overhead_seconds": 2.0,
+    "media_sanitize_settle_seconds": 4.0,
+    "media_sanitize_job_timeout_seconds": 15,
+}
+# For the tests on the real clock, FAST three times over (#448): under load a database step can
+# take most of a 0.1 s step, and a retry found no time left to start its file (one upload seen,
+# not two). The proportions these tests reason on stay the same; the scripted clocks keep FAST.
+REAL_CLOCK_SCALE: Final = 3
+_TIMINGS: Final = (
+    "media_sanitize_timeout_seconds",
+    "media_sanitize_overhead_seconds",
+    "media_sanitize_settle_seconds",
+    "media_sanitize_job_timeout_seconds",
+)
+REAL_CLOCK: dict[str, object] = {
+    key: value * REAL_CLOCK_SCALE if key in _TIMINGS and isinstance(value, int | float) else value
+    for key, value in FAST.items()
 }
 
 
@@ -167,7 +197,7 @@ async def run_job(
     await redis.enqueue_job(
         "sanitize_request_media", str(request_id), _job_id=job_id, _job_try=job_try
     )
-    async with asyncio.timeout(15):
+    async with asyncio.timeout(20):
         await worker.async_run()
     return await redis.zscore(redis.default_queue_name, job_id) is not None
 
@@ -178,13 +208,13 @@ async def test_a_stalled_transfer_is_retried_then_failed_never_left_pending(
 ) -> None:
     storage = stalled(released, stage)
     media = await make_media(db_session, storage, gps_jpeg())
-    settings = make_settings(**FAST)
+    settings = make_settings(**STALL_ONLY)
 
     async with worker_for(db_session, settings, storage, media.request_id) as (worker, redis):
         queued = await run_job(worker, redis, media.request_id)
 
-    # Try 1 waits on the step's timeout and asks for a retry; try 2 (MEDIA_SANITIZE_MAX_TRIES)
-    # fails the row. ARQ's own timeout never ends a try.
+    # Try 1's stall is cut by its step, and the try asks for a retry; try 2
+    # (MEDIA_SANITIZE_MAX_TRIES) fails the row. ARQ's own timeout never ends a try.
     assert (worker.jobs_retried, worker.jobs_failed, worker.jobs_complete) == (1, 0, 1)
     assert not queued
     assert (await row(db_session, media.media_id)).safe_status == MediaSafeStatus.FAILED
@@ -199,7 +229,7 @@ async def test_a_stall_on_the_last_try_still_settles_every_row(
     storage = stalled(released, "download")
     media = await make_media(db_session, storage, gps_jpeg())
     await more_photos(db_session, storage, media, 9)
-    settings = make_settings(**FAST)
+    settings = make_settings(**REAL_CLOCK)
     final = settings.media_sanitize_max_tries + SANITIZE_SPARE_TRIES
 
     with caplog.at_level(logging.INFO):
@@ -327,9 +357,9 @@ async def test_the_accepted_minimum_budget_copies_a_file(db_session: AsyncSessio
         media_sanitize_timeout_seconds=120,
         media_sanitize_overhead_seconds=30,
         media_sanitize_settle_seconds=60,
-        media_sanitize_job_timeout_seconds=840,
+        media_sanitize_job_timeout_seconds=960,
     )
-    assert settings.media_sanitize_min_job_seconds == 840
+    assert settings.media_sanitize_min_job_seconds == 960
 
     outcome = await fast_copier(db_session, storage, settings).copy_pending(
         media.request_id, attempt=1, clock=JumpClock(reads=1, before=0.0, after=0.001)
@@ -350,7 +380,7 @@ async def test_a_file_starts_on_the_terms_the_settings_check(db_session: AsyncSe
         media_sanitize_timeout_seconds=120,
         media_sanitize_overhead_seconds=30,
         media_sanitize_settle_seconds=60,
-        media_sanitize_job_timeout_seconds=840,
+        media_sanitize_job_timeout_seconds=960,
     )
 
     outcome = await fast_copier(db_session, storage, settings).copy_pending(
@@ -371,7 +401,7 @@ async def test_the_first_file_starts_even_when_the_query_ran_long(
         media_sanitize_timeout_seconds=120,
         media_sanitize_overhead_seconds=30,
         media_sanitize_settle_seconds=60,
-        media_sanitize_job_timeout_seconds=840,
+        media_sanitize_job_timeout_seconds=960,
     )
 
     outcome = await fast_copier(db_session, storage, settings).copy_pending(
@@ -387,9 +417,9 @@ def test_the_job_timeout_must_cover_the_query_one_file_and_the_reserve() -> None
         "media_sanitize_overhead_seconds": 30,
         "media_sanitize_settle_seconds": 60,
     }
-    make_settings(**lowest, media_sanitize_job_timeout_seconds=840)
+    make_settings(**lowest, media_sanitize_job_timeout_seconds=960)
     with pytest.raises(ValueError, match="MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS"):
-        make_settings(**lowest, media_sanitize_job_timeout_seconds=839)
+        make_settings(**lowest, media_sanitize_job_timeout_seconds=959)
 
 
 def test_the_settle_reserve_must_cover_two_database_steps() -> None:
@@ -407,7 +437,8 @@ async def test_a_stalled_transfer_keeps_its_files_until_its_thread_ends(
 ) -> None:
     storage = stalled(released, stage)
     media = await make_media(db_session, storage, gps_jpeg())
-    sanitize = SanitizeConfig(1_000_000, 85, "ffmpeg", 0.1)
+    # The step on the real clock, scaled as REAL_CLOCK is (#448).
+    sanitize = SanitizeConfig(1_000_000, 85, "ffmpeg", 0.1 * REAL_CLOCK_SCALE)
     jobs = MediaCopier(sessions_of(db_session), storage, MediaCopyConfig(3, sanitize))
 
     async with asyncio.timeout(BOUND):

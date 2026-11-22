@@ -13,6 +13,7 @@ from app.modules.auth.dependencies import (
     limit_password_forgot,
     limit_password_reset,
     limit_phone_send,
+    limit_phone_send_daily,
     limit_phone_verify,
     limit_refresh,
     limit_register,
@@ -203,14 +204,19 @@ _PHONE_UNAVAILABLE = _error("verification_unavailable: the SMS provider is unava
     status_code=status.HTTP_202_ACCEPTED,
     response_class=Response,
     summary="Send a phone verification code",
-    dependencies=[Depends(limit_phone_send)],
+    dependencies=[Depends(limit_phone_send), Depends(limit_phone_send_daily)],
     responses={
         status.HTTP_202_ACCEPTED: {"description": "Accepted; a code is on its way by SMS."},
         status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
-            "validation_error: not an E.164 number, or a country code that is not allowed."
+            "validation_error: not an E.164 number, or a country code or number range that is "
+            "not allowed."
         ),
         **_RATE_LIMITED,
+        status.HTTP_503_SERVICE_UNAVAILABLE: _error(
+            "verification_unavailable: the daily count of codes cannot be taken; nothing was "
+            "sent, retry later."
+        ),
     },
 )
 async def send_phone_code(

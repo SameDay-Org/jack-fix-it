@@ -31,6 +31,7 @@ DEMO_DIR = Path(__file__).resolve().parents[3] / "scripts" / "demo"
 # their folder is the import root.
 sys.path.insert(0, str(DEMO_DIR))
 
+import demo_api  # noqa: E402
 import seed_demo  # noqa: E402
 from demo_seed import cast, flows, guard, history, scenes, timeline  # noqa: E402
 from demo_seed.history import Case, CaseRun, Closing, Ending  # noqa: E402
@@ -389,6 +390,55 @@ async def test_a_whole_run_makes_the_scenes(seeded: Seeded) -> None:
         )
         assert len(tickets["items"]) >= 3
 
+        # The admin's follow-ups, on the request waiting on its customer: the overdue one first
+        # (set four hours ago, due two hours later), then the one due later today.
+        followups = await world.call(admin, "GET", "/v1/admin/followups", what="follow-ups")
+        overdue, later = followups["items"]
+        assert (overdue["note"], later["note"]) == (cast.FOLLOWUP_OVERDUE, cast.FOLLOWUP_TODAY)
+        assert overdue["request_id"] == later["request_id"]
+        assert overdue["assigned_to"]["id"] == later["assigned_to"]["id"] == str(admin.user_id)
+        now = datetime.now(UTC)
+        assert datetime.fromisoformat(overdue["due_at"]) < now - timedelta(hours=1)
+        if await history.business_today(world) == today:  # not across the business midnight
+            assert datetime.fromisoformat(later["due_at"]) > now
+            badge = await world.call(admin, "GET", "/v1/admin/followups/summary", what="badge")
+            assert badge["due_today"] == 2
+        waiting = await world.call(
+            admin, "GET", f"/v1/admin/requests/{overdue['request_id']}", what="waiting request"
+        )
+        assert (waiting["status"], waiting["category"]) == ("reviewing", None)
+        # The agent's two internal notes, oldest first, on the urgent request they hold (the
+        # only request with notes).
+        agent_id = str(
+            await _scalar(
+                world, "SELECT id FROM users WHERE email = :email", email=cast.AGENT_EMAIL
+            )
+        )
+        noted_id = await _scalar(world, "SELECT DISTINCT request_id FROM request_notes")
+        noted = await world.call(admin, "GET", f"/v1/admin/requests/{noted_id}", what="noted")
+        assert noted["assigned_agent"]["id"] == agent_id
+        assert [note["body"] for note in noted["notes"]] == list(cast.BDC_NOTES)
+        assert {note["author"]["id"] for note in noted["notes"]} == {agent_id}
+        # Each made after its request; the earlier ones dated back; each action audited.
+        after_request = (
+            "SELECT bool_and(made.created_at > r.created_at) FROM (SELECT request_id, created_at"
+            " FROM request_notes UNION ALL SELECT request_id, created_at FROM request_followups)"
+            " made JOIN service_requests r ON r.id = made.request_id"
+        )
+        assert await _scalar(world, after_request)
+        dated = (
+            "SELECT (SELECT created_at FROM request_notes WHERE body = :note) < now() - "
+            "interval '30 minutes' AND (SELECT created_at FROM request_followups WHERE note = "
+            ":followup) < now() - interval '3 hours'"
+        )
+        assert await _scalar(world, dated, note=cast.BDC_NOTES[0], followup=cast.FOLLOWUP_OVERDUE)
+        audited = "SELECT count(*) FROM audit_log WHERE action = :action AND actor_user_id = :actor"
+        add_note, schedule = "service_request.add_note", "service_request.schedule_followup"
+        assert (
+            await _scalar(world, audited, action=add_note, actor=noted["assigned_agent"]["id"]) == 2
+        )
+        assert await _scalar(world, audited, action=schedule, actor=str(admin.user_id)) == 2
+
         metrics = await world.call(admin, "GET", "/v1/admin/metrics", what="metrics")
         assert metrics["metrics"]["contact_rate"]["numerator"] > 0
         assert metrics["metrics"]["lead_to_job"]["numerator"] > 0
@@ -412,6 +462,56 @@ async def test_a_whole_run_makes_the_scenes(seeded: Seeded) -> None:
         )
         assert await _scalar(world, apart) == 0
         assert await _nothing_in_the_future(world)
+
+
+async def test_the_demo_api_s_stand_in_verifier_takes_its_code_only() -> None:
+    """Relay's N3 (#568): the demo's API sends no SMS, and only its code verifies a phone."""
+    verifier = demo_api.StandInVerifier("246810")
+
+    await verifier.start("+13055550123", "en")  # nothing sent, nothing raised
+
+    assert await verifier.check("+13055550123", "246810")
+    assert not await verifier.check("+13055550123", "123456")
+    assert not await verifier.check("+13055550123", "")
+    assert "246810" not in repr(verifier)
+
+
+def test_the_demo_api_refuses_before_it_builds_the_app(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#572 r1: main() runs the seed's guard first. On a database that is not a local jackdemo
+    it raises DemoGuardError, and the app (with its fixed SMS code) is never built or served."""
+    refused = make_settings(database_url="postgresql://jack:jack@db.example.com:5432/jack")
+    built: list[object] = []
+
+    def build(*args: object, **kwargs: object) -> object:
+        built.append(args)
+        raise AssertionError("the app was built before the guard refused")
+
+    monkeypatch.setattr(demo_api, "get_settings", lambda: refused)
+    monkeypatch.setattr(demo_api, "create_app", build)
+
+    with pytest.raises(guard.DemoGuardError):
+        demo_api.main()
+
+    assert built == []
+
+
+def test_the_demo_api_runs_only_where_the_seed_may() -> None:
+    """The guard the seed runs refuses the demo API a database that is not a local jackdemo."""
+    settings = make_settings(database_url="postgresql://jack:jack@db.example.com:5432/jack")
+    with pytest.raises(guard.DemoGuardError):
+        guard.check_settings(settings)
+
+
+async def test_a_visit_proposed_days_ahead_starts_in_the_day(seeded: Seeded) -> None:
+    """Relay's N9: seeded in the evening, a quote must not propose a visit at night. A start
+    outside the day's hours in the business time zone (America/New_York in the tests) moves to
+    the morning of that day; one in the day stays."""
+    async with open_world(seeded.settings, seeded.storage, seeded.stripe().stand_ins) as world:
+        assert world.settings.business_time_zone == "America/New_York"
+        night = datetime(2030, 3, 4, 2, 0, tzinfo=UTC)  # 21:00 EST on March 3
+        afternoon = datetime(2030, 3, 4, 18, 0, tzinfo=UTC)  # 13:00 EST on March 4
+        assert await scenes._in_the_day(world, night) == datetime(2030, 3, 3, 15, 0, tzinfo=UTC)
+        assert await scenes._in_the_day(world, afternoon) == afternoon
 
 
 async def test_a_second_run_changes_nothing_and_fresh_adds_one_request(seeded: Seeded) -> None:

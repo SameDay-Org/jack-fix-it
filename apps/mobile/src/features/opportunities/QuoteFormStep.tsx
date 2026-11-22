@@ -6,6 +6,7 @@ import { Text, View, type ScrollView } from "react-native";
 import { Button, Input, ValueStepper } from "@/components/ui";
 import { BackButton } from "@/features/auth/components/BackButton";
 import { formatMinutes, formatMoney, formatMoneyExact, formatRate } from "@/features/quotes/format";
+import { withPeriod, type PreferredPeriod } from "@/features/request/period";
 
 import { formatDay, formatInstantDay, formatTimeOfDay } from "./format";
 import { MAX_AMOUNT_CENTS, parsePriceCents, split } from "./money";
@@ -32,6 +33,8 @@ type QuoteFormStepProps = {
   quote: QuoteDraftState;
   takeRateBps: number;
   preferredDate: string | null;
+  /** When in the preferred day the customer would like the visit (#237, #360). */
+  preferredPeriod: PreferredPeriod | null;
   onReview: () => void;
   /** The Review or Send just refused, if one brought the pro here: its first problem is shown. */
   refusal?: Refusal;
@@ -83,6 +86,7 @@ export function QuoteFormStep({
   quote,
   takeRateBps,
   preferredDate,
+  preferredPeriod,
   onReview,
   refusal,
   scrollRef,
@@ -192,7 +196,9 @@ export function QuoteFormStep({
         </Text>
         {preferredDate ? (
           <Text className="text-callout text-gray-500" testID="quote-preferred">
-            {t("quoteForm.start.preferred", { date: formatDay(preferredDate) })}
+            {t("quoteForm.start.preferred", {
+              date: withPeriod(t, formatDay(preferredDate), preferredPeriod),
+            })}
           </Text>
         ) : null}
         <ValueStepper

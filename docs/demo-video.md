@@ -107,7 +107,7 @@ Then, each in its own terminal:
 
 ```sh
 cd apps/api && uv run python ../../scripts/demo/seed_demo.py --reset
-cd apps/api && uv run python -m app.serve
+cd apps/api && uv run python ../../scripts/demo/demo_api.py   # the API, with the demo's SMS code
 cd apps/api && uv run arq app.worker.WorkerSettings --custom-log-dict app.observability.WORKER_LOG_CONFIG
 stripe listen --forward-to localhost:8000/v1/webhooks/stripe \
   --forward-connect-to localhost:8000/v1/webhooks/stripe/connect
@@ -117,6 +117,13 @@ adb reverse tcp:8000 tcp:8000 && adb reverse tcp:9000 tcp:9000
 EXPO_PUBLIC_API_URL=http://127.0.0.1:8000 EXPO_PUBLIC_PRO_LOCATION_SHARING=on \
   pnpm --filter @jack/mobile exec expo start --dev-client
 ```
+
+**Phone codes (scenes 2 and 4).** The local stack has no Twilio Verify (its TEST credentials do
+not reach the Verify API), so a sign-up's phone step would never get a code.
+`scripts/demo/demo_api.py` runs the same API as `python -m app.serve`, with a stand-in verifier:
+it sends no SMS, and `DEMO_SMS_CODE` (default `123456`) verifies any number. It runs only where the
+seed may: the same guard refuses anything but a local `jackdemo` database, a deployed `APP_ENV`,
+a Stripe key that is not a TEST key or a storage elsewhere.
 
 Start the API and the worker from the same `.env`: the pre-flight proves the API is on the demo
 database (the demo accounts sign in), but of the worker only that one is listening on the same
@@ -157,34 +164,48 @@ customer's and the pro's scenes one after the other, signing out and in.
 About 8 to 10 minutes; each scene short. "Web" scenes are recorded by the web tour (next
 section); the others on the emulator (Pixel 8: crop the 132 px status band).
 
-| #   | Scene                                                                                       | Where | Account                     | Ends on                                                    | Seconds |
-| --- | ------------------------------------------------------------------------------------------- | ----- | --------------------------- | ---------------------------------------------------------- | ------- |
-| 1   | Public site: landing, `/app`, `/for-pros`                                                   | Web   | none                        | each page's hero, then a scroll                            | 20      |
-| 2   | Customer signs up; the ID card builds step by step                                          | App   | a new customer              | "Here's your ID", then the profile card                    | 25      |
-| 3   | Customer requests a job: **Moving & Assembly**, questions, photos, the Home address, review | App   | the new customer (or Jamie) | "Jack is finding a pro"                                    | 40      |
-| 4   | Pro signs up, uploads documents                                                             | App   | a new pro (or Maria)        | "Waiting for approval"                                     | 40      |
-| 5   | Panel: the queue shows the request; the pros page approves the pro                          | Web   | admin                       | the request held ("You hold this request"); badge Approved | 40      |
-| 6   | Pro: payout setup (Stripe test onboarding), opportunities, a quote                          | App   | Maria (or the new pro)      | the quote sent                                             | 40      |
-| 7   | Customer compares quotes and pays with the test card                                        | App   | the customer                | the job booked                                             | 40      |
-| 8   | The job: On my way (live map, arrival code), arrival, photos, Job's done                    | App   | pro, then customer          | "Waiting for confirmation"                                 | 60      |
-| 9   | Customer confirms, rates. Tips: pending #273. Receipt: pending #62                          | App   | the customer                | the rating sent                                            | 30      |
-| 10  | Pro earnings                                                                                | App   | Dan                         | a month of paid jobs                                       | 15      |
-| 11  | A cancellation after On my way, with the fee and the refund: pending #69                    | App   | the customer                | (recorded when #69 ships)                                  | 20      |
-| 12  | A problem: the customer reports it; the pro replies                                         | App   | Jamie, then Dan             | Jamie's open problem (seeded, with Dan's reply)            | 30      |
-| 13  | Panel: disputes, the detail, resolve with a partial                                         | Web   | admin                       | the dispute resolved ("Split")                             | 45      |
-| 14  | Panel tour: KPIs and charts, support tickets, queue tabs                                    | Web   | admin                       | the KPI chart, read by keyboard                            | 45      |
-| 15  | Closing: the landing hero                                                                   | Web   | none                        | the hero, cursor off the frame                             | 5       |
+| #   | Scene                                                                                                 | Where                   | Account                       | Ends on                                                    | Seconds |
+| --- | ----------------------------------------------------------------------------------------------------- | ----------------------- | ----------------------------- | ---------------------------------------------------------- | ------- |
+| 1   | Public site: landing, `/app`, `/for-pros`                                                             | Web                     | none                          | each page's hero, then a scroll                            | 20      |
+| 2   | Customer signs up; the ID card builds step by step                                                    | App                     | a new customer                | "Here's your ID", then the profile card                    | 25      |
+| 3   | Customer requests a job: **Moving & Assembly**, questions, photos, the Home address, review           | App                     | the new customer (or Jamie)   | "Jack is finding a pro"                                    | 40      |
+| 4   | Pro signs up, uploads documents                                                                       | App                     | a new pro (or Maria)          | "Waiting for approval"                                     | 40      |
+| 5   | Panel: the queue shows the request; the pros page approves the pro                                    | Web                     | admin                         | the request held ("You hold this request"); badge Approved | 40      |
+| 6   | Pro: payout setup (Stripe test onboarding); the panel assigns her the request; opportunities, a quote | App, then Web, then App | Maria (or the new pro); admin | the quote sent                                             | 45      |
+| 7   | Customer compares quotes and pays with the test card                                                  | App                     | the customer                  | the job booked                                             | 40      |
+| 8   | The job: On my way (live map, arrival code), arrival, photos, Job's done                              | App                     | pro, then customer            | "Waiting for confirmation"                                 | 60      |
+| 9   | Customer confirms, rates. Tips: pending #273. Receipt: pending #62                                    | App                     | the customer                  | the rating sent                                            | 30      |
+| 10  | Pro earnings                                                                                          | App                     | Dan                           | a month of paid jobs                                       | 15      |
+| 11  | A cancellation after On my way, with the fee and the refund: pending #69                              | App                     | the customer                  | (recorded when #69 ships)                                  | 20      |
+| 12  | A problem: the customer reports it; the pro replies                                                   | App                     | Jamie, then Dan               | Jamie's open problem (seeded, with Dan's reply)            | 30      |
+| 13  | Panel: disputes, the detail, resolve with a partial                                                   | Web                     | admin                         | the dispute resolved ("Split")                             | 45      |
+| 14  | Panel tour: KPIs and charts, support tickets, queue tabs                                              | Web                     | admin                         | the KPI chart, read by keyboard                            | 45      |
+| 15  | Closing: the landing hero                                                                             | Web                     | none                          | the hero, cursor off the frame                             | 5       |
 
 Notes for the takes:
 
 - **Scene 3 uses Moving & Assembly on purpose.** Only Maria offers it, so the request waits in the
-  queue's New tab (scene 5) and reaches her once she is approved and her payouts are on
-  (scene 6). A Handyman or Painting request goes to Dan and Sam at once.
+  queue's New tab (scene 5). Nothing sends it to her by itself once she is approved: a request
+  sent while no pro was eligible is not dispatched again (the fix is filed for Builder #2).
+  Once her payouts are on (scene 6), the BDC sends it from the panel: the request's card, then
+  **Assign to a pro**, then Maria (#82, #511). A manual assignment needs her payouts on, so it
+  comes after her payout setup; she then has the opportunity and quotes. A Handyman or Painting
+  request goes to Dan and Sam at once.
 - Scenes 2 and 4 can be skipped by signing in as Jamie and Maria: the seed leaves both where
   those scenes end.
 - Scene 6 needs Stripe Connect in TEST mode on the platform account, and `stripe listen`
   forwarding the Connect events.
 - Scene 7 has a fallback: Jamie's seeded request with two quotes (Dan's and Sam's).
+- **Seed on filming day.** The visits the seed's quotes propose days ahead start in the day
+  (between 9:00 and 18:00 in the business time zone, else at 10:00 that day), and the
+  follow-ups and "Scheduled today" are relative to the seed's day. A request made in the app
+  in the evening proposes tomorrow at 9:00 AM by default (#475).
+- **The pro's location on one emulator (scene 8).** `adb -s <serial> emu geo fix <lng> <lat>`
+  (longitude first) sets the emulator's GPS. In Relay's dry run the providers stayed empty after
+  it, so the pro's in-app sender did not run. Retake with nothing else running, or use a second
+  device for the pro. Stand-in: send the pro's positions as the app does, as the pro,
+  `PUT /v1/jobs/{job_id}/pro-location` with `{"lat", "lng", "recorded_at"}` a few seconds apart,
+  while the customer's live map is recorded.
 - Scenes that depend on work not shipped yet are marked "pending #N" and recorded when it ships;
   the agent actions (#82) and the web request flow (#86) will add panel and site shots.
 
@@ -209,21 +230,24 @@ dispute), `DEMO_PARTIAL_RELEASE` (250.00), `DEMO_TIME_ZONE` (America/New_York),
 `DEMO_STAGING_HOST`, and `DEMO_STAGING_ALLOW_PRIVATE=1` when the staging host is on a private
 network.
 
-**The tour writes**: it takes a request, approves documents and the pro, moves a ticket and
-resolves the dispute. Run `seed_demo.py --reset` before each take. On used data a scene with
+**The tour writes**: it takes a request and works it (a note, contacted, a follow-up),
+classifies another, marks a follow-up done, approves documents and the pro, moves a ticket and
+resolves the dispute. The follow-ups scene needs the seed's follow-ups for the admin. Run `seed_demo.py --reset` before each take. On used data a scene with
 nothing left to act on ends early (a `nothing-left` still), and the run still exits 0.
 
-| #   | Scene    | Storyboard | What happens                                                                                                         | Seconds |
-| --- | -------- | ---------- | -------------------------------------------------------------------------------------------------------------------- | ------- |
-| 01  | login    | 5          | `/admin/login`: the email typed, the password filled, the admin home                                                 | 6       |
-| 02  | queue    | 5, 14      | The tabs (Urgent, Waiting on customer, Scheduled today, Problems, New); a request nobody holds; "Take this request"  | 21      |
-| 03  | pros     | 5          | Maria's card; a document opened in place (an image); each document approved; "Approve pro", "Yes, approve"           | 20      |
-| 04  | support  | 14         | The first open ticket; "In progress"                                                                                 | 7       |
-| 05  | kpis     | 14         | Last 7, 90 and 30 days; the pointer swept across the day chart; the chart read with the arrow keys                   | 18      |
-| 06  | disputes | 13         | The open dispute; both sides, photos, money; a partial with an amount and a note; the code typed to confirm; "Split" | 32      |
-| 07  | site     | 1          | `/`, `/app`, `/for-pros`: hero, an eased scroll down, back to the top                                                | 24      |
-| 08  | site-es  | 1 (ES)     | `/es`, `/es/app`, `/es/for-pros`: the heroes                                                                         | 9       |
-| 09  | closing  | 15         | `/` with the cursor off the frame, 5 s                                                                               | 6       |
+| #   | Scene     | Storyboard | What happens                                                                                                                                                                                                                                                                    | Seconds  |
+| --- | --------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| 01  | login     | 5          | `/admin/login`: the email typed, the password filled, the admin home                                                                                                                                                                                                            | 6        |
+| 02  | queue     | 5, 14      | The tabs (Urgent, Waiting on customer, Scheduled today, Problems, New); a request nobody holds; "Take this request"; on it an internal note, "Mark contacted", a follow-up for tomorrow 10:00, then the notes and follow-ups on the card (these card actions are storyboard 14) | about 45 |
+| 03  | classify  | 14         | Urgent, else Waiting on customer: an unclassified request nobody holds; "Take this request"; "Classify" as Handyman, saved (it stays in review)                                                                                                                                 | about 12 |
+| 04  | followups | 14         | The nav's "Follow-ups" badge; "Due today"; "All open" (the most overdue on top); "Mark done" on the first row                                                                                                                                                                   | about 12 |
+| 05  | pros      | 5          | Maria's card; a document opened in place (an image); each document approved; "Approve pro", "Yes, approve"                                                                                                                                                                      | 20       |
+| 06  | support   | 14         | The first open ticket; "In progress"                                                                                                                                                                                                                                            | 7        |
+| 07  | kpis      | 14         | Last 7, 90 and 30 days; the pointer swept across the day chart; the chart read with the arrow keys                                                                                                                                                                              | 18       |
+| 08  | disputes  | 13         | The open dispute; both sides, photos, money; a partial with an amount and a note; the code typed to confirm; "Split"                                                                                                                                                            | 32       |
+| 09  | site      | 1          | `/`, `/app`, `/for-pros`: hero, an eased scroll down, back to the top                                                                                                                                                                                                           | 24       |
+| 10  | site-es   | 1 (ES)     | `/es`, `/es/app`, `/es/for-pros`: the heroes                                                                                                                                                                                                                                    | 9        |
+| 11  | closing   | 15         | `/` with the cursor off the frame, 5 s                                                                                                                                                                                                                                          | 6        |
 
 The host guard (`tour-guard.mjs`): the browser is launched behind a small proxy the script runs,
 loopback included, and the proxy connects to the allowed hosts only. A Playwright route could not

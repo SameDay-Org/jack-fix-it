@@ -615,6 +615,8 @@
     "expired": "Expired",
     "accepted": "Accepted",
     "acceptedNote": "Quote accepted. Payment comes next.",
+    "acceptedPaid": "Quote accepted and paid.",
+    "acceptedOnly": "Quote accepted.",
     "proFallback": "Jack pro",
     "verified": "Verified by Jack Fix It",
     "nameVerified": "{{name}}, verified",
@@ -670,6 +672,17 @@
       },
       "error": {
         "title": "We couldn't load this profile"
+      },
+      "reviews": {
+        "title": "Reviews",
+        "empty": "No reviews yet.",
+        "more": "Show more",
+        "moreLabel": "Show more reviews",
+        "failed": "We couldn't load the reviews.",
+        "moreFailed": "We couldn't load more reviews.",
+        "anonymous": "A customer",
+        "label": "{{reviewer}}, {{rating}} out of 5, {{day}}",
+        "loading": "Loading reviews"
       }
     },
     "notAcceptable": "This quote can't be accepted anymore.",
@@ -1352,6 +1365,7 @@
       "done": "Job confirmed",
       "attention": "This job needs attention",
       "cancelled": "This job was cancelled",
+      "cancelledByPro": "{{name}} cancelled this job",
       "refunded": "Your report was resolved",
       "finished": "{{name}} marked the job done",
       "thanks": "Thanks! Job confirmed"
@@ -1366,6 +1380,7 @@
       "done": "This job is complete.",
       "attention": "A problem was reported on this job.",
       "cancelled": "Nothing more is needed from you.",
+      "cancelledByPro": "This costs you nothing. You can start a new request to find another pro.",
       "refunded": "Your payment for this job went back to your payment method."
     },
     "eta": {
@@ -2040,7 +2055,27 @@
         "title": "That didn't go through",
         "body": "Something went wrong on our side. Try again in a moment."
       }
-    }
+    },
+    "pro": {
+      "intro": "Tell us why. We'll let {{name}} know.",
+      "reason": {
+        "cannot_make_it": "I can't make it",
+        "customer_unreachable": "The customer isn't answering",
+        "scope_changed": "The job is different from what was asked",
+        "other": "Something else"
+      },
+      "costTitle": "What happens",
+      "cost": "Cancelling costs {{name}} nothing: their whole payment goes back to their payment method. You won't be paid for this job.",
+      "byYou": {
+        "title": "You cancelled this job",
+        "body": "We told {{name}}. They won't be charged for it."
+      },
+      "byCustomer": {
+        "title": "This job was cancelled",
+        "body": "It was cancelled by {{name}}. Nothing more is needed from you."
+      }
+    },
+    "newRequest": "New request"
   },
   "disputes": {
     "entry": "Report a problem",
@@ -2174,7 +2209,8 @@
       "noCategory": "Job",
       "paidOn": "Paid on {{date}}",
       "completed": "Completed {{date}}",
-      "confirmedBy": "Usually confirmed by {{date}}"
+      "confirmedBy": "Usually confirmed by {{date}}",
+      "tip": "+ {{amount}} tip"
     },
     "empty": {
       "title": "No earnings yet",
@@ -2207,5 +2243,28 @@
       "body": "Connect a payout account with Stripe so we can send you your earnings.",
       "action": "Set up payouts"
     }
+  },
+  "tips": {
+    "title": "Add a tip for {{name}}?",
+    "body": "Tips are optional. {{name}} gets 100% of it.",
+    "group": "Tip amount",
+    "none": "No tip",
+    "percent": "{{percent}}% · {{amount}}",
+    "custom": "Custom",
+    "customLabel": "Tip amount",
+    "customHint": "From {{min}} to {{max}}",
+    "customOutOfRange": "Enter an amount from {{min}} to {{max}}.",
+    "customInvalid": "Enter an amount, like 10 or 12.50.",
+    "pay": "Tip {{amount}}",
+    "payNoAmount": "Tip",
+    "done": "You tipped {{name}} {{amount}}. Thank you!",
+    "skipped": "No tip added",
+    "failed": "The tip didn't go through. Your job is still confirmed.",
+    "offline": "You're offline. Your job is still confirmed; try the tip again when you're back online.",
+    "generic": "Something went wrong with the tip. Your job is still confirmed.",
+    "delayed": "We're still confirming your tip. It shows here soon.",
+    "rateLimited": "Too many tries in a short time. Wait a moment, then try again. Your job is still confirmed.",
+    "inProgress": "This tip is already being processed. It shows here soon.",
+    "needsReview": "Our support team is checking this tip. Your job is still confirmed; you don't need to do anything."
   }
 }

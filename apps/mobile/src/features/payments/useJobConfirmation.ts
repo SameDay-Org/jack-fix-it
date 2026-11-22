@@ -19,7 +19,7 @@ import { useRequestJob, type CustomerJob } from "./useRequestJob";
 export type PaymentPhase = "loading" | "unpaid" | "confirming" | "delayed" | "booked";
 
 /** True once `deadline` (ms since the epoch) has passed; false while it is null. */
-function useDeadlinePassed(deadline: number | null): boolean {
+export function useDeadlinePassed(deadline: number | null): boolean {
   // Already past when the card mounts (back after the wait ran out): delayed from the first frame.
   const [passed, setPassed] = useState<number | null>(() =>
     deadline !== null && deadline <= Date.now() ? deadline : null,

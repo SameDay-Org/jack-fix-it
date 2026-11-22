@@ -157,6 +157,12 @@ def check_public_api_url(value: str) -> str:
 
 # A legal document's version id (#97): letters, digits, ".", "-" and "_", up to 64 characters.
 TERMS_VERSION_PATTERN: Final = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+# The most tool runs one file's safe copy makes (#182): an HEVC video's ffprobe of the original,
+# its ffmpeg remux, then ffprobe of the copy, of its decoder configuration and of its hidden
+# frames. With the download and the upload, each bounded by MEDIA_SANITIZE_TIMEOUT_SECONDS, they
+# are one file's timed steps. tests/test_media_sanitize.py counts the runs, so these cannot drift.
+MEDIA_SANITIZE_TOOL_RUNS: Final = 5
+MEDIA_SANITIZE_TIMED_STEPS: Final = MEDIA_SANITIZE_TOOL_RUNS + 2
 
 
 class Settings(BaseSettings):
@@ -244,9 +250,29 @@ class Settings(BaseSettings):
     phone_allowed_country_codes: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["+1"]
     )
+    # Number prefixes refused even inside an allowed calling code (CSV, #526). By default the
+    # NANP area codes of the countries other than the US and Canada that share +1: Bahamas,
+    # Barbados, Anguilla, Antigua and Barbuda, British Virgin Islands, Cayman Islands, Bermuda,
+    # Grenada, Turks and Caicos, Jamaica, Montserrat, Sint Maarten, Saint Lucia, Dominica,
+    # Saint Vincent, Dominican Republic, Trinidad and Tobago, Saint Kitts and Nevis. Empty
+    # refuses none.
+    phone_excluded_prefixes: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: [
+            "+1242", "+1246", "+1264", "+1268", "+1284", "+1345", "+1441", "+1473", "+1649",
+            "+1658", "+1664", "+1721", "+1758", "+1767", "+1784", "+1809", "+1829", "+1849",
+            "+1868", "+1869", "+1876",
+        ]
+    )  # fmt: skip
     # Codes sent and codes checked, per user and per phone, per AUTH_RATE_LIMIT_WINDOW_SECONDS.
     phone_otp_send_limit: int = Field(default=3, gt=0)
     phone_otp_check_limit: int = Field(default=5, gt=0)
+    # Codes sent per PHONE_OTP_SEND_DAILY_WINDOW_SECONDS (#526), failing closed: per user and
+    # per number, and per number range, the first PHONE_OTP_PREFIX_LENGTH characters of the
+    # E.164 number (+1, the area code and the exchange by default).
+    phone_otp_send_daily_limit: int = Field(default=5, gt=0)
+    phone_otp_send_daily_prefix_limit: int = Field(default=30, gt=0)
+    phone_otp_prefix_length: int = Field(default=8, ge=3, le=16)
+    phone_otp_send_daily_window_seconds: int = Field(default=86_400, gt=0)
     # Email through Resend (D4.3, #27). Required in staging and production; without them, the
     # reset code is never sent (logged as an error).
     resend_api_key: SecretStr | None = None
@@ -293,7 +319,8 @@ class Settings(BaseSettings):
     ffmpeg_path: str = Field(default="ffmpeg", min_length=1)
     ffprobe_path: str = Field(default="ffprobe", min_length=1)
     # The only video and audio codecs a safe copy may carry (CSV of ffmpeg codec names): a remux
-    # copies the streams as they are, and an image codec (MJPEG, PNG) keeps its EXIF.
+    # copies the streams as they are, and an image codec (MJPEG, PNG) keeps its EXIF. A video
+    # codec also needs a SEI filter in app/modules/media/sanitize.py (h264, hevc), #182.
     media_video_codecs: Annotated[list[str], NoDecode] = Field(default=["h264", "hevc"])
     media_audio_codecs: Annotated[list[str], NoDecode] = Field(default=["aac", "mp3", "opus"])
     # The longest one sanitize job may run (every media of one request), past which ARQ stops it
@@ -457,10 +484,10 @@ class Settings(BaseSettings):
     tip_max_cents: int = Field(default=50_000, gt=0)
     tip_window_hours: int = Field(default=168, gt=0)
     # Receipts (#62; Foreman decision Q-R1, the values are Cesar's): who issues the receipt.
-    # The legal name and the support email go on the in-app receipt and the email's footer,
-    # the mailing address in the email's footer only. Unset, none is shown: never a value
-    # made up here. How many times the worker tries one receipt email (Resend unavailable,
-    # the card not read yet) and how many seconds it waits between two tries.
+    # The legal name and the support email go on the in-app receipt and the footer of every
+    # email (app.email_layout, #92), the mailing address in that footer only. Unset, none is
+    # shown: never a value made up here. How many times the worker tries one receipt email
+    # (Resend unavailable, the card not read yet) and how many seconds it waits between two.
     receipt_legal_name: str | None = Field(default=None, min_length=1, max_length=200)
     receipt_support_email: str | None = Field(default=None, min_length=3, max_length=254)
     receipt_mailing_address: str | None = Field(default=None, min_length=1, max_length=300)
@@ -763,6 +790,18 @@ class Settings(BaseSettings):
             raise ValueError("PHONE_ALLOWED_COUNTRY_CODES must list calling codes such as +1")
         return value
 
+    @field_validator("phone_excluded_prefixes", mode="before")
+    @classmethod
+    def _split_excluded_prefixes(cls, value: object) -> object:
+        return parse_country_codes(value) if isinstance(value, str) else value
+
+    @field_validator("phone_excluded_prefixes")
+    @classmethod
+    def _check_excluded_prefixes(cls, value: list[str]) -> list[str]:
+        if not all(re.fullmatch(r"\+[1-9]\d{1,14}", prefix) for prefix in value):
+            raise ValueError("PHONE_EXCLUDED_PREFIXES must list number prefixes such as +1876")
+        return value
+
     @field_validator(
         "sentry_dsn",
         "jwt_secret",
@@ -845,9 +884,13 @@ class Settings(BaseSettings):
 
     @property
     def media_sanitize_row_budget_seconds(self) -> float:
-        """The longest one file's copy may take: its download, three ffprobe runs, one ffmpeg
-        run and its upload, each within MEDIA_SANITIZE_TIMEOUT_SECONDS, then its write."""
-        return 6 * self.media_sanitize_timeout_seconds + self.media_sanitize_overhead_seconds
+        """The longest one file's copy may take: its download, MEDIA_SANITIZE_TOOL_RUNS tool
+        runs (an HEVC video's, the most) and its upload, each within
+        MEDIA_SANITIZE_TIMEOUT_SECONDS, then its write."""
+        return (
+            MEDIA_SANITIZE_TIMED_STEPS * self.media_sanitize_timeout_seconds
+            + self.media_sanitize_overhead_seconds
+        )
 
     @property
     def media_sanitize_min_job_seconds(self) -> float:
@@ -873,8 +916,8 @@ class Settings(BaseSettings):
         if self.media_sanitize_job_timeout_seconds < self.media_sanitize_min_job_seconds:
             raise ValueError(
                 "MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS must cover one file: at least "
-                "6 x MEDIA_SANITIZE_TIMEOUT_SECONDS + 2 x MEDIA_SANITIZE_OVERHEAD_SECONDS "
-                "+ MEDIA_SANITIZE_SETTLE_SECONDS"
+                f"{MEDIA_SANITIZE_TIMED_STEPS} x MEDIA_SANITIZE_TIMEOUT_SECONDS + 2 x "
+                "MEDIA_SANITIZE_OVERHEAD_SECONDS + MEDIA_SANITIZE_SETTLE_SECONDS"
             )
         return self
 
