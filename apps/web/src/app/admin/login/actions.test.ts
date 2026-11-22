@@ -2,11 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { auth, FakeCookieJar, RedirectSignal, routeFetch, TOKENS } from "@/lib/test-helpers";
 
-const { jar } = vi.hoisted(() => ({ jar: { current: null as unknown } }));
+const { jar, incoming } = vi.hoisted(() => ({
+  jar: { current: null as unknown },
+  incoming: { current: new Headers() },
+}));
 
 vi.mock("next/headers", () => ({
   cookies: async () => jar.current,
-  headers: async () => new Headers(),
+  headers: async () => incoming.current,
 }));
 vi.mock("next/navigation", async () => {
   const { RedirectSignal: Signal } = await import("@/lib/test-helpers");
@@ -29,6 +32,7 @@ let cookies: FakeCookieJar;
 beforeEach(() => {
   cookies = new FakeCookieJar();
   jar.current = cookies;
+  incoming.current = new Headers();
   vi.stubEnv("API_INTERNAL_URL", "http://api.test.invalid:8000");
   vi.stubEnv("API_TIMEOUT_MS", "1000");
   vi.stubEnv("REFRESH_TOKEN_TTL_SECONDS", "2592000");
@@ -63,6 +67,33 @@ function calledPaths(): string[] {
 }
 
 describe("login action", () => {
+  it("carries the web key and the edge's last address, never the browser's own (#530)", async () => {
+    const key = "web-service-key-for-tests-0123456789abcdef";
+    vi.stubEnv("WEB_SERVICE_KEY", key);
+    vi.stubEnv("CLIENT_IP_HEADER", "x-forwarded-for");
+    incoming.current = new Headers({
+      "x-forwarded-for": "6.6.6.6, 2001:db8::7",
+      "x-jfi-client-ip": "9.9.9.9",
+      "x-jfi-web-key": "a-key-the-browser-made-up",
+    });
+    fetchMock.mockImplementation(
+      routeFetch({
+        "/v1/auth/login": () => Response.json(auth("customer")),
+        "/v1/auth/logout": () => new Response(null, { status: 204 }),
+      }),
+    );
+
+    await submit();
+
+    // The login, and the revoke of a non-staff account's token, both count this visitor.
+    expect(calledPaths()).toEqual(["/v1/auth/login", "/v1/auth/logout"]);
+    for (const [input, init] of fetchMock.mock.calls) {
+      const sent = new Headers(init?.headers);
+      expect(sent.get("x-jfi-web-key"), String(input)).toBe(key);
+      expect(sent.get("x-jfi-client-ip"), String(input)).toBe("2001:db8::7");
+    }
+  });
+
   it.each(["agent", "admin"] as const)("staff_login_sets_cookies (%s)", async (role) => {
     fetchMock.mockImplementation(routeFetch({ "/v1/auth/login": () => Response.json(auth(role)) }));
 
