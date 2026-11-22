@@ -23,6 +23,13 @@
 //   DEMO_PARTIAL_RELEASE      dollars released to the pro in the partial (default "250.00")
 //   DEMO_TIME_ZONE            the zone the panel's times read in (default America/New_York)
 //   DEMO_BROWSER_CHANNEL      the installed browser Playwright drives (default msedge)
+//   DEMO_REQUEST_ZIP          a served ZIP for the web request (default 33316, in the seed)
+//   DEMO_REQUEST_EMAIL        the web request's email (default avery@example.com); the API
+//                             takes a few sends per email an hour: change it for more takes
+//   DEMO_INTEREST_EMAIL       the /app interest form's email (default jordan@example.com)
+// The request and interest scenes need the web built with REQUEST_FLOW_ENABLED and
+// INTEREST_FORM_ENABLED (and their secrets, docs/railway.md); without them they fail on the
+// first field.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,7 +75,14 @@ const DISPUTE_CODE = process.env.DEMO_DISPUTE_CODE ?? "";
 const PARTIAL = process.env.DEMO_PARTIAL_RELEASE ?? "250.00";
 const TIME_ZONE = process.env.DEMO_TIME_ZONE ?? "America/New_York";
 const CHANNEL = process.env.DEMO_BROWSER_CHANNEL ?? "msedge";
+const REQUEST_ZIP = process.env.DEMO_REQUEST_ZIP ?? "33316";
+const REQUEST_EMAIL = process.env.DEMO_REQUEST_EMAIL ?? "avery@example.com";
+const INTEREST_EMAIL = process.env.DEMO_INTEREST_EMAIL ?? "jordan@example.com";
 const VIEW = { width: 1280, height: 720 };
+// The public site's own words (the copy may still change): the request flow and the /app form.
+const EN = JSON.parse(readFileSync(join(HERE, "../../apps/web/src/i18n/locales/en.json"), "utf8"));
+const REQUEST = EN.request;
+const INTEREST = EN.showcase.interest;
 
 // Each scene: its storyboard number(s) (docs/demo-video.md) and its title, in tour order.
 const STORY = {
@@ -81,6 +95,8 @@ const STORY = {
   disputes: ["13", "Disputes: both sides, a partial, the confirmation"],
   site: ["1", "Public site: landing, /app, /for-pros"],
   "site-es": ["1 (ES)", "Public site in Spanish"],
+  request: ["1", "Web request: no account, from the ZIP to the request number"],
+  interest: ["1", "/app: the interest form"],
   closing: ["15", "Closing: landing hero"],
 };
 const WANTED = args.scenes ? args.scenes.split(",") : Object.keys(STORY);
@@ -774,6 +790,103 @@ const SCENES = {
       await beat(page, 2200);
       await still(path.slice(1).replace("/", "-"));
     }
+  },
+
+  // Storyboard 1: a visitor asks for a job on the site, with no account (#86). The request
+  // lands in the panel's New tab as a web lead. Each step waits for its heading.
+  async request(page, still) {
+    const heading = (name) => page.getByRole("heading", { name, exact: true }).waitFor();
+    const next = () => press(page, page.getByRole("button", { name: REQUEST.next, exact: true }));
+    await visit(page, `${base}/request`);
+    await page.waitForLoadState("networkidle");
+    await heading(REQUEST.zip.title);
+    await beat(page, 1200);
+    await type(page, page.getByLabel(REQUEST.zip.label, { exact: true }), REQUEST_ZIP, 120);
+    await next();
+
+    await heading(REQUEST.describe.title);
+    await beat(page, 600);
+    await type(
+      page,
+      page.getByLabel(REQUEST.describe.label, { exact: true }),
+      "Two shelves to hang in the living room and a bedroom door that sticks.",
+      40,
+    );
+    await press(page, page.getByLabel("Handyman", { exact: true }));
+    await beat(page, 600);
+    await still("describe");
+    await next();
+
+    // Handyman asks one question (the seed's category).
+    await heading("Handyman");
+    await type(
+      page,
+      page.getByRole("textbox").first(),
+      "Hang two shelves; plane the bedroom door so it closes.",
+      40,
+    );
+    await beat(page, 500);
+    await next();
+
+    // The ZIP filled in the city and state.
+    await heading(REQUEST.where.title);
+    await type(page, page.getByLabel(REQUEST.where.line1, { exact: true }), "1200 SE 17th St", 55);
+    await beat(page, 900);
+    await still("where");
+    await next();
+
+    await heading(REQUEST.when.title);
+    const day = page.getByLabel(new RegExp(`^${REQUEST.when.day}`));
+    await press(page, day);
+    await day.fill(tomorrowIn(TIME_ZONE)); // a date input: fill, not type
+    await beat(page, 500);
+    await press(page, page.getByLabel(REQUEST.when.periods.morning, { exact: true }));
+    await beat(page, 700);
+    await next();
+
+    await heading(REQUEST.contact.title);
+    await type(page, page.getByLabel(REQUEST.contact.firstName, { exact: true }), "Avery", 60);
+    await type(page, page.getByLabel(REQUEST.contact.phone, { exact: true }), "(954) 555-0142", 50);
+    await type(page, page.getByLabel(REQUEST.contact.email, { exact: true }), REQUEST_EMAIL, 45);
+    await beat(page, 500);
+    await next();
+
+    // The review: everything as typed, each part with its Edit; the consent line above Send.
+    await heading(REQUEST.review.title);
+    await beat(page, 1500);
+    await still("review");
+    const send = page.getByRole("button", { name: REQUEST.review.send, exact: true });
+    await bring(page, send, 1400);
+    await beat(page, 1200);
+    await press(page, send);
+    await heading(REQUEST.sent.title);
+    // The number the team will quote: the cursor rests on it.
+    await glide(page, page.locator("strong, b").filter({ hasText: /^JF-/ }).first(), {
+      pause: 600,
+    });
+    await beat(page, 2000);
+    await still("sent");
+  },
+
+  // Storyboard 1: on /app, a visitor leaves an email for when the app is out (#409).
+  async interest(page, still) {
+    await visit(page, `${base}/app`);
+    await page.waitForLoadState("networkidle");
+    const email = page.getByLabel(INTEREST.label, { exact: true });
+    await bring(page, page.getByRole("heading", { name: INTEREST.title }), 1800);
+    await beat(page, 1500);
+    // The form's token must be a few seconds old to send (INTEREST_FORM_MIN_SECONDS, 3).
+    await type(page, email, INTEREST_EMAIL, 70);
+    await beat(page, 800);
+    await press(page, page.getByRole("button", { name: INTEREST.submit, exact: true }));
+    const joined = page.getByText(INTEREST.joined);
+    await joined.waitFor({ timeout: 15000 });
+    // The form gives way to one line: bring it to the middle of the frame.
+    const y = await joined.evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
+    await scrollTo(page, Math.max(0, y - VIEW.height / 2 + 40), 900);
+    await glide(page, joined, { pause: 400 });
+    await beat(page, 2000);
+    await still("joined");
   },
 
   // Storyboard 15: the closing shot.
