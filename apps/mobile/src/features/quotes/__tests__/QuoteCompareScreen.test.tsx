@@ -56,11 +56,13 @@ jest.mock("../RequestPreferred", () => {
   };
 });
 // The accepted card's payment has its own suite (features/payments): here it is a stand-in that
-// shows the note and records what the list handed it.
+// shows the note and records what the list handed it, and the summary's payment line is the
+// unpaid one (what it says in each state is in paidRequest.test.tsx, #373).
 jest.mock("@/features/payments", () => {
   const { Text } = jest.requireActual<typeof import("react-native")>("react-native");
   return {
     requestAutoPay: jest.fn(),
+    usePaymentLine: jest.fn(() => "next"),
     PaymentPanel: jest.fn(({ testID }: { testID: string }) => (
       <Text
         accessibilityElementsHidden

@@ -97,6 +97,22 @@ describe("Button", () => {
     expect(screen.getByText("Medium").props.className).toContain("text-headline");
     expect(screen.getByText("Medium").props.numberOfLines).toBe(1); // one line by contract
   });
+
+  it("wraps its label only when asked, shrinking it to the button's width (#441)", async () => {
+    await render(
+      <>
+        <Button label="One line" size="lg" />
+        <Button label="Choose from library" size="lg" wrap />
+      </>,
+    );
+
+    expect(screen.getByText("One line").props.numberOfLines).toBe(1);
+    expect(screen.getByText("One line").props.className).not.toContain("shrink");
+    expect(button("One line").props.className).not.toContain("py-3");
+    expect(screen.getByText("Choose from library").props.numberOfLines).toBeUndefined();
+    expect(screen.getByText("Choose from library").props.className).toContain("shrink");
+    expect(button("Choose from library").props.className).toContain("py-3");
+  });
 });
 
 describe("Button badge (#74)", () => {
