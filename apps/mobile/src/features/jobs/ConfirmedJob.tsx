@@ -109,7 +109,7 @@ export function ConfirmedJob({
           unread={job.unread_messages}
         />
         {hasReport(job) ? <ReportStatus job={job} /> : null}
-        <PaidRow job={job} />
+        <PaidRow job={job} requestId={requestId} />
         <BeforePhotos photos={job.photos} updatedAt={updatedAt} refetch={refetch} />
         <JobTimeline items={timelineOf(t, job, now)} />
       </Sheet>

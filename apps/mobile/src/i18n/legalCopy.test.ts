@@ -49,7 +49,8 @@ const EXCEPTIONS: readonly Exception[] = [
  * Where the app talks about the customer's money: the confirm sheet and the job's status line (both
  * said "Payment is released"), the pay panel and its announcement, the wallet, quotes and payouts,
  * every FAQ answer, a reported problem and how it was resolved, a cancellation's cost and where
- * its money stands, and the tip (#273). No string under these prefixes can ever become an exception.
+ * its money stands, the tip (#273) and the receipt (#62). No string under these prefixes can ever
+ * become an exception.
  */
 const PROMISE_KEYS = [
   "jobs.confirmSheet.",
@@ -63,6 +64,7 @@ const PROMISE_KEYS = [
   "disputes.",
   "cancellation.",
   "tips.",
+  "receipt.",
 ] as const;
 
 /** Each English term the rule names, and its Spanish mirrors: both matchers must catch them. */

@@ -2266,5 +2266,41 @@
     "rateLimited": "Too many tries in a short time. Wait a moment, then try again. Your job is still confirmed.",
     "inProgress": "This tip is already being processed. It shows here soon.",
     "needsReview": "Our support team is checking this tip. Your job is still confirmed; you don't need to do anything."
+  },
+  "receipt": {
+    "title": "Receipt",
+    "number": "Receipt {{code}}",
+    "paidOn": "Paid on {{date}}",
+    "service": "Service",
+    "serviceOf": "{{category}} service",
+    "tax": "Tax",
+    "tip": "Tip for {{name}}",
+    "tipNoName": "Tip",
+    "returned": "Returned to your payment method",
+    "total": "Total paid",
+    "paidWith": "Paid with {{method}}",
+    "paidByCard": "Paid by card",
+    "pro": "With {{name}}",
+    "done": "Done {{date}}",
+    "scheduled": "Scheduled for {{date}}",
+    "thanks": "Thank you for using Jack Fix It.",
+    "questions": "Questions? {{email}}",
+    "status": {
+      "paid": "Paid",
+      "under_review": "Under review",
+      "partly_returned": "Partly returned",
+      "returned": "Returned"
+    },
+    "see": "See receipt",
+    "share": "Share",
+    "shareDialog": "Share your receipt",
+    "shareFailed": "We couldn't share the receipt. Try again.",
+    "addTip": "Add a tip",
+    "loading": "Loading your receipt",
+    "notYet": "Your receipt shows here once the payment goes through.",
+    "error": {
+      "title": "We couldn't load your receipt",
+      "retry": "Try again"
+    }
   }
 }

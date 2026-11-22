@@ -7,30 +7,24 @@ import {
   useState,
   type Ref,
 } from "react";
-import { Directory, File, Paths } from "expo-file-system";
-import { Image, PixelRatio, View } from "react-native";
-import ViewShot, { type CaptureOptions, type ViewShotRef } from "react-native-view-shot";
+import { PixelRatio, View } from "react-native";
+import ViewShot, { type ViewShotRef } from "react-native-view-shot";
 
 import { IdCard, type IdCardProps } from "./IdCard";
+import {
+  capturePrivatePng,
+  OFFSCREEN_GAP,
+  PNG_CAPTURE,
+  SHARE_MIN_RATIO,
+  shareLayoutWidth,
+  type ShareCapture,
+  type ShareHandle,
+} from "./shareCapture";
 
-export type IdCardShareCapture = {
-  /** The PNG, a file in the app's private cache (`ID_CARD_SHARE_DIR`), for the share sheet. */
-  uri: string;
-  /** Its pixel size: at least 3x the design width. */
-  width: number;
-  height: number;
-  /**
-   * Deletes the PNG. The capture belongs to its caller: call this once the share sheet is done
-   * with it, and whenever the capture goes unused (cancelled, failed, superseded, too late).
-   * Calling it again does nothing.
-   */
-  discard: () => void;
-};
+/** The PNG of the card in the app's private cache (`ID_CARD_SHARE_DIR`), at least 3x wide. */
+export type IdCardShareCapture = ShareCapture;
 
-export type IdCardShareHandle = {
-  /** Renders the card to a PNG, once its photo (if any) has loaded. */
-  capture: () => Promise<IdCardShareCapture>;
-};
+export type IdCardShareHandle = ShareHandle;
 
 export type IdCardShareRenderProps = Pick<
   IdCardProps,
@@ -49,17 +43,8 @@ export type IdCardShareRenderProps = Pick<
 /** The shared image's design width in dp; the PNG is this times the ratio below, or more. */
 export const ID_CARD_SHARE_BASE_WIDTH = 320;
 /** The least pixel ratio of the PNG: crisp when another app shows it full width. */
-export const ID_CARD_SHARE_MIN_RATIO = 3;
-/** Clears the card from the screen's left edge whatever its parent's inset. */
-const OFFSCREEN_GAP = 64;
+export const ID_CARD_SHARE_MIN_RATIO = SHARE_MIN_RATIO;
 
-/**
- * The PNG comes back as base64 and never as a view-shot temporary file: on Android view-shot puts
- * its files in the external cache when that has more room, and before Android 10 other apps with
- * storage access can read it (#293). The card holds a name, a portrait and a place, so the app
- * writes the PNG itself, into its private cache.
- */
-const CAPTURE: CaptureOptions = { format: "png", quality: 1, result: "base64" };
 /** The folder in the app's private cache (`Paths.cache`) that holds the shared PNGs. */
 export const ID_CARD_SHARE_DIR = "id-card-share";
 const NOT_MOUNTED = "IdCardShareRender is not mounted";
@@ -69,33 +54,6 @@ type Waiter = { resolve: () => void; reject: (error: Error) => void };
 /** One photo load: a new URI, or the same one put back after a removal, is a new load. */
 type PhotoLoad = { uri: string | undefined; id: number };
 
-/** Names each PNG apart, so one capture's discard never deletes another's file. */
-let sequence = 0;
-
-/** Deletes a PNG that may already be gone; a failed delete leaves it to the OS cache eviction. */
-function deleteQuietly(file: File) {
-  try {
-    if (file.exists) file.delete();
-  } catch {
-    // Nothing to tell the person: the file sits in the app's private cache either way.
-  }
-}
-
-/** Writes the base64 PNG into the app's private cache and returns the file. */
-async function writePrivatePng(base64: string): Promise<File> {
-  const dir = new Directory(Paths.cache, ID_CARD_SHARE_DIR);
-  dir.create({ intermediates: true, idempotent: true });
-  sequence += 1;
-  const file = new File(dir, `card-${Date.now()}-${sequence}.png`);
-  try {
-    await file.write(base64, { encoding: "base64" });
-  } catch (error) {
-    deleteQuietly(file);
-    throw error;
-  }
-  return file;
-}
-
 /**
  * The width to lay the card out at, in dp, so that the native capture comes out at
  * `ID_CARD_SHARE_MIN_RATIO` pixels per design dp on a 1x or 2x screen, and at the screen's own
@@ -103,7 +61,7 @@ async function writePrivatePng(base64: string): Promise<File> {
  * (#251), so the extra pixels must come from the layout, never from scaling the bitmap up.
  */
 export function idCardShareLayoutWidth(pixelRatio: number): number {
-  return (ID_CARD_SHARE_BASE_WIDTH * Math.max(ID_CARD_SHARE_MIN_RATIO, pixelRatio)) / pixelRatio;
+  return shareLayoutWidth(ID_CARD_SHARE_BASE_WIDTH, pixelRatio);
 }
 
 /**
@@ -188,21 +146,7 @@ export function IdCardShareRender({
             waiting.current.push(waiter);
           });
         }
-        const target = shot.current;
-        if (!target) throw new Error(NOT_MOUNTED);
-        const base64 = await target.capture();
-        // A capture that ends after the unmount writes nothing: no one is left to share or delete it.
-        if (!mounted.current) throw new Error(NOT_MOUNTED);
-        const file = await writePrivatePng(base64);
-        const discard = () => deleteQuietly(file);
-        try {
-          const size = await Image.getSize(file.uri);
-          if (!mounted.current) throw new Error(NOT_MOUNTED);
-          return { uri: file.uri, width: size.width, height: size.height, discard };
-        } catch (error) {
-          discard();
-          throw error;
-        }
+        return capturePrivatePng(shot.current, ID_CARD_SHARE_DIR, "card", () => mounted.current);
       },
     }),
     [photoUri, photoTimeoutMs],
@@ -216,7 +160,7 @@ export function IdCardShareRender({
       testID={testID}
       style={{ position: "absolute", top: 0, left: -(width + OFFSCREEN_GAP), width }}
     >
-      <ViewShot ref={shot} options={CAPTURE}>
+      <ViewShot ref={shot} options={PNG_CAPTURE}>
         <IdCard
           shareable
           variant={variant}
