@@ -516,6 +516,11 @@
         "unavailable": "No pudimos iniciar tu sesión ahora. Vuelve a intentarlo en un momento."
       }
     },
+    "busy": {
+      "title": "El panel está ocupado en este momento",
+      "body": "Sigues con la sesión iniciada; vuelve a intentarlo en un momento.",
+      "retry": "Intentar de nuevo"
+    },
     "nav": {
       "label": "Panel",
       "home": "Inicio",
