@@ -6,9 +6,25 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { getT } from "@/i18n/server";
 
 import { requestFlowText } from "./copy";
+import { type LaterSteps, loadLaterSteps } from "./later-steps-loader";
 import { RequestFlow, type RequestFlowProps } from "./request-flow";
 import type { RequestCategory } from "./server";
-import type { RequestFlowText, WaitlistInput, WaitlistResult, ZipCheckResult } from "./types";
+import type {
+  RequestFlowText,
+  SendInput,
+  SendResult,
+  WaitlistInput,
+  WaitlistResult,
+  ZipCheckResult,
+} from "./types";
+
+// The later steps' code comes as it does in the page; a test makes it wait or fail.
+vi.mock("./later-steps-loader", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./later-steps-loader")>();
+  return { loadLaterSteps: vi.fn(actual.loadLaterSteps) };
+});
+const realLoad = async (): Promise<LaterSteps> => import("./later-steps");
+const offline = (): Promise<LaterSteps> => Promise.reject(new Error("offline"));
 
 // React's act() expects to be told it runs in a test.
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -63,17 +79,28 @@ let root: Root;
 let container: HTMLDivElement;
 let checkZip: ReturnType<typeof vi.fn<(zip: string) => Promise<ZipCheckResult>>>;
 let joinWaitlist: ReturnType<typeof vi.fn<(input: WaitlistInput) => Promise<WaitlistResult>>>;
+let sendRequest: ReturnType<typeof vi.fn<(input: SendInput) => Promise<SendResult>>>;
 
 beforeAll(async () => {
   TEXT = requestFlowText(await getT("en"));
 });
 
+// The steps after the description load apart from the page (later-steps.ts); loaded once here,
+// the flow's own import of them answers at once.
+beforeAll(async () => {
+  await import("./later-steps");
+});
+
 beforeEach(() => {
+  vi.mocked(loadLaterSteps).mockReset().mockImplementation(realLoad);
   checkZip = vi.fn(async (zip: string): Promise<ZipCheckResult> => ({
     kind: "served",
     zip: zip.slice(0, 5),
+    city: "Fort Lauderdale",
+    state: "FL",
   }));
   joinWaitlist = vi.fn(async (): Promise<WaitlistResult> => ({ kind: "joined" }));
+  sendRequest = vi.fn(async (): Promise<SendResult> => ({ kind: "sent", code: "JF-000124" }));
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -94,9 +121,16 @@ async function mount(props: Partial<RequestFlowProps> = {}): Promise<void> {
         categories: [HANDYMAN, CLEANING],
         initialCategoryId: null,
         countryCode: "+1",
+        formToken: "token-1",
+        utm: { source: "google", campaign: "launch" },
+        storeLinks: null,
+        appHref: "/app",
         homeHref: "/",
+        termsHref: "/terms",
+        privacyHref: "/privacy",
         checkZip,
         joinWaitlist,
+        sendRequest,
         ...props,
       }),
     ),
@@ -104,6 +138,8 @@ async function mount(props: Partial<RequestFlowProps> = {}): Promise<void> {
 }
 
 const text = () => container.textContent ?? "";
+/** The screen the address names (none for the ZIP step). */
+const step = () => new URLSearchParams(window.location.search).get("step");
 const heading = () => container.querySelector("h2")!;
 const problems = () =>
   container.querySelector<HTMLElement>('[aria-labelledby="request-problems-title"]');
@@ -142,12 +178,12 @@ describe("the ZIP step", () => {
   it("checks the ZIP and moves to the description, its heading focused", async () => {
     await mount();
     expect(heading().textContent).toBe(TEXT.zip.title);
-    expect(text()).toContain("Step 1 of 2");
+    expect(text()).toContain("Step 1 of 6");
     await served(" 33301 ");
     expect(checkZip).toHaveBeenCalledWith("33301");
     expect(heading().textContent).toBe(TEXT.describe.title);
     expect(document.activeElement).toBe(heading());
-    expect(text()).toContain("Step 2 of 2");
+    expect(text()).toContain("Step 2 of 6");
   });
 
   it("refuses a ZIP that is not one without asking, and says so at the top and under the field", async () => {
@@ -251,10 +287,8 @@ describe("the description and the service", () => {
   it("needs a description; a service with questions adds a step", async () => {
     await mount();
     await served();
-    // No service picked: this is the last step built so far, so there is no Continue.
-    expect(() => button(TEXT.next)).toThrow();
     await click(field("Handyman") as HTMLInputElement);
-    expect(text()).toContain("Step 2 of 3");
+    expect(text()).toContain("Step 2 of 7");
     await click(button(TEXT.next));
     expect(document.activeElement).toBe(problems());
     expect(problems()!.textContent).toContain(TEXT.describe.required);
@@ -265,7 +299,7 @@ describe("the description and the service", () => {
     await type(field(TEXT.describe.label), "The TV needs mounting.");
     await click(button(TEXT.next));
     expect(heading().textContent).toBe("Handyman");
-    expect(text()).toContain("Step 3 of 3");
+    expect(text()).toContain("Step 3 of 7");
   });
 
   it("starts with the service a link picked, and offers Not sure", async () => {
@@ -294,12 +328,11 @@ describe("the description and the service", () => {
 });
 
 describe("the service's questions", () => {
-  async function atQuestions(onComplete = vi.fn()): Promise<typeof onComplete> {
-    await mount({ initialCategoryId: HANDYMAN.id, onComplete });
+  async function atQuestions(): Promise<void> {
+    await mount({ initialCategoryId: HANDYMAN.id });
     await served();
     await type(field(TEXT.describe.label), "Mount a TV");
     await click(button(TEXT.next));
-    return onComplete;
   }
 
   it("shows each question by its type, labels as plain text", async () => {
@@ -315,9 +348,9 @@ describe("the service's questions", () => {
   });
 
   it("lists what needs a look and goes on once the answers fit", async () => {
-    const onComplete = await atQuestions();
+    await atQuestions();
     await click(button(TEXT.next));
-    expect(onComplete).not.toHaveBeenCalled();
+    expect(heading().textContent).toBe("Handyman");
     expect(document.activeElement).toBe(problems());
     expect(problems()!.querySelector('a[href="#q-rooms"]')?.textContent).toBe(
       TEXT.questions.required,
@@ -329,12 +362,12 @@ describe("the service's questions", () => {
     await click(button(TEXT.next));
     expect(problems()!.textContent).toContain("Enter a number from 1 to 10.");
     expect(problems()!.querySelector('a[href="#q-tasks-0"]')?.textContent).toBe("Pick up to 1.");
-    expect(onComplete).not.toHaveBeenCalled();
+    expect(heading().textContent).toBe("Handyman");
 
     await type(field("How many rooms?"), "3");
     await click(field("Hang a shelf") as HTMLInputElement);
     await click(button(TEXT.next));
-    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(heading().textContent).toBe(TEXT.where.title);
   });
 
   it("keeps each service's answers apart", async () => {
@@ -348,25 +381,447 @@ describe("the service's questions", () => {
   });
 });
 
-describe("the browser's Back and Forward (#86)", () => {
-  /** The browser's Back or Forward: the history moves, then the page hears popstate. */
-  async function browser(direction: "back" | "forward"): Promise<void> {
-    const before = window.location.href;
-    await act(async () => {
-      window.history[direction]();
-      // jsdom moves the history in a later task: wait for the address to change, then to
-      // settle (passing over a screen moves it once more).
-      for (let tries = 0; tries < 200 && window.location.href === before; tries += 1) {
-        await new Promise((done) => setTimeout(done, 5));
-      }
-      let last = "";
-      while (last !== window.location.href) {
-        last = window.location.href;
-        await new Promise((done) => setTimeout(done, 30));
-      }
-    });
+/** Through the description (Not sure: no questions) to the address step. */
+async function atWhere(props: Partial<RequestFlowProps> = {}): Promise<void> {
+  await mount(props);
+  await served();
+  await type(field(TEXT.describe.label), "The kitchen sink leaks.");
+  await click(button(TEXT.next));
+}
+
+async function fillAddress(): Promise<void> {
+  await type(field(TEXT.where.line1), "100 Las Olas Blvd");
+  await type(field(`${TEXT.where.line2} (optional)`), "Apt 4");
+}
+
+async function fillContact(): Promise<void> {
+  await type(field(TEXT.contact.firstName), "Ana");
+  await type(field(TEXT.contact.phone), "(954) 555-0100");
+  await type(field(TEXT.contact.email), "Ana@Example.com");
+}
+
+/** The whole way to the review, with a day and a time of it. */
+async function atReview(props: Partial<RequestFlowProps> = {}): Promise<void> {
+  await atWhere(props);
+  await fillAddress();
+  await click(button(TEXT.next));
+  await type(field(`${TEXT.when.day} (optional)`), "2099-03-14");
+  await click(field(TEXT.when.periods.morning) as HTMLInputElement);
+  await click(button(TEXT.next));
+  await fillContact();
+  await click(button(TEXT.next));
+}
+
+describe("where the job is", () => {
+  it("comes with the served city and state filled in, the ZIP shown with a way to change it", async () => {
+    await atWhere();
+    expect(heading().textContent).toBe(TEXT.where.title);
+    expect(text()).toContain("Step 3 of 6");
+    expect((field(TEXT.where.city) as HTMLInputElement).value).toBe("Fort Lauderdale");
+    expect((field(TEXT.where.state) as HTMLInputElement).value).toBe("FL");
+    expect(text()).toContain("ZIP code: 33301");
+    await click(button(TEXT.where.changeZip));
+    expect(heading().textContent).toBe(TEXT.zip.title);
+  });
+
+  it("needs a street, a city and a 2-letter state", async () => {
+    await atWhere();
+    await type(field(TEXT.where.city), " ");
+    await type(field(TEXT.where.state), "Florida");
+    await click(button(TEXT.next));
+    expect(document.activeElement).toBe(problems());
+    const links = [...problems()!.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+    expect(links).toEqual(["#request-line1", "#request-city", "#request-state"]);
+    await fillAddress();
+    await type(field(TEXT.where.city), "Fort Lauderdale");
+    await type(field(TEXT.where.state), "fl");
+    await click(button(TEXT.next));
+    expect(heading().textContent).toBe(TEXT.when.title);
+  });
+
+  /** Back to the ZIP from the address, another ZIP, and on to the address again. */
+  async function otherZip(answer: ZipCheckResult): Promise<void> {
+    await click(button(TEXT.where.changeZip));
+    checkZip.mockResolvedValueOnce(answer);
+    await served("33101");
+    await click(button(TEXT.next));
+    expect(heading().textContent).toBe(TEXT.where.title);
   }
-  const step = () => new URLSearchParams(window.location.search).get("step");
+  const city = () => (field(TEXT.where.city) as HTMLInputElement).value;
+  const state = () => (field(TEXT.where.state) as HTMLInputElement).value;
+
+  it("takes the new ZIP's city and state in place of those the first one filled in", async () => {
+    await atWhere();
+    await otherZip({ kind: "served", zip: "33101", city: "Miami", state: "FL" });
+    expect([city(), state()]).toEqual(["Miami", "FL"]);
+    expect(text()).toContain("ZIP code: 33101");
+  });
+
+  it("clears what the first ZIP filled in when the new one names no city", async () => {
+    await atWhere();
+    await otherZip({ kind: "served", zip: "33101", city: null, state: null });
+    expect([city(), state()]).toEqual(["", ""]);
+  });
+
+  it("keeps a city and a state the visitor typed", async () => {
+    await atWhere();
+    await type(field(TEXT.where.city), "Dania Beach");
+    await type(field(TEXT.where.state), "fl");
+    await otherZip({ kind: "served", zip: "33101", city: "Miami", state: "FL" });
+    expect([city(), state()]).toEqual(["Dania Beach", "fl"]);
+  });
+});
+
+describe("the steps that load after the description (later-steps.ts)", () => {
+  it("shows Loading until their code comes, then the step with its heading focused", async () => {
+    let arrive: () => void = () => undefined;
+    vi.mocked(loadLaterSteps).mockImplementation(
+      () => new Promise((resolve) => (arrive = () => void realLoad().then(resolve))),
+    );
+    await atWhere();
+    expect(heading().textContent).toBe(TEXT.loading);
+    expect(document.activeElement).toBe(heading());
+    await act(async () => arrive());
+    expect(heading().textContent).toBe(TEXT.where.title);
+    expect(document.activeElement).toBe(heading());
+  });
+
+  it("asks again on reaching them when the first ask failed", async () => {
+    vi.mocked(loadLaterSteps).mockImplementationOnce(offline);
+    await atWhere();
+    expect(loadLaterSteps).toHaveBeenCalledTimes(2);
+    expect(heading().textContent).toBe(TEXT.where.title);
+  });
+
+  it("says so with a Try again when they do not come, as many times as it takes", async () => {
+    vi.mocked(loadLaterSteps).mockImplementation(offline);
+    await atWhere();
+    expect(heading().textContent).toBe(TEXT.loadFailed.title);
+    expect(document.activeElement).toBe(heading());
+    expect(text()).toContain(TEXT.loadFailed.body);
+
+    await click(button(TEXT.loadFailed.retry));
+    expect(heading().textContent).toBe(TEXT.loadFailed.title);
+    expect(document.activeElement).toBe(heading());
+
+    vi.mocked(loadLaterSteps).mockImplementation(realLoad);
+    await click(button(TEXT.loadFailed.retry));
+    expect(loadLaterSteps).toHaveBeenCalledTimes(4);
+    expect(heading().textContent).toBe(TEXT.where.title);
+    expect(document.activeElement).toBe(heading());
+    // Nothing typed was lost on the way.
+    await click(button(TEXT.back));
+    expect((field(TEXT.describe.label) as HTMLTextAreaElement).value).toBe(
+      "The kitchen sink leaks.",
+    );
+  });
+});
+
+describe("when it suits", () => {
+  it("any day by default; a day before today is refused; a time of day only with a day", async () => {
+    await atWhere();
+    await fillAddress();
+    await click(button(TEXT.next));
+    expect(container.querySelector('input[name="period"]')).toBeNull();
+    expect((field(`${TEXT.when.day} (optional)`) as HTMLInputElement).min).toMatch(
+      /^\d{4}-\d{2}-\d{2}$/,
+    );
+    await type(field(`${TEXT.when.day} (optional)`), "2000-01-01");
+    await click(button(TEXT.next));
+    expect(problems()!.textContent).toContain(TEXT.when.errors.day);
+    await type(field(`${TEXT.when.day} (optional)`), "2099-03-14");
+    expect(container.querySelectorAll('input[name="period"]')).toHaveLength(4);
+    await click(button(TEXT.next));
+    expect(heading().textContent).toBe(TEXT.contact.title);
+  });
+});
+
+describe("how we reach the visitor", () => {
+  async function atContact(): Promise<void> {
+    await atWhere();
+    await fillAddress();
+    await click(button(TEXT.next));
+    await click(button(TEXT.next));
+  }
+
+  it("needs the first name, the mobile number and the email, as the API does", async () => {
+    await atContact();
+    expect(container.querySelector("#request-last-name")).toBeNull();
+    expect(container.querySelector('input[name="preferred"]')).toBeNull();
+    await click(button(TEXT.next));
+    const links = [...problems()!.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+    expect(links).toEqual(["#request-first-name", "#request-phone", "#request-email"]);
+    await fillContact();
+    await type(field(TEXT.contact.email), "ana@");
+    await click(button(TEXT.next));
+    expect(problems()!.textContent).toContain(TEXT.contact.errors.email);
+    await type(field(TEXT.contact.email), "ana@example.com");
+    await click(button(TEXT.next));
+    expect(heading().textContent).toBe(TEXT.review.title);
+  });
+});
+
+describe("the review and the send", () => {
+  it("shows everything as plain text, each part with its own Edit", async () => {
+    await atReview({ categories: [HANDYMAN, CLEANING] });
+    expect(heading().textContent).toBe(TEXT.review.title);
+    expect(text()).toContain("Step 6 of 6");
+    expect(text()).toContain("The kitchen sink leaks.");
+    expect(text()).toContain(`${TEXT.review.sections.service}: ${TEXT.review.notSure}`);
+    expect(text()).toContain("100 Las Olas Blvd");
+    expect(text()).toContain("Fort Lauderdale, FL 33301");
+    expect(text()).toContain("Saturday, March 14 · Morning");
+    expect(text()).toContain("Ana");
+    expect(text()).toContain("(954) 555-0100");
+    expect(text()).toContain("Ana@Example.com");
+    expect(text()).toContain(TEXT.review.consent);
+    expect(container.querySelector('a[href="/terms"]')?.textContent).toBe(TEXT.review.terms);
+    expect(container.querySelector('a[href="/privacy"]')?.textContent).toBe(TEXT.review.privacy);
+    const edits = [...container.querySelectorAll("button[aria-label]")].map((b) =>
+      b.getAttribute("aria-label"),
+    );
+    expect(edits).toEqual([
+      TEXT.review.edit.description,
+      TEXT.review.edit.address,
+      TEXT.review.edit.when,
+      TEXT.review.edit.contact,
+    ]);
+    await click(
+      container.querySelector<HTMLButtonElement>(`[aria-label="${TEXT.review.edit.address}"]`)!,
+    );
+    expect(heading().textContent).toBe(TEXT.where.title);
+  });
+
+  it("keeps the hidden field away from people: off screen, out of the tab order, unread", async () => {
+    await atReview();
+    const trap = document.getElementById("request-website") as HTMLInputElement;
+    expect(trap.tabIndex).toBe(-1);
+    expect(trap.autocomplete).toBe("off");
+    expect(trap.closest('[aria-hidden="true"]')).not.toBeNull();
+  });
+
+  it("sends the token, an empty trap and every answer, then shows the number", async () => {
+    await atReview();
+    await click(button(TEXT.review.send));
+    expect(sendRequest).toHaveBeenCalledWith({
+      token: "token-1",
+      website: "",
+      draft: {
+        zip: "33301",
+        description: "The kitchen sink leaks.",
+        categoryId: null,
+        answers: {},
+        address: {
+          line1: "100 Las Olas Blvd",
+          line2: "Apt 4",
+          city: "Fort Lauderdale",
+          state: "FL",
+        },
+        date: "2099-03-14",
+        period: "morning",
+        contact: { firstName: "Ana", phone: "(954) 555-0100", email: "Ana@Example.com" },
+        locale: "en",
+        utm: { source: "google", campaign: "launch" },
+      },
+    });
+    expect(heading().textContent).toBe(TEXT.sent.title);
+    expect(document.activeElement).toBe(heading());
+    expect(text()).toContain("Your request number: JF-000124");
+    expect(text()).toContain(TEXT.sent.next);
+    // The invitation to the app's account; no store links set: the app's page.
+    expect(text()).toContain(TEXT.sent.invite);
+    expect(container.querySelector('a[href="/app"]')?.textContent).toBe(TEXT.sent.seeApp);
+    expect(step()).toBe("done");
+  });
+
+  it("sends a service's answers as the request's intake answers", async () => {
+    await mount({ initialCategoryId: HANDYMAN.id });
+    await served();
+    await type(field(TEXT.describe.label), "Mount a TV");
+    await click(button(TEXT.next));
+    await type(field("How many rooms?"), "3");
+    await click(field("Mount a TV") as HTMLInputElement);
+    await click(button(TEXT.next));
+    await fillAddress();
+    await click(button(TEXT.next));
+    await click(button(TEXT.next));
+    await fillContact();
+    await click(button(TEXT.next));
+    expect(text()).toContain("How many rooms?3");
+    expect(text()).toContain("Any pets at home?No");
+    await click(button(TEXT.review.send));
+    expect(sendRequest.mock.calls[0]![0].draft).toMatchObject({
+      categoryId: HANDYMAN.id,
+      answers: { rooms: 3, tasks: ["tv"], pets: false },
+      date: "",
+      period: "flexible",
+    });
+  });
+
+  it("offers the app's stores once they are set", async () => {
+    await atReview({
+      storeLinks: { appStore: "https://apps.example/jack", playStore: "https://play.example/jack" },
+    });
+    await click(button(TEXT.review.send));
+    expect(text()).toContain(TEXT.sent.invite);
+    expect(container.querySelector('a[href="/app"]')).toBeNull();
+    expect(container.querySelector('a[href="https://apps.example/jack"]')?.textContent).toBe(
+      "App Store",
+    );
+    expect(container.querySelector('a[href="https://play.example/jack"]')?.textContent).toBe(
+      "Google Play",
+    );
+  });
+
+  it("shows no number when nothing was sent", async () => {
+    sendRequest.mockResolvedValueOnce({ kind: "sent", code: null });
+    await atReview();
+    await click(button(TEXT.review.send));
+    expect(heading().textContent).toBe(TEXT.sent.title);
+    expect(text()).not.toContain("Your request number");
+  });
+
+  it("sends once while it waits", async () => {
+    let finish: (result: SendResult) => void = () => undefined;
+    sendRequest.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    await atReview();
+    await click(button(TEXT.review.send));
+    expect(text()).toContain(TEXT.review.sending);
+    await click(button(TEXT.review.send));
+    expect(sendRequest).toHaveBeenCalledTimes(1);
+    await act(async () => finish({ kind: "sent", code: "JF-000125" }));
+    expect(text()).toContain("JF-000125");
+  });
+
+  it.each(["retry", "unavailable", "rate_limited", "duplicate", "invalid"] as const)(
+    "words a %s refusal on the review and keeps every answer",
+    async (error) => {
+      sendRequest.mockResolvedValueOnce({ kind: "error", error });
+      await atReview();
+      await click(button(TEXT.review.send));
+      expect(heading().textContent).toBe(TEXT.review.title);
+      expect(document.activeElement).toBe(problems());
+      expect(problems()!.textContent).toContain(TEXT.review.errors[error]);
+      expect(problems()!.textContent).toContain(TEXT.review.failedTitle);
+      expect(text()).toContain("100 Las Olas Blvd");
+    },
+  );
+
+  it.each([
+    [7, "Try again in 7 min."],
+    [61, "Try again in 61 min."],
+    [91, "Try again in about 2 h."],
+    [1440, "Try again in about 24 h."],
+  ])("words the API's wait of %i minutes", async (waitMinutes, wording) => {
+    sendRequest.mockResolvedValueOnce({ kind: "error", error: "rate_limited", waitMinutes });
+    await atReview();
+    await click(button(TEXT.review.send));
+    expect(problems()!.textContent).toContain(wording);
+  });
+
+  it("answers a failed call as unavailable, the answers kept", async () => {
+    sendRequest.mockRejectedValueOnce(new Error("network"));
+    await atReview();
+    await click(button(TEXT.review.send));
+    expect(problems()!.textContent).toContain(TEXT.review.errors.unavailable);
+  });
+
+  it("takes the fresh token of a page left open, and sends with it next time", async () => {
+    sendRequest.mockResolvedValueOnce({ kind: "error", error: "stale", token: "token-2" });
+    await atReview();
+    await click(button(TEXT.review.send));
+    expect(problems()!.textContent).toContain(TEXT.review.errors.stale);
+    await click(button(TEXT.review.send));
+    expect(sendRequest.mock.calls[1]![0].token).toBe("token-2");
+    expect(heading().textContent).toBe(TEXT.sent.title);
+  });
+
+  it("drops a service the API no longer offers, back on the description", async () => {
+    sendRequest.mockResolvedValueOnce({ kind: "error", error: "invalid_category" });
+    await mount({ initialCategoryId: CLEANING.id });
+    await served();
+    await type(field(TEXT.describe.label), "Deep clean");
+    await click(button(TEXT.next));
+    await fillAddress();
+    await click(button(TEXT.next));
+    await click(button(TEXT.next));
+    await fillContact();
+    await click(button(TEXT.next));
+    await click(button(TEXT.review.send));
+    expect(heading().textContent).toBe(TEXT.describe.title);
+    expect(text()).toContain(TEXT.notices.invalidCategory);
+    expect((field(TEXT.describe.notSure) as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("goes back to the questions when the service's questions changed (422 invalid_intake_answers)", async () => {
+    sendRequest.mockResolvedValueOnce({ kind: "error", error: "invalid_answers" });
+    await mount({ initialCategoryId: HANDYMAN.id });
+    await served();
+    await type(field(TEXT.describe.label), "Mount a TV");
+    await click(button(TEXT.next));
+    await type(field("How many rooms?"), "3");
+    await click(button(TEXT.next));
+    await fillAddress();
+    await click(button(TEXT.next));
+    await click(button(TEXT.next));
+    await fillContact();
+    await click(button(TEXT.next));
+    await click(button(TEXT.review.send));
+    expect(heading().textContent).toBe(HANDYMAN.name);
+    expect(document.activeElement).toBe(heading());
+    expect(text()).toContain(TEXT.notices.invalidAnswers);
+    expect((field("How many rooms?") as HTMLInputElement).value).toBe("3");
+  });
+
+  it("goes back to the description for a service without questions (422 invalid_intake_answers)", async () => {
+    sendRequest.mockResolvedValueOnce({ kind: "error", error: "invalid_answers" });
+    await atReview();
+    await click(button(TEXT.review.send));
+    expect(heading().textContent).toBe(TEXT.describe.title);
+    expect(text()).toContain(TEXT.notices.invalidAnswers);
+  });
+
+  it("says the visitor is on the waitlist when the ZIP stopped being served (409 out_of_area)", async () => {
+    sendRequest.mockResolvedValueOnce({ kind: "error", error: "out_of_area" });
+    await atReview();
+    await click(button(TEXT.review.send));
+    // The API made no request and put the contact on the list: no form to fill in again.
+    expect(heading().textContent).toBe(TEXT.waitlist.joinedTitle);
+    expect(document.activeElement).toBe(heading());
+    expect(text()).toContain("Jack isn't taking requests in 33301 right now");
+    expect(container.querySelector("form")).toBeNull();
+    expect(text()).not.toContain("Your request number");
+  });
+});
+
+describe("the browser's Back and Forward (#86)", () => {
+  /**
+   * The browser's Back or Forward, and each step back the flow takes on its own (passing over a
+   * screen). jsdom makes every move in later tasks and fires popstate with it: this waits until
+   * every move asked for was heard, not for a quiet spell. On a busy machine (the whole suite at
+   * once) a quiet-spell timer can come due before jsdom's next task runs.
+   */
+  async function browser(direction: "back" | "forward"): Promise<void> {
+    const moves = [vi.spyOn(window.history, "back"), vi.spyOn(window.history, "forward")];
+    const asked = () => moves.reduce((sum, move) => sum + move.mock.calls.length, 0);
+    let heard = 0;
+    const hear = () => {
+      heard += 1;
+    };
+    window.addEventListener("popstate", hear);
+    try {
+      await act(async () => {
+        window.history[direction]();
+        for (let tries = 0; heard < asked(); tries += 1) {
+          if (tries === 2000) throw new Error(`${asked() - heard} history moves never happened`);
+          await new Promise((done) => setTimeout(done, 1));
+        }
+      });
+    } finally {
+      window.removeEventListener("popstate", hear);
+      for (const move of moves) move.mockRestore();
+    }
+  }
 
   it("moves between the screens seen, everything kept, the heading focused", async () => {
     await mount();
@@ -428,6 +883,39 @@ describe("the browser's Back and Forward (#86)", () => {
 
     expect(seen).toEqual([TEXT.zip.title, TEXT.zip.title]);
     expect(step()).toBeNull();
+  });
+
+  it("leaves the page with Back once the request is sent, never back into it", async () => {
+    window.history.replaceState(null, "", "/home");
+    window.history.pushState(null, "", "/request");
+    await atReview();
+    await click(button(TEXT.review.send));
+    expect(step()).toBe("done");
+
+    await act(async () => {
+      window.history.back();
+      for (let tries = 0; tries < 400 && window.location.pathname !== "/home"; tries += 1) {
+        await new Promise((done) => setTimeout(done, 5));
+      }
+    });
+
+    // Every screen before the end is passed over: the review is not offered to send again.
+    expect(window.location.pathname).toBe("/home");
+    expect(sendRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("goes forward only to a step whose earlier steps still go on", async () => {
+    await atWhere();
+    await fillAddress();
+    await click(button(TEXT.next));
+    expect(step()).toBe("when");
+    await browser("back");
+    await type(field(TEXT.where.line1), " ");
+
+    await browser("forward");
+
+    // No street any more: the day cannot come before it.
+    expect(heading().textContent).toBe(TEXT.where.title);
   });
 
   it("goes back from the waitlist to the ZIP", async () => {

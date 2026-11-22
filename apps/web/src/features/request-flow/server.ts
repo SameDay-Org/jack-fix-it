@@ -1,6 +1,6 @@
 import type { Locale } from "@/i18n/config";
-import { apiGet } from "@/lib/api";
 
+import { activeCategories } from "./api-client";
 import type { IntakeQuestion } from "./questions";
 
 /** A service the visitor may pick, with the questions it asks (in the page's language). */
@@ -12,22 +12,14 @@ export type RequestCategory = {
 };
 
 /**
- * How long the services and their questions are reused before the API is read again: an hour,
- * as the landing's services grid. The page itself is never cached (it holds what a visitor
- * types); only this read is shared by every visitor, so one visitor is not one API call.
- */
-const CATEGORIES_REVALIDATE_SECONDS = 3600;
-
-/**
  * The active services, from `GET /v1/categories`, or null when the API cannot be read. Then the
  * page offers no service to pick: the request can go without one (the BDC picks it), and the
  * page never makes one up.
  */
 export async function loadRequestCategories(locale: Locale): Promise<RequestCategory[] | null> {
   try {
-    const categories = await apiGet("/v1/categories", {
-      next: { revalidate: CATEGORIES_REVALIDATE_SECONDS },
-    });
+    // Read once an hour for every visitor (api-client.ts): the page itself is never cached.
+    const categories = await activeCategories();
     return categories.map((category) => ({
       id: category.id,
       slug: category.slug,
