@@ -81,6 +81,8 @@ describe("support ticket page", () => {
           topic: "safety",
           role: "pro",
           job_id: JOB_ID,
+          job_request_id: "5e9d0c1b-1111-4222-8333-944455556666",
+          job_request_code: "JF-000102",
           app_version: "9.8.7 (654)",
           platform: "ios",
           status: "in_progress",
@@ -93,7 +95,12 @@ describe("support ticket page", () => {
 
     const [request] = requestsTo(fetchMock.mock.calls, TICKET);
     expect(new Headers(request?.init?.headers).get("Authorization")).toBe(`Bearer ${ACCESS_TOKEN}`);
-    for (const text of ["Safety", "Ana", "Pro", JOB_ID, "9.8.7 (654) · iOS", "All tickets"]) {
+    // The job by its request code, a link to the card of its request (#503); never its raw id.
+    expect(page).toMatch(
+      /<a [^>]*href="\/admin\/requests\/5e9d0c1b-1111-4222-8333-944455556666"[^>]*>JF-000102<\/a>/,
+    );
+    expect(page).not.toContain(JOB_ID);
+    for (const text of ["Safety", "Ana", "Pro", "9.8.7 (654) · iOS", "All tickets"]) {
       expect(page).toContain(text);
     }
     // The text is shown as text, line breaks kept by the style: markup in it stays inert.
@@ -115,6 +122,18 @@ describe("support ticket page", () => {
     expect(page).toContain('role="status"');
     expect(page).toContain("Nov 7, 2026, 2:30 PM UTC");
     expect(page).not.toContain(ACCESS_TOKEN);
+  });
+
+  it("shows no job row when the API names no request for it (#503)", async () => {
+    api(() =>
+      Response.json(ticket({ job_id: JOB_ID, job_request_id: null, job_request_code: null })),
+    );
+
+    const page = decoded(await markup());
+
+    expect(page).not.toContain(">Job<");
+    expect(page).not.toContain(JOB_ID);
+    expect(page).not.toContain("/admin/requests/");
   });
 
   it("shows when a closed ticket was closed", async () => {

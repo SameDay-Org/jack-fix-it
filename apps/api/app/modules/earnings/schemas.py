@@ -33,7 +33,9 @@ class EarningsSummary(_Out):
     """All the pro's jobs, not just this page."""
 
     awaiting_confirmation_cents: int
-    pending_cents: int = Field(description="Confirmed, the transfer still to be made.")
+    pending_cents: int = Field(
+        description="Confirmed, the transfer still to be made; a tip whose own transfer is."
+    )
     on_hold_cents: int
     paid_cents: int
     currency: str = Field(examples=["usd"])
@@ -47,7 +49,15 @@ class EarningCategory(_Out):
 class EarningItem(_Out):
     job_id: uuid.UUID
     category: EarningCategory | None = Field(description="What the job was: the safe title.")
-    amount_cents: int = Field(description="What the pro receives, in integer cents.")
+    amount_cents: int = Field(
+        description="What the pro receives for the job, in integer cents (never the tip)."
+    )
+    tip_cents: int | None = Field(
+        default=None,
+        description="The customer's tip on the job, all of it the pro's, in integer cents; 0 "
+        "when none. Its own transfer: the summary counts it by that transfer's state. Always "
+        "sent; optional in the schema so clients built before #273 keep compiling.",
+    )
     status: EarningStatus
     completed_at: datetime
     paid_at: datetime | None = Field(description="When it was paid; null until then.")

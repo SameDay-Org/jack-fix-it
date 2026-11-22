@@ -44,6 +44,11 @@ any exchange (Cesar, 2026-10-28). Text only here; photos are part 2.
   version before them keeps working during a deploy.
 - Unread: the other side's messages after the caller's marker, all of them without one. The
   job views (customer and pro) show it per job (ChatUnreadReader).
+- The new-message push (#73 part 1, chat.notify): after a message commits, one push to the other
+  side, unless they have the chat open (they listed it or moved their marker within
+  CHAT_PRESENCE_SECONDS) or a push for this job went out to them within
+  CHAT_PUSH_COOLDOWN_SECONDS (chat.presence). The job's code only, never the text. Neither
+  presence nor the queue can fail a message: both log and go on.
 
 Never logged: a body, an original, or their masked parts. Logs carry ids, the length,
 `redacted` and counts.
@@ -66,6 +71,7 @@ from app.modules.audit.service import AuditService
 from app.modules.audit.types import AuditAction, AuditEntity, AuditEntityType
 from app.modules.chat.errors import ChatClosedError, InvalidChatInputError, InvalidMessageError
 from app.modules.chat.models import MESSAGE_MAX_LENGTH, ChatOffenderFlag, JobMessage, Receipt
+from app.modules.chat.notify import ChatNotifier, NewMessage
 from app.modules.chat.repository import ChatRepository, MessageRow
 from app.modules.chat.schemas import (
     ChatMessageOut,
@@ -80,6 +86,7 @@ from app.modules.chat.schemas import (
 )
 from app.modules.jobs.service import JobParties, JobPartiesReader
 from app.modules.pros.service import ProService
+from app.modules.requests.service import CustomerRequestReader
 from app.modules.users.types import UserAccount
 from app.redaction import redact_contacts
 
@@ -129,11 +136,13 @@ class ChatUnreadReader:
 
 
 class ChatService:
-    def __init__(self, session: AsyncSession, config: ChatConfig) -> None:
+    def __init__(self, session: AsyncSession, config: ChatConfig, notifier: ChatNotifier) -> None:
         self._session = session
         self._config = config
+        self._notifier = notifier
         self._chat = ChatRepository(session)
         self._jobs = JobPartiesReader(session, ProService(session))
+        self._requests = CustomerRequestReader(session)
         self._unread = ChatUnreadReader(session)
 
     async def messages(
@@ -141,6 +150,8 @@ class ChatService:
     ) -> ChatPage:
         before = _decode_cursor(cursor) if cursor else None
         parties = await self._participant(user, job_id)
+        # The app lists the thread only while the chat is on screen: no push to them meanwhile.
+        await self._notifier.seen(job_id, user.id)
         page, next_cursor = await self._page(parties, limit, before)
         # The other side's messages in the page are the caller's to receive: their receipt is
         # from the caller's read marker and deliveries, so "sent" means neither covers it yet.
@@ -187,6 +198,8 @@ class ChatService:
             # Nothing left once invisible characters are dropped, or (in theory) masks longer
             # than what they replaced past the limit.
             raise InvalidChatInputError
+        # Read here, so nothing after the commit can fail on the database: the push's only fact.
+        public_code = await self._requests.public_code(parties.request_id)
         message = await self._chat.add(
             JobMessage(
                 job_id=job_id,
@@ -227,10 +240,20 @@ class ChatService:
             receipt=Receipt.SENT,
             warning=ChatWarning.CONTACT_DETAILS_HIDDEN if result.redacted else None,
         )
+        to_customer = user.id != parties.customer_id
+        new = NewMessage(
+            message_id=sent.id,
+            job_id=job_id,
+            request_id=parties.request_id,
+            public_code=public_code,
+            recipient_id=parties.customer_id if to_customer else parties.pro_user_id,
+            to_customer=to_customer,
+        )
         # After the answer is built: a failed check rolls the session back, which expires the
         # message.
         if result.redacted:
             await self._check_offender(user.id, job_id)
+        await self._notifier.announce(new)
         return sent
 
     async def _check_offender(self, sender_id: uuid.UUID, job_id: uuid.UUID) -> None:
@@ -269,6 +292,7 @@ class ChatService:
     async def mark_read(self, user: UserAccount, job_id: uuid.UUID, up_to: uuid.UUID) -> int:
         """Moves the caller's marker to `up_to` when it is newer; the unread count after."""
         await self._participant(user, job_id)
+        await self._notifier.seen(job_id, user.id)
         message = await self._chat.get_in_job(job_id, up_to)
         if message is None:
             raise InvalidMessageError

@@ -505,9 +505,25 @@ class CustomerRequestReader:
         """Each request's category, for a pro's earnings (#70): nothing about the customer."""
         return await self._requests.category_ids(request_ids)
 
+    @staticmethod
+    def codes() -> Subquery:
+        """Each request's id (`request_id`) and public code (`public_code`), as a subquery:
+        a staff support ticket names its job's request by code (#503)."""
+        return ServiceRequestRepository.codes()
+
     async def public_codes(self, request_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str]:
         """The public code of each request among `request_ids`, for staff lists (#76)."""
         return await self._requests.public_codes(request_ids)
+
+    async def own_address(self, request_id: uuid.UUID) -> AddressOut:
+        """The request's address as its customer typed it, unmasked: for the customer's own
+        receipt (#62), never a pro's view (which masks contacts typed into it). The caller
+        already checked the request is the customer's: this does not."""
+        request = await self._requests.get(request_id)
+        found = None if request is None else await self._addresses.full_many([request.address_id])
+        if request is None or found is None or request.address_id not in found:
+            raise NotFoundError  # pragma: no cover - both ids are foreign keys
+        return found[request.address_id]
 
     async def place(self, request_id: uuid.UUID) -> AddressPlace:
         """Where the request takes place, for the route of its job (#351). The caller already

@@ -25,6 +25,7 @@ from app.config import Settings
 from app.db import get_session
 from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.integrations.stripe_payments import (
+    CardFacts,
     CreatedCustomer,
     FoundPaymentIntents,
     FoundTipIntents,
@@ -32,6 +33,7 @@ from app.integrations.stripe_payments import (
     PaymentIntentState,
     StripePayments,
     StripePaymentsClient,
+    TipChargeFacts,
     TipIntentFacts,
     get_stripe_payments,
 )
@@ -73,6 +75,8 @@ __all__ = ["sentry_transport"]  # a fixture, used by name
 # Fixture values only: a test-mode-shaped key that is not a key, and a take rate that is not
 # the default, so the tests prove the rate comes from settings.
 PUBLISHABLE_KEY = "pk_test_fixturePayments58"
+# The charge every tip PaymentIntent of the fake was paid with (#273 PR A2).
+TIP_CHARGE = "ch_fixtureTipCharge273"
 SECRET_KEY = "sk_test_fixture-not-a-real-key"
 TAKE_RATE = "platform_take_rate_bps"
 TAKE_RATE_BPS = 1500
@@ -170,6 +174,9 @@ class FakeStripePayments:
     cancels: list[tuple[str, str]] = field(default_factory=list)
     cancel_refused: bool = False
     on_cancel_intent: Callable[[], Awaitable[None]] | None = None
+    # The card each PaymentIntent was paid with, as card_of reads it (#62); none by default.
+    cards: dict[str, CardFacts] = field(default_factory=dict)
+    card_reads: list[str] = field(default_factory=list)
     # Tip intents (#510 round 1), as tip_intent and search_tip_intents read them: what each
     # create sent, by PaymentIntent id. `tip_statuses` is Stripe's status of one intent (else
     # `intent_status`; an accepted cancel makes it canceled), `failed_intents` the ones with a
@@ -178,6 +185,12 @@ class FakeStripePayments:
     tip_statuses: dict[str, str] = field(default_factory=dict)
     failed_intents: set[str] = field(default_factory=set)
     tip_reads: list[str] = field(default_factory=list)
+    # The tip's charge (#273 PR A2), as tip_charge reads it: its id by PaymentIntent id (a
+    # fixed one unless set), and the intents whose charge was refunded or is disputed.
+    tip_charges: dict[str, str | None] = field(default_factory=dict)
+    refunded_charges: set[str] = field(default_factory=set)
+    disputed_charges: set[str] = field(default_factory=set)
+    tip_charge_reads: list[str] = field(default_factory=list)
     tip_searches: list[uuid.UUID] = field(default_factory=list)
 
     def add_intent(self, facts: PaymentIntentFacts) -> None:
@@ -313,6 +326,12 @@ class FakeStripePayments:
             self.tip_statuses[payment_intent_id] = "canceled"
         return not self.cancel_refused
 
+    async def card_of(self, payment_intent_id: str) -> CardFacts | None:
+        if "card_of" in self.errors:
+            raise self.errors["card_of"]
+        self.card_reads.append(payment_intent_id)
+        return self.cards.get(payment_intent_id)
+
     def tip_now(self, facts: TipIntentFacts) -> TipIntentFacts:
         """The intent as Stripe holds it now: its status and its last payment error."""
         intent = facts.payment_intent_id
@@ -334,6 +353,20 @@ class FakeStripePayments:
         if facts is None:
             raise StripeRejectedError(request_id="req_fake_missing", code="resource_missing")
         return self.tip_now(facts)
+
+    async def tip_charge(self, payment_intent_id: str) -> TipChargeFacts:
+        if "tip_charge" in self.errors:
+            raise self.errors["tip_charge"]
+        self.tip_charge_reads.append(payment_intent_id)
+        facts = self.tip_facts.get(payment_intent_id)
+        if facts is None:
+            raise StripeRejectedError(request_id="req_fake_missing", code="resource_missing")
+        return TipChargeFacts(
+            intent=self.tip_now(facts),
+            charge_id=self.tip_charges.get(payment_intent_id, TIP_CHARGE),
+            refunded=payment_intent_id in self.refunded_charges,
+            disputed=payment_intent_id in self.disputed_charges,
+        )
 
     async def search_tip_intents(self, tip_id: uuid.UUID) -> FoundTipIntents:
         if "search_tip_intents" in self.errors:

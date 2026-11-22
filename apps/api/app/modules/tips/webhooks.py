@@ -29,13 +29,18 @@ The four event types are handled alike:
      canceled when it still can be, and staff get an ERROR (`tip_succeeded_on_stale_attempt`)
      with the ids. Never a second silent charge.
    An intent naming no tip of ours is a warning and changes nothing.
-Nothing here changes the job's status, its payment or its transfer. Logs carry ids, the event
-type, statuses and Stripe codes only: no amount, no PaymentIntent id, no customer data.
+Nothing here changes the job's status, its payment or its transfer. A tip that succeeded
+through an event queues, once that event commits: its receipt email (#62), its transfer to the
+pro (transfers.py, #273 PR A2) and the pro's tip_received push. Once, since a repeat moves
+nothing (and a contained late success is staff's: no receipt, no transfer, no push). Logs
+carry ids, the event type, statuses and Stripe codes only: no amount, no PaymentIntent id, no
+customer data.
 """
 
 import logging
 import uuid
 from collections.abc import Callable, Mapping
+from functools import partial
 from types import MappingProxyType
 from typing import Final
 
@@ -50,7 +55,11 @@ from app.integrations.stripe_payments import (
     worker_stripe_payments,
 )
 from app.modules.jobs.service import JobTimeline
+from app.modules.notifications.events import push_tip_received
 from app.modules.payments.webhook_handlers import intent_event
+from app.modules.pros.service import ProService
+from app.modules.receipts.queue import enqueue_tip_receipt
+from app.modules.requests.service import CustomerRequestReader
 from app.modules.tips.errors import TipEventMismatchError, TipRowMissingError
 from app.modules.tips.intents import (
     mismatches,
@@ -60,8 +69,10 @@ from app.modules.tips.intents import (
 )
 from app.modules.tips.models import UNPAID_STATUSES, Tip, TipStatus
 from app.modules.tips.repository import TipRepository
+from app.modules.tips.transfer_queue import enqueue_tip_transfer
 from app.modules.users.service import UserService
 from app.modules.webhooks.events import AfterCommit, StripeEvent, StripeEventHandler
+from app.queue import JobQueue
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +237,52 @@ class TipReconciler:
         )
 
 
+async def _queue_receipt(tip_id: uuid.UUID, queue: JobQueue, timeout_seconds: float) -> None:
+    await enqueue_tip_receipt(queue, tip_id, timeout_seconds)
+
+
+async def _queue_transfer(tip_id: uuid.UUID, queue: JobQueue, timeout_seconds: float) -> None:
+    await enqueue_tip_transfer(queue, tip_id, timeout_seconds)
+
+
+async def _announce(session: AsyncSession, tip_id: uuid.UUID, after_commit: AfterCommit) -> None:
+    """What a tip that just succeeded sets off once its event commits: the receipt, the
+    transfer and the pro's push (read now, in the event's transaction)."""
+    after_commit.add(partial(_queue_receipt, tip_id))
+    after_commit.add(partial(_queue_transfer, tip_id))
+    tip = await TipRepository(session).get(tip_id)
+    pro_user_id = None if tip is None else await ProService(session).user_id_of(tip.pro_id)
+    if tip is None or pro_user_id is None:  # pragma: no cover - tips.pro_id is a foreign key
+        return
+    after_commit.add(
+        partial(
+            _push_tip,
+            pro_user_id,
+            tip_id,
+            tip.job_id,
+            await CustomerRequestReader(session).public_code(tip.request_id),
+        )
+    )
+
+
+async def _push_tip(
+    pro_user_id: uuid.UUID,
+    tip_id: uuid.UUID,
+    job_id: uuid.UUID,
+    public_code: str,
+    queue: JobQueue,
+    timeout_seconds: float,
+) -> None:
+    await push_tip_received(
+        queue,
+        pro_user_id=pro_user_id,
+        tip_id=tip_id,
+        job_id=job_id,
+        public_code=public_code,
+        timeout_seconds=timeout_seconds,
+    )
+
+
 def tip_event_handler(stripe: StripePaymentsProvider) -> StripeEventHandler:
     """The handler, reading PaymentIntents with the client `stripe` gives (the worker's own in
     production, a fake in tests)."""
@@ -240,13 +297,15 @@ def tip_event_handler(stripe: StripePaymentsProvider) -> StripeEventHandler:
             logger.warning("tips_stripe_not_configured", extra=ids)
             raise TipsStripeNotConfiguredError
         try:
-            await TipReconciler(session, client).apply(intent_id, ids)
+            succeeded = await TipReconciler(session, client).apply(intent_id, ids)
         except StripeCallError as error:
             logger.warning(
                 "tip_event_stripe_unavailable",
                 extra={**ids, "error": type(error).__name__, "stripe_code": error.code},
             )
             raise
+        if succeeded is not None:
+            await _announce(session, succeeded, after_commit)
 
     return tip_event
 

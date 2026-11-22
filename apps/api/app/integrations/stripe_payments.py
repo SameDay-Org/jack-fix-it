@@ -46,6 +46,7 @@ from stripe.params import (
     EphemeralKeyCreateParams,
     PaymentIntentCancelParams,
     PaymentIntentCreateParams,
+    PaymentIntentRetrieveParams,
     PaymentIntentSearchParams,
 )
 from stripe.params import (
@@ -111,6 +112,17 @@ class PaymentIntentFacts:
 
 
 @dataclass(frozen=True)
+class CardFacts:
+    """The card a succeeded PaymentIntent was paid with, for a receipt (#62): Stripe's brand
+    ("visa"), the last 4 digits and the wallet that carried it ("apple_pay"), each None when
+    Stripe gives none. Never the card's number, expiry or holder."""
+
+    brand: str | None
+    last4: str | None
+    wallet: str | None
+
+
+@dataclass(frozen=True)
 class TipIntentFacts:
     """A PaymentIntent as Stripe holds it now, for a tip (#510 round 1): what its row is checked
     against before anything is stored or settled, and its current status. The metadata fields
@@ -127,6 +139,20 @@ class TipIntentFacts:
     tip_id: str | None
     job_id: str | None
     attempt: str | None
+
+
+@dataclass(frozen=True)
+class TipChargeFacts:
+    """A tip's PaymentIntent with its latest charge, as the tip's transfer reads them (#273 PR
+    A2): the intent as tip_intent reads it, the charge a transfer pays from (None when the
+    intent has none, or Stripe did not expand it), and whether any of that charge went back to
+    the customer (`refunded`, in part or in full) or is charged back (`disputed`). Never the
+    card or the customer's details."""
+
+    intent: TipIntentFacts
+    charge_id: str | None
+    refunded: bool
+    disputed: bool
 
 
 @dataclass(frozen=True)
@@ -192,6 +218,11 @@ class StripePayments(Protocol):
         processing, succeeded or canceled already (see the module doc)."""
         ...
 
+    async def card_of(self, payment_intent_id: str) -> CardFacts | None:
+        """The card the intent's latest charge was paid with (#62); None when it has no
+        charge or the charge was not paid with a card."""
+        ...
+
     async def tip_intent(self, payment_intent_id: str) -> TipIntentFacts:
         """The PaymentIntent as Stripe holds it now (#510 round 1): never an event's copy."""
         ...
@@ -199,6 +230,11 @@ class StripePayments(Protocol):
     async def search_tip_intents(self, tip_id: uuid.UUID) -> FoundTipIntents:
         """The platform's PaymentIntents whose metadata tip_id is `tip_id` (Stripe Search:
         eventually consistent, so a recent intent may be missing)."""
+        ...
+
+    async def tip_charge(self, payment_intent_id: str) -> TipChargeFacts:
+        """The tip's PaymentIntent and its latest charge as Stripe holds them now (#273 PR A2),
+        read before its transfer: never an event's copy."""
         ...
 
 
@@ -356,6 +392,16 @@ class StripePaymentsClient:
             raise_typed(error)
         return True
 
+    async def card_of(self, payment_intent_id: str) -> CardFacts | None:
+        params: PaymentIntentRetrieveParams = {"expand": ["latest_charge"]}
+        try:
+            intent = await self._client.v1.payment_intents.retrieve_async(
+                payment_intent_id, params=params
+            )
+        except stripe.StripeError as error:
+            raise_typed(error)
+        return _card(intent)
+
     async def tip_intent(self, payment_intent_id: str) -> TipIntentFacts:
         try:
             intent = await self._client.v1.payment_intents.retrieve_async(payment_intent_id)
@@ -378,6 +424,34 @@ class StripePaymentsClient:
             complete=not page.has_more,
         )
 
+    async def tip_charge(self, payment_intent_id: str) -> TipChargeFacts:
+        params: PaymentIntentRetrieveParams = {"expand": ["latest_charge"]}
+        try:
+            intent = await self._client.v1.payment_intents.retrieve_async(
+                payment_intent_id, params=params
+            )
+        except stripe.StripeError as error:
+            raise_typed(error)
+        return _tip_charge(intent)
+
+
+def _card(intent: stripe.PaymentIntent) -> CardFacts | None:
+    """The card of the intent's expanded latest charge, read defensively: anything missing is
+    None, never an error (the receipt then says "Card")."""
+    charge = getattr(intent, "latest_charge", None)
+    details = getattr(charge, "payment_method_details", None)
+    card = getattr(details, "card", None)
+    if card is None:
+        return None
+    brand = getattr(card, "brand", None)
+    last4 = getattr(card, "last4", None)
+    wallet = getattr(getattr(card, "wallet", None), "type", None)
+    return CardFacts(
+        brand=brand if isinstance(brand, str) else None,
+        last4=last4 if isinstance(last4, str) and len(last4) == 4 and last4.isdigit() else None,
+        wallet=wallet if isinstance(wallet, str) else None,
+    )
+
 
 def _tip_facts(intent: stripe.PaymentIntent) -> TipIntentFacts:
     customer = intent.customer
@@ -399,6 +473,23 @@ def _tip_facts(intent: stripe.PaymentIntent) -> TipIntentFacts:
         tip_id=named("tip_id"),
         job_id=named("job_id"),
         attempt=named("attempt"),
+    )
+
+
+def _tip_charge(intent: stripe.PaymentIntent) -> TipChargeFacts:
+    """The intent's expanded latest charge: its id, and whether it was refunded (any amount)
+    or disputed. A charge Stripe did not expand, or none, is no charge to pay from."""
+    charge = getattr(intent, "latest_charge", None)
+    charge_id = getattr(charge, "id", None)
+    if isinstance(charge, str) or not isinstance(charge_id, str):
+        return TipChargeFacts(_tip_facts(intent), None, refunded=False, disputed=False)
+    amount_refunded = getattr(charge, "amount_refunded", 0)
+    return TipChargeFacts(
+        intent=_tip_facts(intent),
+        charge_id=charge_id,
+        refunded=getattr(charge, "refunded", False) is True
+        or (isinstance(amount_refunded, int) and amount_refunded > 0),
+        disputed=getattr(charge, "disputed", False) is True,
     )
 
 
