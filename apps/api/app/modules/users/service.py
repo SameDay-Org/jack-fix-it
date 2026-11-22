@@ -87,14 +87,25 @@ class UserService:
         None when a name is missing or shows a contact detail, the user's own email and phone
         included. The contacts never leave this module, and the full name only through
         `legal_name` (staff's review of a pro)."""
-        return {
+        names, _ = await self.public_names_and_deleted(user_ids)
+        return names
+
+    async def public_names_and_deleted(
+        self, user_ids: Collection[uuid.UUID]
+    ) -> tuple[dict[uuid.UUID, str | None], set[uuid.UUID]]:
+        """`public_names`, and the ids of the deleted accounts among them (#97), from the
+        same one query."""
+        rows = await self._users.names(user_ids)
+        names = {
             user_id: DELETED_USER_NAME
             if status is UserStatus.DELETED
             else safe_public_name(
                 first, last, KnownValues(emails=(email,), phones=(phone,) if phone else ())
             )
-            for user_id, first, last, email, phone, status in await self._users.names(user_ids)
+            for user_id, first, last, email, phone, status in rows
         }
+        deleted = {user_id for user_id, *_, status in rows if status is UserStatus.DELETED}
+        return names, deleted
 
     async def legal_name(self, user_id: uuid.UUID) -> str | None:
         """The account's first and last name as stored, for the staff member who matches a
@@ -161,10 +172,6 @@ class UserService:
         if user is None:
             return None
         return UserCredentials(account=_to_account(user), password_hash=user.password_hash)
-
-    async def deleted_among(self, user_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
-        """The ids among `user_ids` of deleted accounts (#97)."""
-        return await self._users.deleted_among(user_ids)
 
     async def anonymise(self, user_id: uuid.UUID) -> None:
         """Anonymises the account in place (#97); the caller holds its row (get_for_update) and

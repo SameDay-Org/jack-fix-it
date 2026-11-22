@@ -119,12 +119,6 @@ class UserRepository:
         )
         return (await self._session.scalars(statement)).one_or_none()
 
-    async def deleted_among(self, user_ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
-        if not user_ids:
-            return set()
-        statement = select(User.id).where(User.id.in_(user_ids), User.status == UserStatus.DELETED)
-        return set(await self._session.scalars(statement))
-
     async def get_by_email(self, email: str, *, lock: bool = False) -> User | None:
         """`lock`: FOR NO KEY UPDATE until the transaction ends, reading the row as last
         committed (populate_existing, not the copy an earlier read left in the session). Not

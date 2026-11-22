@@ -266,12 +266,12 @@ class ProService:
         self, pro_ids: Collection[uuid.UUID], *, hireable_only: bool
     ) -> dict[uuid.UUID, ProCard]:
         rows = await self._profiles.public_fields(pro_ids, hireable_only=hireable_only)
+        # One read of the accounts: their public names, and which are deleted (#97).
+        names, deleted = await self._users.public_names_and_deleted([row[1] for row in rows])
         if hireable_only:
             # A deleted pro (#97) is never hired again: their profile may still look approved
             # with payouts enabled (Stripe's events can turn them back on).
-            deleted = await self._users.deleted_among({row[1] for row in rows})
             rows = [row for row in rows if row[1] not in deleted]
-        names = await self._users.public_names([row[1] for row in rows])
         return {
             pro_id: ProCard(
                 pro_id=pro_id,

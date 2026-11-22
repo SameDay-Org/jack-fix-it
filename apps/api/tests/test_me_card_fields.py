@@ -442,6 +442,7 @@ async def test_me_returns_signed_photo_and_member_since(
         "home_state",
         "photo",
         "member_since",
+        "terms_required",  # #97: the documents the account has still to accept
     }
 
 
