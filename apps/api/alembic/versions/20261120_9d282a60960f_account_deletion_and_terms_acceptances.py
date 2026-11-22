@@ -2,7 +2,7 @@
 documents' acceptances (terms_acceptances), #97
 
 Revision ID: 9d282a60960f
-Revises: 920fe99e6f1d
+Revises: 4e6125ffe8c0
 Create Date: 2026-11-20 12:10:06.900896
 
 """
@@ -16,7 +16,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "9d282a60960f"
-down_revision: str | Sequence[str] | None = "920fe99e6f1d"
+down_revision: str | Sequence[str] | None = "4e6125ffe8c0"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -44,13 +44,13 @@ def _timestamps() -> list[sa.Column[datetime]]:
 
 def upgrade() -> None:
     # Expand only: Railway runs this in the pre-deploy step while the previous API and worker
-    # keep serving. They write the statuses active and suspended only, which the new CHECK
+    # keep serving. They write the statuses active, suspended and guest only, which the new CHECK
     # still accepts, never deleted_at (NULL on every row, as the second CHECK wants), and they
     # neither read nor write the two new tables.
     op.add_column("users", sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True))
     op.drop_constraint(op.f(STATUS_CHECK), "users", type_="check")
     op.create_check_constraint(
-        op.f(STATUS_CHECK), "users", "status IN ('active', 'suspended', 'deleted')"
+        op.f(STATUS_CHECK), "users", "status IN ('active', 'suspended', 'guest', 'deleted')"
     )
     op.create_check_constraint(
         op.f(DELETED_CHECK), "users", "(status = 'deleted') = (deleted_at IS NOT NULL)"
@@ -134,5 +134,7 @@ def downgrade() -> None:
     op.drop_table("account_deletions")
     op.drop_constraint(op.f(DELETED_CHECK), "users", type_="check")
     op.drop_constraint(op.f(STATUS_CHECK), "users", type_="check")
-    op.create_check_constraint(op.f(STATUS_CHECK), "users", "status IN ('active', 'suspended')")
+    op.create_check_constraint(
+        op.f(STATUS_CHECK), "users", "status IN ('active', 'suspended', 'guest')"
+    )
     op.drop_column("users", "deleted_at")
