@@ -18,6 +18,7 @@ from app.modules.disputes.router import pro_router as dispute_pro_router
 from app.modules.disputes.router import staff_router as staff_disputes_router
 from app.modules.earnings.router import router as earnings_router
 from app.modules.geo.router import router as geo_router
+from app.modules.interest.router import router as interest_router
 from app.modules.jobs.router import customer_router as customer_jobs_router
 from app.modules.jobs.router import location_router as job_location_router
 from app.modules.jobs.router import route_router as job_route_router
@@ -36,6 +37,7 @@ from app.modules.pros.router import router as pros_router
 from app.modules.pros.router import staff_router as staff_pros_router
 from app.modules.quotes.router import customer_router as customer_quotes_router
 from app.modules.quotes.router import router as quotes_router
+from app.modules.receipts.router import router as receipts_router
 from app.modules.requests.router import router as requests_router
 from app.modules.reviews.router import public_pro_router
 from app.modules.reviews.router import rating_router as my_rating_router
@@ -78,6 +80,7 @@ v1_router.include_router(staff_chat_router)
 v1_router.include_router(chat_flags_router)
 v1_router.include_router(devices_router)
 v1_router.include_router(waitlist_router)
+v1_router.include_router(interest_router)
 v1_router.include_router(webhooks_router)
 v1_router.include_router(addresses_router)
 v1_router.include_router(notification_preferences_router)
@@ -96,5 +99,6 @@ v1_router.include_router(staff_disputes_router)
 v1_router.include_router(staff_metrics_router)
 v1_router.include_router(my_rating_router)
 v1_router.include_router(tips_router)
+v1_router.include_router(receipts_router)
 # After pros_router: /v1/pros/me is matched before /v1/pros/{pro_id} (#78).
 v1_router.include_router(public_pro_router)

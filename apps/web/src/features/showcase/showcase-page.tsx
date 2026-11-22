@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { ComingSoon, Faq, FinalCall } from "./closing";
 import { ForPros, HowItWorks } from "./features";
 import { Hero } from "./hero";
+import { InterestEntry } from "@/features/interest/interest-entry";
 import { HtmlLang } from "@/features/site/html-lang";
 import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
@@ -40,7 +41,7 @@ export async function ShowcasePage({ locale }: { locale: Locale }) {
         <Hero t={t} />
         <HowItWorks t={t} />
         <ForPros t={t} />
-        <ComingSoon t={t} />
+        <ComingSoon t={t} interest={<InterestEntry t={t} locale={locale} />} />
         <Faq t={t} />
         <FinalCall t={t} />
       </main>

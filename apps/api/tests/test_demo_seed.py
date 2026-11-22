@@ -381,6 +381,55 @@ async def test_a_whole_run_makes_the_scenes(seeded: Seeded) -> None:
         )
         assert len(tickets["items"]) >= 3
 
+        # The admin's follow-ups, on the request waiting on its customer: the overdue one first
+        # (set four hours ago, due two hours later), then the one due later today.
+        followups = await world.call(admin, "GET", "/v1/admin/followups", what="follow-ups")
+        overdue, later = followups["items"]
+        assert (overdue["note"], later["note"]) == (cast.FOLLOWUP_OVERDUE, cast.FOLLOWUP_TODAY)
+        assert overdue["request_id"] == later["request_id"]
+        assert overdue["assigned_to"]["id"] == later["assigned_to"]["id"] == str(admin.user_id)
+        now = datetime.now(UTC)
+        assert datetime.fromisoformat(overdue["due_at"]) < now - timedelta(hours=1)
+        if await history.business_today(world) == today:  # not across the business midnight
+            assert datetime.fromisoformat(later["due_at"]) > now
+            badge = await world.call(admin, "GET", "/v1/admin/followups/summary", what="badge")
+            assert badge["due_today"] == 2
+        waiting = await world.call(
+            admin, "GET", f"/v1/admin/requests/{overdue['request_id']}", what="waiting request"
+        )
+        assert (waiting["status"], waiting["category"]) == ("reviewing", None)
+        # The agent's two internal notes, oldest first, on the urgent request they hold (the
+        # only request with notes).
+        agent_id = str(
+            await _scalar(
+                world, "SELECT id FROM users WHERE email = :email", email=cast.AGENT_EMAIL
+            )
+        )
+        noted_id = await _scalar(world, "SELECT DISTINCT request_id FROM request_notes")
+        noted = await world.call(admin, "GET", f"/v1/admin/requests/{noted_id}", what="noted")
+        assert noted["assigned_agent"]["id"] == agent_id
+        assert [note["body"] for note in noted["notes"]] == list(cast.BDC_NOTES)
+        assert {note["author"]["id"] for note in noted["notes"]} == {agent_id}
+        # Each made after its request; the earlier ones dated back; each action audited.
+        after_request = (
+            "SELECT bool_and(made.created_at > r.created_at) FROM (SELECT request_id, created_at"
+            " FROM request_notes UNION ALL SELECT request_id, created_at FROM request_followups)"
+            " made JOIN service_requests r ON r.id = made.request_id"
+        )
+        assert await _scalar(world, after_request)
+        dated = (
+            "SELECT (SELECT created_at FROM request_notes WHERE body = :note) < now() - "
+            "interval '30 minutes' AND (SELECT created_at FROM request_followups WHERE note = "
+            ":followup) < now() - interval '3 hours'"
+        )
+        assert await _scalar(world, dated, note=cast.BDC_NOTES[0], followup=cast.FOLLOWUP_OVERDUE)
+        audited = "SELECT count(*) FROM audit_log WHERE action = :action AND actor_user_id = :actor"
+        add_note, schedule = "service_request.add_note", "service_request.schedule_followup"
+        assert (
+            await _scalar(world, audited, action=add_note, actor=noted["assigned_agent"]["id"]) == 2
+        )
+        assert await _scalar(world, audited, action=schedule, actor=str(admin.user_id)) == 2
+
         metrics = await world.call(admin, "GET", "/v1/admin/metrics", what="metrics")
         assert metrics["metrics"]["contact_rate"]["numerator"] > 0
         assert metrics["metrics"]["lead_to_job"]["numerator"] > 0

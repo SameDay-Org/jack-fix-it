@@ -15,6 +15,7 @@ from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailabl
 from app.integrations.stripe_payments import (
     PAYMENT_INTENT_CLOSED_STATUSES,
     PAYMENT_INTENT_SEARCH_LIMIT,
+    CardFacts,
     PaymentIntentFacts,
     PaymentIntentState,
     StripePaymentsClient,
@@ -473,3 +474,109 @@ def test_get_stripe_payments_builds_one_client_per_app_or_none_without_a_key() -
     assert get_stripe_payments(request_of(with_key)) is first
     with pytest.raises(RuntimeError, match="STRIPE_SECRET_KEY"):
         StripePaymentsClient.from_settings(make_settings(stripe_secret_key=None))
+
+
+def charged(card: dict[str, Any] | None) -> dict[str, Any]:
+    """A succeeded intent with its latest charge expanded, paid with `card` (None: no card)."""
+    details: dict[str, Any] = {"type": "card", "card": card} if card is not None else {"type": "x"}
+    charge = {"id": "ch_test62", "object": "charge", "payment_method_details": details}
+    return intent_body(status="succeeded", latest_charge=charge)
+
+
+async def test_card_of_reads_the_expanded_charge_s_card_and_nothing_else() -> None:
+    card = {
+        "brand": "visa",
+        "last4": "4242",
+        "exp_month": 12,
+        "exp_year": 2034,
+        "fingerprint": "fp_secret",
+        "wallet": {"type": "apple_pay", "apple_pay": {}},
+    }
+    wrapper, http = client((200, charged(card)))
+
+    found = await wrapper.card_of(INTENT)
+
+    assert found == CardFacts(brand="visa", last4="4242", wallet="apple_pay")
+    [(method, url, _, form)] = http.sent
+    # The charge is asked for expanded, in the query of the GET.
+    assert (method, url) == (
+        "get",
+        f"https://api.stripe.com/v1/payment_intents/{INTENT}?expand[0]=latest_charge",
+    )
+    assert form == {}
+
+
+@pytest.mark.parametrize(
+    ("card", "expected"),
+    [
+        (None, None),
+        (
+            {"brand": "mastercard", "last4": "5555", "wallet": None},
+            CardFacts("mastercard", "5555", None),
+        ),
+        # Anything not a 4-digit string is no last 4.
+        ({"brand": "visa", "last4": "42", "wallet": None}, CardFacts("visa", None, None)),
+    ],
+)
+async def test_card_of_reads_what_is_there_and_never_fails_on_what_is_not(
+    card: dict[str, Any] | None, expected: CardFacts | None
+) -> None:
+    wrapper, _ = client((200, charged(card)))
+
+    assert await wrapper.card_of(INTENT) == expected
+
+
+async def test_card_of_an_intent_without_a_charge_is_none() -> None:
+    wrapper, _ = client((200, intent_body(status="requires_payment_method", latest_charge=None)))
+
+    assert await wrapper.card_of(INTENT) is None
+
+
+def tip_charged(charge: object) -> dict[str, Any]:
+    """A succeeded tip intent (#273 PR A2) with `charge` as its latest charge."""
+    metadata = {"kind": "tip", "tip_id": "tip-1", "job_id": "job-1", "attempt": "1"}
+    return intent_body(status="succeeded", latest_charge=charge, metadata=metadata)
+
+
+def a_charge(**fields: Any) -> dict[str, Any]:
+    return {
+        "id": "ch_test273",
+        "object": "charge",
+        "refunded": False,
+        "amount_refunded": 0,
+        "disputed": False,
+        **fields,
+    }
+
+
+@pytest.mark.parametrize(
+    ("charge", "expected"),
+    [
+        (a_charge(), ("ch_test273", False, False)),
+        (a_charge(amount_refunded=1), ("ch_test273", True, False)),
+        (a_charge(refunded=True, amount_refunded=10_000), ("ch_test273", True, False)),
+        (a_charge(disputed=True), ("ch_test273", False, True)),
+        # Not expanded, or none: no charge to pay from.
+        ("ch_test273", (None, False, False)),
+        (None, (None, False, False)),
+    ],
+)
+async def test_tip_charge_reads_the_expanded_charge_and_the_intent(
+    charge: object, expected: tuple[str | None, bool, bool]
+) -> None:
+    wrapper, http = client((200, tip_charged(charge)))
+
+    found = await wrapper.tip_charge(INTENT)
+
+    assert (found.charge_id, found.refunded, found.disputed) == expected
+    assert (found.intent.kind, found.intent.tip_id, found.intent.attempt, found.intent.status) == (
+        "tip",
+        "tip-1",
+        "1",
+        "succeeded",
+    )
+    [(method, url, _, _)] = http.sent
+    assert (method, url) == (
+        "get",
+        f"https://api.stripe.com/v1/payment_intents/{INTENT}?expand[0]=latest_charge",
+    )

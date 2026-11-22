@@ -138,6 +138,8 @@ class JobBooked:
     customer_id: uuid.UUID
     pro_user_id: uuid.UUID
     public_code: str
+    # The payment that booked it: its receipt email is queued once the event commits (#62).
+    payment_id: uuid.UUID
 
 
 @dataclass(frozen=True)
@@ -412,6 +414,7 @@ class PaymentReconciler:
             customer_id=request.customer_id,
             pro_user_id=pro_user_id,
             public_code=request.public_code,
+            payment_id=payment.id,
         )
 
     async def _reopen(self, locked: _Locked) -> BookingReopened | None:

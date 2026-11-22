@@ -11,7 +11,11 @@
 // The 3D hero (#403 PR 2) must stay out of the first load: the guard fails when a first-load
 // script holds three.js, and measures the lazy chunk that does against its own budget. It
 // fails when no chunk holds it either: the lazy import is gone, or the marker changed.
+//
+// The request flow (#86) is rendered on request, so the build holds no HTML of it: its first
+// load comes from the build's manifests instead (`manifestScripts`).
 import { readdirSync, readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 import { gzipSync } from "node:zlib";
 
 const BUILD_DIR = new URL("../.next/", import.meta.url);
@@ -36,6 +40,33 @@ const PAGES = {
   "/es/for-pros": "server/app/es/for-pros.html",
 };
 
+/** The public pages rendered on request, and their page's client manifest in the build output. */
+const DYNAMIC_PAGES = {
+  "/request": "server/app/(marketing)/request/page_client-reference-manifest.js",
+  "/es/request": "server/app/(marketing)/es/request/page_client-reference-manifest.js",
+};
+
+/** Boundaries whose scripts load only when they show, never with the page. */
+const NOT_FIRST_LOAD = /\/(not-found|global-error)$/;
+
+/**
+ * The scripts a page rendered on request loads first: the root scripts every page loads
+ * (`rootMainFiles`) and those of each segment on its route (its layouts, error boundaries and
+ * the page itself), from its client manifest. On 2026-11-20 this matched, file for file, the
+ * scripts in the HTML a running build served for /request and /es/request.
+ */
+function manifestScripts(manifestPath) {
+  const context = {};
+  runInNewContext(readFileSync(new URL(manifestPath, BUILD_DIR), "utf8"), context);
+  const pages = Object.values(context.__RSC_MANIFEST ?? {});
+  if (pages.length !== 1) return [];
+  const build = JSON.parse(readFileSync(new URL("build-manifest.json", BUILD_DIR), "utf8"));
+  const segments = Object.entries(pages[0].entryJSFiles ?? {})
+    .filter(([segment]) => !NOT_FIRST_LOAD.test(segment))
+    .flatMap(([, files]) => files);
+  return [...new Set([...(build.rootMainFiles ?? []), ...segments])];
+}
+
 const STATIC_SCRIPT = /^\/_next\/(static\/[^"?#]+\.js)(?:[?#].*)?$/;
 
 /** The build-output paths of the scripts a page's HTML loads, each once. */
@@ -59,18 +90,24 @@ function kilobytes(bytes) {
 }
 
 let failed = false;
-for (const [route, htmlPath] of Object.entries(PAGES)) {
-  let html;
+const measured = [
+  ...Object.entries(PAGES).map(([route, path]) => ({ route, path, read: readHtmlScripts })),
+  ...Object.entries(DYNAMIC_PAGES).map(([route, path]) => ({ route, path, read: manifestScripts })),
+];
+function readHtmlScripts(htmlPath) {
+  return firstLoadScripts(readFileSync(new URL(htmlPath, BUILD_DIR), "utf8"));
+}
+for (const { route, path, read } of measured) {
+  let scripts;
   try {
-    html = readFileSync(new URL(htmlPath, BUILD_DIR), "utf8");
+    scripts = read(path);
   } catch {
-    console.error(`${route}: no ${htmlPath} in .next. Run "next build" first.`);
+    console.error(`${route}: no ${path} in .next. Run "next build" first.`);
     failed = true;
     continue;
   }
-  const scripts = firstLoadScripts(html);
   if (scripts.length === 0) {
-    console.error(`${route}: found no script in ${htmlPath}; the guard measures nothing.`);
+    console.error(`${route}: found no script in ${path}; the guard measures nothing.`);
     failed = true;
     continue;
   }

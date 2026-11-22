@@ -21,11 +21,13 @@ from typing import Final
 
 from app.integrations.stripe_connect import AccountState
 from app.integrations.stripe_payments import (
+    CardFacts,
     CreatedCustomer,
     FoundPaymentIntents,
     FoundTipIntents,
     PaymentIntentFacts,
     PaymentIntentState,
+    TipChargeFacts,
     TipIntentFacts,
 )
 from app.integrations.stripe_refunds import FoundRefunds, RefundFacts
@@ -106,6 +108,22 @@ class StandInPayments:
 
     async def payment_intent_facts(self, payment_intent_id: str) -> PaymentIntentFacts:
         return self._intents[payment_intent_id].facts
+
+    async def card_of(self, payment_intent_id: str) -> CardFacts | None:
+        """A paid intent's card, as Stripe's test card reads; none before it is paid."""
+        if self._intents[payment_intent_id].status != _SUCCEEDED:
+            return None
+        return CardFacts(brand="visa", last4="4242", wallet=None)
+
+    async def tip_charge(self, payment_intent_id: str) -> TipChargeFacts:
+        """A tip's intent with its charge once paid: never refunded nor disputed here."""
+        paid = self._intents[payment_intent_id].status == _SUCCEEDED
+        return TipChargeFacts(
+            intent=self._tip_facts(payment_intent_id),
+            charge_id=stand_in_id("ch", payment_intent_id) if paid else None,
+            refunded=False,
+            disputed=False,
+        )
 
     async def tip_intent(self, payment_intent_id: str) -> TipIntentFacts:
         return self._tip_facts(payment_intent_id)
@@ -191,6 +209,9 @@ class StandInTransfers:
             job_id=metadata.get("job_id"),
             reversed=False,
             request_id=None,
+            # A tip's transfer names its tip, as Stripe returns the create's metadata (#518).
+            kind=metadata.get("kind"),
+            tip_id=metadata.get("tip_id"),
         )
         self._transfers.setdefault(transfer_id, (transfer_group, facts))
         return self._transfers[transfer_id][1]

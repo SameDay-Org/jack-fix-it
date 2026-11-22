@@ -1330,6 +1330,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/interest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Join the app-launch interest list (the web service only)
+         * @description Puts the email on the list of people who want to hear when the app is in the stores,
+         *     with the version of the consent words the visitor saw and the time. Called by the web app's
+         *     server with its key (`X-JFI-Web-Key`) and the visitor's address (`X-JFI-Client-IP`): the
+         *     browser never calls it. Nothing is sent to the email.
+         */
+        post: operations["join_interest_v1_interest_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/webhooks/stripe": {
         parameters: {
             query?: never;
@@ -2287,6 +2310,29 @@ export interface paths {
          *     one first); "No tip" comes with no sheet. Sending the same choice again is safe.
          */
         post: operations["choose_tip_v1_requests__request_id__job_tip_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/requests/{request_id}/receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The receipt of my job
+         * @description The proof of payment of the request's job, from the moment its payment went through:
+         *     the service, the tax when there is some, the tip once it went through and each amount
+         *     returned to the payment method, the total paid, the card's brand and last 4 digits, and
+         *     where the money stands. Never the platform's fee or the pro's payout.
+         */
+        get: operations["get_receipt_v1_requests__request_id__receipt_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3490,9 +3536,14 @@ export interface components {
             category: components["schemas"]["EarningCategory"] | null;
             /**
              * Amount Cents
-             * @description What the pro receives, in integer cents.
+             * @description What the pro receives for the job, in integer cents (never the tip).
              */
             amount_cents: number;
+            /**
+             * Tip Cents
+             * @description The customer's tip on the job, all of it the pro's, in integer cents; 0 when none. Its own transfer: the summary counts it by that transfer's state. Always sent; optional in the schema so clients built before #273 keep compiling.
+             */
+            tip_cents?: number | null;
             status: components["schemas"]["EarningStatus"];
             /**
              * Completed At
@@ -3539,7 +3590,7 @@ export interface components {
             awaiting_confirmation_cents: number;
             /**
              * Pending Cents
-             * @description Confirmed, the transfer still to be made.
+             * @description Confirmed, the transfer still to be made; a tip whose own transfer is.
              */
             pending_cents: number;
             /** On Hold Cents */
@@ -3740,6 +3791,37 @@ export interface components {
             /** Max */
             max: number;
         };
+        /** InterestJoin */
+        InterestJoin: {
+            /**
+             * Email
+             * Format: email
+             * @description Trimmed and lowercased before it is checked and stored.
+             */
+            email: string;
+            /**
+             * Locale
+             * @description The page's language.
+             * @default en
+             * @enum {string}
+             */
+            locale: "en" | "es";
+            /**
+             * @description Where the form was: showcase only.
+             * @default showcase
+             */
+            source: components["schemas"]["InterestSource"];
+            /**
+             * Consent Version
+             * @description The id of the consent words the visitor saw, stored with the time of the join (e.g. "interest-2026-11-19"): letters, digits, ".", "-" and "_", 1 to 64 characters.
+             */
+            consent_version: string;
+        };
+        /**
+         * InterestSource
+         * @enum {string}
+         */
+        InterestSource: "showcase";
         /**
          * JobAddress
          * @description Where the job is: the pro of a paid job sees the whole address, to get there.
@@ -4657,7 +4739,7 @@ export interface components {
          * PreferenceGroup
          * @enum {string}
          */
-        PreferenceGroup: "job_updates" | "quotes_and_opportunities" | "reminders" | "marketing" | "account_and_security";
+        PreferenceGroup: "job_updates" | "messages" | "quotes_and_opportunities" | "reminders" | "marketing" | "account_and_security";
         /**
          * PreferredPeriod
          * @description When in the preferred day the customer would like the visit (#237). Pros propose the
@@ -5480,6 +5562,154 @@ export interface components {
          * @enum {string}
          */
         Receipt: "sent" | "delivered" | "seen";
+        /**
+         * ReceiptAddress
+         * @description The customer's own address, on the in-app receipt only: line 1, city and state.
+         */
+        ReceiptAddress: {
+            /** Line1 */
+            line1: string;
+            /** City */
+            city: string;
+            /** State */
+            state: string;
+        };
+        /** ReceiptCategory */
+        ReceiptCategory: {
+            /** Slug */
+            slug: string;
+            /** Names */
+            names: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * ReceiptIssuer
+         * @description Who issues the receipt (Q-R1): the API's settings, never the app's.
+         */
+        ReceiptIssuer: {
+            /** Legal Name */
+            legal_name: string;
+            /** Support Email */
+            support_email: string;
+        };
+        /** ReceiptLine */
+        ReceiptLine: {
+            /** @description The app names the line by its kind. */
+            kind: components["schemas"]["ReceiptLineKind"];
+            /**
+             * Amount Cents
+             * @description Integer cents; negative for an amount returned.
+             */
+            amount_cents: number;
+            /**
+             * At
+             * @description When it went back, for a returned amount; else null.
+             */
+            at: string | null;
+        };
+        /**
+         * ReceiptLineKind
+         * @enum {string}
+         */
+        ReceiptLineKind: "service" | "tax" | "tip" | "returned";
+        /**
+         * ReceiptOut
+         * @description A job's receipt, from the frozen amounts: the price and tax as charged, the tip once it
+         *     went through and each amount that went back. Never the platform's fee or the pro's payout,
+         *     and no Stripe id.
+         */
+        ReceiptOut: {
+            /**
+             * Receipt Number
+             * @description The request's public code: one receipt per job.
+             * @example JF-000124
+             */
+            receipt_number: string;
+            /**
+             * Paid At
+             * Format: date-time
+             * @description When the job's payment went through.
+             */
+            paid_at: string;
+            status: components["schemas"]["ReceiptStatus"];
+            category: components["schemas"]["ReceiptCategory"] | null;
+            /**
+             * Pro Name
+             * @description The pro's public name; null when none can be shown.
+             * @example Dan R.
+             */
+            pro_name: string | null;
+            /**
+             * Scheduled Start At
+             * Format: date-time
+             */
+            scheduled_start_at: string;
+            /**
+             * Completed At
+             * @description When the pro marked the job done.
+             */
+            completed_at: string | null;
+            address: components["schemas"]["ReceiptAddress"] | null;
+            /** Lines */
+            lines: components["schemas"]["ReceiptLine"][];
+            /**
+             * Total Paid Cents
+             * @description Service plus tax plus tip, minus what went back.
+             */
+            total_paid_cents: number;
+            /**
+             * Currency
+             * @description Stripe's lower-case currency code.
+             * @example usd
+             */
+            currency: string;
+            /** @description null until Stripe's charge was read, and for a payment it gave no card for: the app then says Card. */
+            payment_method: components["schemas"]["ReceiptPaymentMethod"] | null;
+            /** @description Whether a tip can still be added and until when; null for a job that takes no tip. */
+            tip: components["schemas"]["ReceiptTip"] | null;
+            /** @description Who issues the receipt; null until both values are set on the server. */
+            issuer: components["schemas"]["ReceiptIssuer"] | null;
+        };
+        /**
+         * ReceiptPaymentMethod
+         * @description The card that paid, as Stripe's charge describes it: never more than this.
+         */
+        ReceiptPaymentMethod: {
+            /**
+             * Brand
+             * @description Stripe's brand code.
+             * @example visa
+             */
+            brand: string | null;
+            /**
+             * Last4
+             * @example 4242
+             */
+            last4: string | null;
+            /**
+             * Wallet
+             * @description Stripe's wallet type.
+             * @example apple_pay
+             */
+            wallet: string | null;
+        };
+        /**
+         * ReceiptStatus
+         * @description Where the receipt's money stands.
+         * @enum {string}
+         */
+        ReceiptStatus: "paid" | "under_review" | "partly_returned" | "returned";
+        /** ReceiptTip */
+        ReceiptTip: {
+            /**
+             * Can Tip
+             * @description Whether a tip can still be added (the job's tip window).
+             */
+            can_tip: boolean;
+            /** Closes At */
+            closes_at: string | null;
+        };
         /** RefreshTokenRequest */
         RefreshTokenRequest: {
             /**
@@ -6729,6 +6959,16 @@ export interface components {
              * @description The job the ticket is about, if any.
              */
             job_id: string | null;
+            /**
+             * Job Request Id
+             * @description The request of the ticket's job, for the panel's request page; null without a job (#503).
+             */
+            job_request_id: string | null;
+            /**
+             * Job Request Code
+             * @description That request's public code, as staff name and search it; null without a job (#503).
+             */
+            job_request_code: string | null;
             status: components["schemas"]["TicketStatus"];
             /**
              * Created At
@@ -6762,6 +7002,16 @@ export interface components {
              * @description The job the ticket is about, if any.
              */
             job_id: string | null;
+            /**
+             * Job Request Id
+             * @description The request of the ticket's job, for the panel's request page; null without a job (#503).
+             */
+            job_request_id: string | null;
+            /**
+             * Job Request Code
+             * @description That request's public code, as staff name and search it; null without a job (#503).
+             */
+            job_request_code: string | null;
             status: components["schemas"]["TicketStatus"];
             /**
              * Created At
@@ -11129,6 +11379,55 @@ export interface operations {
             };
         };
     };
+    join_interest_v1_interest_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InterestJoin"];
+            };
+        };
+        responses: {
+            /** @description On the list: the same answer whether the email already was. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_service_key: no X-JFI-Web-Key, or not the web service's. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a bad email, locale, source or consent_version, or an unknown field. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many joins from this visitor's address or for this email in the window; Retry-After says when to try again. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     receive_stripe_event_v1_webhooks_stripe_post: {
         parameters: {
             query?: never;
@@ -14248,6 +14547,64 @@ export interface operations {
             };
             /** @description not_configured: payments are not configured; payments_unavailable: Stripe is not reachable or asked to retry later; nothing changed, retry later. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_receipt_v1_requests__request_id__receipt_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptOut"];
+                };
+            };
+            /** @description invalid_token: missing, invalid or expired token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers have receipts. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no request of the caller with this id; receipt_not_available: its job's payment has not gone through yet. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

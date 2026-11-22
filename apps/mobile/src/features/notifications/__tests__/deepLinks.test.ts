@@ -43,6 +43,8 @@ describe("parsePushLink", () => {
     [`/jobs/${ID}`, "/jobs/{id}"],
     [`/quotes/${ID}`, "/quotes/{id}"],
     [`/opportunities/${ID}`, "/opportunities/{id}"],
+    [`/jobs/${ID}/chat`, "/jobs/{id}/chat"],
+    [`/requests/${ID}/job/chat`, "/requests/{id}/job/chat"],
   ])("reads %s as %s", (url, path) => {
     expect(parsePushLink(url)).toEqual({ path, id: ID });
   });
@@ -68,6 +70,9 @@ describe("parsePushLink", () => {
     `/jobs/${ID.toUpperCase()}`,
     `/jobs/${ID.slice(1)}`,
     `/jobs/${ID}/check-in`,
+    `/jobs/${ID}/chat/`,
+    `/requests/${ID}/chat`,
+    `/jobs/${ID}/chat?request=${ID}`,
     `/jobs/%2E%2E/${ID}`,
     "",
     null,
@@ -96,6 +101,29 @@ describe("pushRoute", () => {
       pathname: "/opportunities/[id]",
       params: { id: ID },
     });
+  });
+
+  it("opens each side's chat of the job (#73): the pro's by the job, the customer's by the request", () => {
+    const JOB = "7f3c2b1a-0e9d-4c8b-a7f6-5e4d3c2b1a09";
+    expect(pushRoute(parsePushLink(`/jobs/${ID}/chat`), "pro")?.href(ID)).toEqual({
+      pathname: "/jobs/[id]/chat",
+      params: { id: ID },
+    });
+    const customer = pushRoute(parsePushLink(`/requests/${ID}/job/chat`), "customer");
+    // The job read answered: the chat of its job, with the request the chat reads the pro from.
+    expect(customer?.href(ID, { id: JOB, status: "scheduled" })).toEqual({
+      pathname: "/jobs/[id]/chat",
+      params: { id: JOB, request: ID },
+    });
+    expect(customer?.path?.(ID, { id: JOB })).toBe(`/jobs/${JOB}/chat`);
+    // No answer: the job screen of the request, which shows its own error and its chat entry.
+    expect(customer?.href(ID, undefined)).toEqual({
+      pathname: "/requests/[id]/job",
+      params: { id: ID },
+    });
+    expect(customer?.path?.(ID, undefined)).toBe(`/requests/${ID}/job`);
+    expect(pushRoute(parsePushLink(`/jobs/${ID}/chat`), "customer")).toBeNull();
+    expect(pushRoute(parsePushLink(`/requests/${ID}/job/chat`), "pro")).toBeNull();
   });
 
   it("opens nothing for the other role, a path with no screen, or no link", () => {
