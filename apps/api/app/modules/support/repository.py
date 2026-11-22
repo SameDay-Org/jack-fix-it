@@ -1,14 +1,23 @@
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import Select, func, select, tuple_, update
+from sqlalchemy import Select, Subquery, func, select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.support.models import SupportTicket, TicketStatus
 
 # Where a page starts: strictly before this (created_at, id).
 Before = tuple[datetime, uuid.UUID]
+
+
+@dataclass(frozen=True)
+class JobRequest:
+    """The request a ticket's job belongs to: its id and public code (#503)."""
+
+    request_id: uuid.UUID
+    public_code: str
 
 
 @dataclass(frozen=True)
@@ -32,6 +41,24 @@ class SupportTicketRepository:
         return select(SupportTicket.job_id).where(
             SupportTicket.job_id.is_not(None), SupportTicket.status != TicketStatus.CLOSED
         )
+
+    async def job_requests(
+        self, job_ids: Collection[uuid.UUID], jobs: Subquery, codes: Subquery
+    ) -> dict[uuid.UUID, JobRequest]:
+        """Each job's request among `job_ids`, in one statement: `jobs` maps a job to its
+        request (`job_id`, `request_id`: the jobs module's), `codes` a request to its public
+        code (`request_id`, `public_code`: the requests module's)."""
+        if not job_ids:
+            return {}
+        statement = (
+            select(jobs.c.job_id, jobs.c.request_id, codes.c.public_code)
+            .join(codes, codes.c.request_id == jobs.c.request_id)
+            .where(jobs.c.job_id.in_(job_ids))
+        )
+        return {
+            row.job_id: JobRequest(row.request_id, row.public_code)
+            for row in await self._session.execute(statement)
+        }
 
     async def add(self, ticket: SupportTicket) -> SupportTicket:
         """Inserts the ticket and reads back what Postgres set (id, status, timestamps)."""

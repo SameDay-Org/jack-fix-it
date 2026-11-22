@@ -305,9 +305,11 @@ class JobScheduler:
 class JobParties:
     """Who takes part in a job, for the chat (#71) and the reviews (#77): the customer's and
     the pro's user ids, whether the job still accepts messages (CHAT_OPEN) and whether its
-    two sides may review each other (is_reviewable)."""
+    two sides may review each other (is_reviewable). The request is the job's, for the chat's
+    push to the customer (#73), which opens the job of their request."""
 
     job_id: uuid.UUID
+    request_id: uuid.UUID
     customer_id: uuid.UUID
     pro_user_id: uuid.UUID
     chat_open: bool
@@ -373,6 +375,13 @@ class JobTipReader:
         if job is None or job.customer_id != customer_id:
             return None
         return tip_facts(job)
+
+    async def locked(self, job_id: uuid.UUID) -> JobTipFacts | None:
+        """The job, its row locked FOR UPDATE until the caller's transaction ends (the lock
+        every status change, a dispute and a refund take), read as last committed; None for an
+        unknown job. For a tip's transfer (#273 PR A2)."""
+        job = await self._jobs.get_for_update(job_id)
+        return None if job is None else tip_facts(job)
 
 
 @dataclass(frozen=True)
@@ -515,6 +524,12 @@ class JobPartiesReader:
         self._pros = pros
 
     @staticmethod
+    def request_ids() -> Subquery:
+        """Each job's id (`job_id`) and its request (`request_id`), as a subquery: a staff
+        support ticket names its job's request in the tickets' own query (#503)."""
+        return JobRepository.request_ids()
+
+    @staticmethod
     def confirmations() -> Subquery:
         """Each job's id (`job_id`) and confirmation time (`confirmed_at`), as a subquery: a
         review's publication window is read in the reviews' own query (#77)."""
@@ -552,6 +567,7 @@ class JobPartiesReader:
         job, pro_user_id = found
         return JobParties(
             job_id=job.id,
+            request_id=job.request_id,
             customer_id=job.customer_id,
             pro_user_id=pro_user_id,
             chat_open=job.status in CHAT_OPEN,

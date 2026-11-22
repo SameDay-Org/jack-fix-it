@@ -64,6 +64,9 @@ _TWILIO_SETTINGS: tuple[str, ...] = (
 # The HMAC key for PII in rate-limit keys (#137): required where a weak one stops startup.
 RATE_LIMIT_KEY_SECRET_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
 RATE_LIMIT_KEY_SECRET_MIN_LENGTH = 32
+# The web service's key (#409, #86): required where deployed, as long as the HMAC keys.
+WEB_SERVICE_KEY_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
+WEB_SERVICE_KEY_MIN_LENGTH = 32
 # The HMAC key that derives each rotated refresh token (#152): required when deployed.
 REFRESH_ROTATION_SECRET_REQUIRED_IN = _JWT_SECRET_REQUIRED_IN
 REFRESH_ROTATION_SECRET_MIN_LENGTH = 32
@@ -194,6 +197,10 @@ class Settings(BaseSettings):
     # Seconds after a rotation during which the old refresh token, presented again, gets the
     # same successor instead of revoking the session (#152). 0 turns the grace window off.
     refresh_reuse_grace_seconds: int = Field(default=30, ge=0)
+    # The key the web app's server sends as X-JFI-Web-Key (#409, #86): only behind it is the
+    # visitor address it forwards (X-JFI-Client-IP) trusted. Required in staging and production;
+    # unset elsewhere, the web service's routes refuse every call.
+    web_service_key: SecretStr | None = None
     # Proxies whose X-Forwarded-For uvicorn trusts for the client IP (CSV, or "*").
     forwarded_allow_ips: str = "127.0.0.1"
     # Object storage, S3-compatible (R2 or Railway Buckets), reached only through presigned URLs.
@@ -211,6 +218,10 @@ class Settings(BaseSettings):
     upload_max_image_bytes: int = Field(default=10 * MIB, gt=0)
     upload_max_video_bytes: int = Field(default=100 * MIB, gt=0)
     upload_max_document_bytes: int = Field(default=15 * MIB, gt=0)
+    # Upload URLs one user may get per window (#529): each lets them store up to the
+    # purpose's largest size.
+    upload_url_limit: int = Field(default=30, gt=0)
+    upload_url_window_seconds: int = Field(default=600, gt=0)
     # The worker's sweep of uploads no row references (#191): what it does (dry_run only counts
     # and logs; delete removes them), the age an upload must reach before it may count as
     # orphaned, how often it runs (a cron, in minutes of the hour), and the longest one run may
@@ -355,6 +366,11 @@ class Settings(BaseSettings):
     # Waitlist (D8.4, #46): joins per client IP and per contact (email or phone, hashed), per
     # AUTH_RATE_LIMIT_WINDOW_SECONDS.
     waitlist_join_limit: int = Field(default=5, gt=0)
+    # The app-launch interest list (#409): joins per visitor address and per email (hashed), per
+    # INTEREST_WINDOW_SECONDS.
+    interest_ip_limit: int = Field(default=10, gt=0)
+    interest_email_limit: int = Field(default=3, gt=0)
+    interest_window_seconds: int = Field(default=3_600, gt=0)
     # Saved addresses (D8.2, #214): the most one customer may keep in their address book, and
     # how many writes (create, edit, delete together) one customer may make per window.
     saved_addresses_max_per_user: int = Field(default=4, gt=0)
@@ -377,6 +393,9 @@ class Settings(BaseSettings):
     # customer may make per window. Each one is a call to Stripe.
     payment_method_write_limit: int = Field(default=20, gt=0)
     payment_method_write_window_seconds: int = Field(default=600, gt=0)
+    # Wallet lists one customer may read per window (#525): each one is two Stripe reads.
+    payment_method_read_limit: int = Field(default=60, gt=0)
+    payment_method_read_window_seconds: int = Field(default=600, gt=0)
     # The cards are read from Stripe 100 per page, at most this many pages: a customer with
     # more cards gets 503 payments_unavailable, never a partial list.
     payment_method_list_max_pages: int = Field(default=5, gt=0)
@@ -400,6 +419,10 @@ class Settings(BaseSettings):
     stripe_payment_intent_reconcile_after_seconds: int = Field(
         default=72_000, gt=0, lt=STRIPE_IDEMPOTENCY_KEY_RETENTION_SECONDS
     )
+    # Payment sheets one customer may open per window (#525): each one reads the
+    # PaymentIntent and creates a CustomerSession at Stripe.
+    payment_sheet_limit: int = Field(default=20, gt=0)
+    payment_sheet_window_seconds: int = Field(default=600, gt=0)
     # Unpaid payments (#297): a payment still unpaid (requires_payment or failed) this many
     # seconds after its creation is canceled, so its quote and request reopen and another quote
     # can be accepted. The default (2 h) is provisional, tied to the request expiry and dispatch
@@ -573,6 +596,12 @@ class Settings(BaseSettings):
     # Job chat (D14.1, #71): messages one user may send in one job's chat per window.
     chat_message_rate_limit: int = Field(default=20, gt=0)
     chat_message_rate_window_seconds: int = Field(default=60, gt=0)
+    # The new-message push (#73 part 1): a participant who listed the thread or moved their read
+    # marker within CHAT_PRESENCE_SECONDS has the chat open and gets no push (the app polls every
+    # EXPO_PUBLIC_CHAT_POLL_SECONDS while the chat is on screen); one away gets at most one push
+    # per job per CHAT_PUSH_COOLDOWN_SECONDS.
+    chat_presence_seconds: int = Field(default=15, gt=0)
+    chat_push_cooldown_seconds: int = Field(default=60, gt=0)
     # Support tickets ("Talk to Jack", #274): tickets one user may write per window.
     support_ticket_create_limit: int = Field(default=5, gt=0)
     support_ticket_create_window_seconds: int = Field(default=3_600, gt=0)
@@ -711,6 +740,7 @@ class Settings(BaseSettings):
         "twilio_auth_token",
         "twilio_verify_service_sid",
         "rate_limit_key_secret",
+        "web_service_key",
         "refresh_rotation_secret",
         "resend_api_key",
         "email_from",
@@ -918,6 +948,18 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"RATE_LIMIT_KEY_SECRET must be set to at least "
                 f"{RATE_LIMIT_KEY_SECRET_MIN_LENGTH} characters when APP_ENV is {self.app_env}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_web_service_key_when_deployed(self) -> Self:
+        if self.app_env not in WEB_SERVICE_KEY_REQUIRED_IN:
+            return self
+        key = self.web_service_key
+        if key is None or len(key.get_secret_value()) < WEB_SERVICE_KEY_MIN_LENGTH:
+            raise ValueError(
+                f"WEB_SERVICE_KEY must be set to at least {WEB_SERVICE_KEY_MIN_LENGTH} "
+                f"characters when APP_ENV is {self.app_env}"
             )
         return self
 

@@ -721,6 +721,21 @@ class RefundRepository:
         )
         return {dispute_id for dispute_id in await self._session.scalars(statement) if dispute_id}
 
+    async def returned_of_job(self, job_id: uuid.UUID) -> bool:
+        """Whether any refund of the job may have given money back (returned_jobs)."""
+        statement = select(RefundRepository.returned_jobs().where(Refund.job_id == job_id).exists())
+        return bool(await self._session.scalar(statement))
+
+    @staticmethod
+    def returned_jobs() -> Select[uuid.UUID]:
+        """The job of every refund that may have given money back to the customer, of any
+        kind (a dispute's, a cancellation's): any status but abandoned, or abandoned with a
+        refund seen made late since (late_refund_seen_at, #450 round 2). For the tip's transfer
+        (#273 PR A2): a job with one never sends its tip by itself."""
+        return select(Refund.job_id.label("job_id")).where(
+            or_(Refund.status != RefundStatus.ABANDONED, Refund.late_refund_seen_at.is_not(None))
+        )
+
     async def unsettled_of_job(self, job_id: uuid.UUID) -> bool:
         """Whether the job has a dispute refund Stripe has not finished (not `succeeded`)."""
         statement = select(

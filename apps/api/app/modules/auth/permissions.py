@@ -37,6 +37,10 @@ PUBLIC_ROUTES: Final[frozenset[tuple[str, str]]] = frozenset(
         # Stripe calls it without an account: the Stripe-Signature HMAC over the raw body, under
         # STRIPE_WEBHOOK_SECRET, is the credential (D7.3, #40).
         ("POST", "/v1/webhooks/stripe"),
+        # The web app's server calls it for a showcase visitor, who has no account: its
+        # X-JFI-Web-Key (WEB_SERVICE_KEY, compared in constant time) is the credential, and joins
+        # are limited per visitor address and per email (#409, app.web_service).
+        ("POST", "/v1/interest"),
         # Stripe's Connect endpoint sends the pros' account events without an account: the
         # Stripe-Signature HMAC over the raw body, under STRIPE_CONNECT_WEBHOOK_SECRET, is the
         # credential (#280).

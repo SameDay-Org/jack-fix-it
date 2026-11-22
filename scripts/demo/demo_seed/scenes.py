@@ -37,6 +37,7 @@ from demo_seed.flows import Catalog, Checkout
 from demo_seed.history import Case, CaseRun, Closing, Ending, Lived, People
 from demo_seed.stripe_standins import stand_in_id
 from demo_seed.stripe_test import CardCheckout
+from demo_seed.timeline import Timeline
 from demo_seed.world import Actor, Gateways, SeedError, World
 
 MARKER_KEY: Final = "demo_seed"
@@ -49,6 +50,13 @@ _DAN: Final = 0
 # A job "scheduled today" starts this long from now, never past the day's end.
 _TODAY_LEAD: Final = timedelta(hours=3)
 _BEFORE_MIDNIGHT: Final = timedelta(minutes=20)
+# The BDC's work, each piece after its request was made: the agent's first note this long
+# before the second; the admin's overdue follow-up set this long ago, due this long after; the
+# one due today never due sooner than this (in the day's last minutes).
+_NOTE_BEFORE: Final = timedelta(minutes=40)
+_OVERDUE_SET: Final = timedelta(hours=4)
+_OVERDUE_LEAD: Final = timedelta(hours=2)
+_TODAY_MIN_LEAD: Final = timedelta(minutes=5)
 # The requests the queue's "New" tab opens with.
 _FRESH_CATEGORY: Final = cast.MARIA_CATEGORIES[0]
 
@@ -73,6 +81,14 @@ class Stripe:
     test: Gateways | None = None
     test_checkout: CardCheckout | None = None
     test_accounts: AccountReader | None = None
+
+
+@dataclass(frozen=True)
+class _QueueScenes:
+    """The queue's requests the BDC's notes and follow-ups go on."""
+
+    waiting_customer: flows.RequestRef  # unclassified, the BDC asked its customer for more
+    held: flows.RequestRef  # urgent, never contacted, held by the agent
 
 
 @dataclass
@@ -145,7 +161,8 @@ async def build(world: World, options: Options, stripe: Stripe) -> Summary:
     jamie = await _jamie(world, options, stripe)
     jamies = People(customers=[(jamie, cast.JAMIE, cast.JAMIE_HOME)], pros=pros, admin=admin)
     confirmed, problem = await _jamies_jobs(world, catalog, jamies, stripe, summary, now)
-    await _queue(world, catalog, people, jamies, stripe, agent, summary, now)
+    queue_scenes = await _queue(world, catalog, people, jamies, stripe, agent, summary, now)
+    await _bdc_work(world, admin, agent, queue_scenes)
     await _tickets(world, jamie, pros["handyman"][_DAN], customers[0][0], confirmed)
     if problem.job_id is None or confirmed.job_id is None:
         raise SeedError("the video's jobs were not booked")
@@ -338,8 +355,9 @@ async def _queue(
     agent: Actor,
     summary: Summary,
     now: datetime,
-) -> None:
-    """The requests that make each tab of the operations queue worth opening."""
+) -> _QueueScenes:
+    """The requests that make each tab of the operations queue worth opening. Returns the
+    two the BDC's notes and follow-ups go on."""
     start_today = await _later_today(world, now)
     runner = CaseRun(world, people, catalog, stripe.stand_in_checkout)
     # Scheduled today: two paid jobs whose visit is still ahead.
@@ -380,7 +398,7 @@ async def _queue(
         ending=Ending.NO_QUOTE,
         contact_after=timedelta(minutes=4),
     )
-    await runner.run(asked, now - timedelta(hours=5), now + timedelta(days=3))
+    waiting_customer = await runner.run(asked, now - timedelta(hours=5), now + timedelta(days=3))
     # Urgent: past the first-contact time and never contacted. The agent holds one.
     late = now - timedelta(minutes=world.settings.ops_first_contact_sla_minutes * 9)
     unsorted = Case(
@@ -426,6 +444,40 @@ async def _queue(
         summary.fresh_codes.append(
             await fresh_request(world, catalog, people, index, f"queue-new-{index}")
         )
+    return _QueueScenes(waiting_customer=waiting_customer.request, held=held.request)
+
+
+async def _bdc_work(world: World, admin: Actor, agent: Actor, scenes: _QueueScenes) -> None:
+    """The BDC's work, through the API (the holder rule, the follow-up's range and the audit
+    apply), each piece dated after its request was made:
+
+    - the agent's two internal notes on the urgent request they hold, the first 40 minutes
+      before the second;
+    - the admin's two follow-ups on the request waiting on its customer: one set 4 hours ago
+      and due 2 hours later, so overdue now, and one due later today. The follow-ups page
+      lists both and its badge counts both (due by the end of today, overdue included).
+
+    What happened earlier is lived now and dated back, as the history is (timeline); the audit
+    rows keep the time the seed ran."""
+    first, second = cast.BDC_NOTES
+    notes = Timeline(world.sessions, scenes.held.id)
+    await notes.start()
+    await flows.add_note(world, agent, scenes.held, first)
+    await notes.mark(datetime.now(UTC) - _NOTE_BEFORE)
+    await notes.flush()
+    await flows.add_note(world, agent, scenes.held, second)
+
+    waiting = scenes.waiting_customer
+    followups = Timeline(world.sessions, waiting.id)
+    await followups.start()
+    await flows.schedule_followup(
+        world, admin, waiting, followups.ahead(_OVERDUE_LEAD), cast.FOLLOWUP_OVERDUE
+    )
+    await followups.mark(datetime.now(UTC) - _OVERDUE_SET)
+    await followups.flush()
+    now = datetime.now(UTC)
+    due = max(await _later_today(world, now), now + _TODAY_MIN_LEAD)
+    await flows.schedule_followup(world, admin, waiting, due, cast.FOLLOWUP_TODAY)
 
 
 async def fresh_request(

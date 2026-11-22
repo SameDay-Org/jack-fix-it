@@ -134,9 +134,10 @@ _ASCII_LETTERS: Final = frozenset(string.ascii_letters)
 _SCHEME_CHARS: Final = _ASCII_LETTERS | frozenset(string.digits + "+.-")
 # Besides whitespace and the start of the text, a URL in free text may follow one of these.
 _URL_START_AFTER: Final = frozenset("\"'([<{=:,;")
-# Request headers holding credentials that send_default_pii=False does not filter. Lower case;
-# matched whatever the header's casing.
-_CREDENTIAL_HEADERS: Final = frozenset({"stripe-signature"})
+# Request headers holding credentials or personal data that send_default_pii=False does not
+# filter: Stripe's signature, the web service's key and the visitor's address it forwards
+# (#409). Lower case; matched whatever the header's casing.
+_CREDENTIAL_HEADERS: Final = frozenset({"stripe-signature", "x-jfi-web-key", "x-jfi-client-ip"})
 # A Stripe object's id: a connected account's (a pro's, #39), a customer's or a PaymentIntent's
 # (a customer's payment, #58; its client secret starts with the id), an ephemeral key's
 # secret, a CustomerSession's client secret (cuss_, #253c), and a saved card's PaymentMethod
@@ -244,8 +245,9 @@ def _without_database_text(event: Event, hint: Hint) -> None:
 
 def before_send(event: Event, hint: Hint) -> Event:
     """Sentry hook: drops the query string from the request URL, its Referer and the transaction,
-    credential headers (Stripe-Signature), Stripe object ids (accounts, customers,
-    PaymentIntents, ephemeral keys) from the request URL and a database error's text.
+    credential and personal headers (Stripe-Signature, X-JFI-Web-Key, X-JFI-Client-IP), Stripe
+    object ids (accounts, customers, PaymentIntents, ephemeral keys) from the request URL and a
+    database error's text.
 
     Keeps the path and every other field. Fields of an unexpected shape are left as they are.
     """

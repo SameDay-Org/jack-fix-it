@@ -13,6 +13,7 @@ import {
 } from "@/api";
 import { invalidateMyRequests } from "@/features/history/useMyRequests";
 import { refreshCustomerJob } from "@/features/jobs/api";
+import { refreshJob } from "@/features/pro-jobs/api";
 
 export type CancelPreview = ApiSchema<"CancelPreviewOut">;
 export type Cancellation = ApiSchema<"CancellationOut">;
@@ -28,13 +29,32 @@ export const CANCEL_REASONS: readonly CancelReason[] = [
   "other",
 ];
 
-/** The job's statuses the API lets its customer cancel: only these ask for the preview. */
+export type ProCancelReason = ApiSchema<"ProCancelReason">;
+export type ProCancelBody = ApiSchema<"ProCancelIn">;
+export type ProCancellation = ApiSchema<"ProCancellationOut">;
+
+/** The pro's reasons, in the order their screen lists them (`ProCancelReason` in the API). */
+export const PRO_CANCEL_REASONS: readonly ProCancelReason[] = [
+  "cannot_make_it",
+  "customer_unreachable",
+  "scope_changed",
+  "other",
+];
+
+/**
+ * The job's statuses the API lets its customer or its pro cancel (arrived is on the way, checked
+ * in): only these ask for the customer's preview or offer the pro's cancel.
+ */
 const CANCELLABLE: ReadonlySet<string> = new Set(["scheduled", "on_the_way"]);
 export const mayCancel = (status: string): boolean => CANCELLABLE.has(status);
 
 /** The cancel screen's route over the job. */
 export const cancelJobHref = (requestId: string) =>
   ({ pathname: "/requests/[id]/cancel", params: { id: requestId } }) as const;
+
+/** The pro's cancel screen, over their job screen. */
+export const proCancelHref = (jobId: string) =>
+  ({ pathname: "/jobs/[id]/cancel", params: { id: jobId } }) as const;
 
 /**
  * What cancelling the job now would cost, computed by the API (`GET …/cancel-preview`): the fee it
@@ -128,4 +148,40 @@ export function cancelFailureOf(error: unknown): CancelFailure | null {
     if (error.status === 422) return "invalid";
   }
   return "failed";
+}
+
+/**
+ * The pro cancels their job (`POST /v1/pros/me/jobs/{id}/cancel`): the customer is never charged,
+ * whatever the job's step (the API refunds the whole payment). One Idempotency-Key per screen,
+ * sent again with every retry, as for the customer. The answer is the cancellation, not the job:
+ * the job and the pro's lists are read again. Pinned to the session it was asked in.
+ */
+export async function cancelProJob(
+  client: QueryClient,
+  cancel: { jobId: string; body: ProCancelBody; idempotencyKey: string },
+  generation: number,
+): Promise<ProCancellation> {
+  const answer = await apiPost("/v1/pros/me/jobs/{job_id}/cancel", cancel.body, {
+    auth: true,
+    generation,
+    idempotencyKey: cancel.idempotencyKey,
+    params: { job_id: cancel.jobId },
+  });
+  refreshJob(client, cancel.jobId, generation);
+  return answer;
+}
+
+/**
+ * Why the pro's cancel did not go, in the customer's words where they fit (no cost to change on
+ * this side). `review`: the job's payment needs staff first (409 `cancel_needs_review`): trying
+ * again will not help. `closed`: the job moved on (it started, the customer cancelled) or is no
+ * longer the pro's (404): the screen reads it again.
+ */
+export type ProCancelFailure = Exclude<CancelFailure, "feeChanged"> | "review";
+
+export function proCancelFailureOf(error: unknown): ProCancelFailure | null {
+  if (refusalOf(error) === "needsReview") return "review";
+  if (error instanceof ApiError && error.status === 404) return "closed";
+  const why = cancelFailureOf(error);
+  return why === "feeChanged" ? "closed" : why;
 }

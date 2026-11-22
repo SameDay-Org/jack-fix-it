@@ -16,10 +16,20 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string | undefined,
+    /** The refusal's Retry-After in whole seconds (a 429's), null when it gave no usable one. */
+    readonly retryAfterSeconds: number | null = null,
   ) {
     super(`API request failed with status ${status}${code ? ` (${code})` : ""}`);
     this.name = "ApiError";
   }
+}
+
+/** The API sends Retry-After as whole seconds; anything else (a date, junk, 0) is no wait. */
+function retryAfterSeconds(response: Response): number | null {
+  const value = response.headers.get("retry-after")?.trim() ?? "";
+  if (!/^\d{1,6}$/.test(value)) return null;
+  const seconds = Number(value);
+  return seconds > 0 ? seconds : null;
 }
 
 /** API_TIMEOUT_MS: the longest wait on the API for one call, body included (never a literal). */
@@ -111,7 +121,9 @@ export async function apiGet<P extends GetPath>(
     headers,
     signal: AbortSignal.timeout(apiTimeoutMs()),
   });
-  if (!response.ok) throw new ApiError(response.status, await readErrorCode(response));
+  if (!response.ok) {
+    throw new ApiError(response.status, await readErrorCode(response), retryAfterSeconds(response));
+  }
   return (await response.json()) as GetResponse<P>;
 }
 
@@ -158,7 +170,9 @@ export async function apiPost<P extends PostPath>(
     cache: "no-store",
     signal: AbortSignal.timeout(apiTimeoutMs()), // body read included, as in apiGet
   });
-  if (!response.ok) throw new ApiError(response.status, await readErrorCode(response));
+  if (!response.ok) {
+    throw new ApiError(response.status, await readErrorCode(response), retryAfterSeconds(response));
+  }
   // A 204, or a 202 that only says "accepted" (POST /v1/waitlist), has no body to read.
   const text = await response.text();
   if (text === "") return undefined as PostResponse<P>;
@@ -201,6 +215,8 @@ export async function apiPatch<P extends PatchPath>(
     cache: "no-store",
     signal: AbortSignal.timeout(apiTimeoutMs()), // body read included, as in apiGet
   });
-  if (!response.ok) throw new ApiError(response.status, await readErrorCode(response));
+  if (!response.ok) {
+    throw new ApiError(response.status, await readErrorCode(response), retryAfterSeconds(response));
+  }
   return (await response.json()) as PatchResponse<P>;
 }

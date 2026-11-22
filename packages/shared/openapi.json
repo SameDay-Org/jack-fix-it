@@ -781,6 +781,24 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "rate_limited: too many upload URLs for this account; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -2932,6 +2950,24 @@
               }
             }
           },
+          "429": {
+            "description": "rate_limited: too many payment sheets for this account; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "502": {
             "description": "payments_error: Stripe refused the call; nothing changed, the payment can be asked for again.",
             "content": {
@@ -3164,6 +3200,24 @@
           },
           "403": {
             "description": "forbidden: only customers keep payment methods.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many wallet reads; retry later.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the current limit window ends.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -5306,6 +5360,61 @@
             "HTTPBearer": []
           }
         ]
+      }
+    },
+    "/v1/interest": {
+      "post": {
+        "tags": [
+          "interest"
+        ],
+        "summary": "Join the app-launch interest list (the web service only)",
+        "description": "Puts the email on the list of people who want to hear when the app is in the stores,\nwith the version of the consent words the visitor saw and the time. Called by the web app's\nserver with its key (`X-JFI-Web-Key`) and the visitor's address (`X-JFI-Client-IP`): the\nbrowser never calls it. Nothing is sent to the email.",
+        "operationId": "join_interest_v1_interest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterestJoin"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "On the list: the same answer whether the email already was."
+          },
+          "422": {
+            "description": "validation_error: a bad email, locale, source or consent_version, or an unknown field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_service_key: no X-JFI-Web-Key, or not the web service's.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many joins from this visitor's address or for this email in the window; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/webhooks/stripe": {
@@ -12566,7 +12675,19 @@
           "amount_cents": {
             "type": "integer",
             "title": "Amount Cents",
-            "description": "What the pro receives, in integer cents."
+            "description": "What the pro receives for the job, in integer cents (never the tip)."
+          },
+          "tip_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tip Cents",
+            "description": "The customer's tip on the job, all of it the pro's, in integer cents; 0 when none. Its own transfer: the summary counts it by that transfer's state. Always sent; optional in the schema so clients built before #273 keep compiling."
           },
           "status": {
             "$ref": "#/components/schemas/EarningStatus"
@@ -12671,7 +12792,7 @@
           "pending_cents": {
             "type": "integer",
             "title": "Pending Cents",
-            "description": "Confirmed, the transfer still to be made."
+            "description": "Confirmed, the transfer still to be made; a tip whose own transfer is."
           },
           "on_hold_cents": {
             "type": "integer",
@@ -13078,6 +13199,51 @@
           "max"
         ],
         "title": "IntegerQuestion"
+      },
+      "InterestJoin": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email",
+            "description": "Trimmed and lowercased before it is checked and stored."
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "en",
+              "es"
+            ],
+            "title": "Locale",
+            "description": "The page's language.",
+            "default": "en"
+          },
+          "source": {
+            "$ref": "#/components/schemas/InterestSource",
+            "description": "Where the form was: showcase only.",
+            "default": "showcase"
+          },
+          "consent_version": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+            "title": "Consent Version",
+            "description": "The id of the consent words the visitor saw, stored with the time of the join (e.g. \"interest-2026-11-19\"): letters, digits, \".\", \"-\" and \"_\", 1 to 64 characters."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "email",
+          "consent_version"
+        ],
+        "title": "InterestJoin"
+      },
+      "InterestSource": {
+        "type": "string",
+        "enum": [
+          "showcase"
+        ],
+        "title": "InterestSource"
       },
       "JobAddress": {
         "properties": {
@@ -14843,6 +15009,7 @@
         "type": "string",
         "enum": [
           "job_updates",
+          "messages",
           "quotes_and_opportunities",
           "reminders",
           "marketing",
@@ -19905,6 +20072,31 @@
             "title": "Job Id",
             "description": "The job the ticket is about, if any."
           },
+          "job_request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Id",
+            "description": "The request of the ticket's job, for the panel's request page; null without a job (#503)."
+          },
+          "job_request_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Code",
+            "description": "That request's public code, as staff name and search it; null without a job (#503)."
+          },
           "status": {
             "$ref": "#/components/schemas/TicketStatus"
           },
@@ -19923,6 +20115,8 @@
           "role",
           "topic",
           "job_id",
+          "job_request_id",
+          "job_request_code",
           "status",
           "created_at"
         ],
@@ -19972,6 +20166,31 @@
             ],
             "title": "Job Id",
             "description": "The job the ticket is about, if any."
+          },
+          "job_request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Id",
+            "description": "The request of the ticket's job, for the panel's request page; null without a job (#503)."
+          },
+          "job_request_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Request Code",
+            "description": "That request's public code, as staff name and search it; null without a job (#503)."
           },
           "status": {
             "$ref": "#/components/schemas/TicketStatus"
@@ -20035,6 +20254,8 @@
           "role",
           "topic",
           "job_id",
+          "job_request_id",
+          "job_request_code",
           "status",
           "created_at",
           "message",

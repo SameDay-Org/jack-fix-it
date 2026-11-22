@@ -120,6 +120,18 @@ async def has_open_dispute(session: AsyncSession, job_id: uuid.UUID) -> bool:
     return await DisputeRepository(session).is_open_for(job_id)
 
 
+async def has_dispute(session: AsyncSession, job_id: uuid.UUID) -> bool:
+    """Whether the job ever had a dispute, open or resolved: its tip is never transferred
+    by itself (#273 PR A2; tips.transfers)."""
+    return await DisputeRepository(session).exists_for(job_id)
+
+
+def disputed_jobs() -> Subquery:
+    """The job (`job_id`) of every dispute, whatever its status, as a subquery: the tip
+    transfer sweep leaves those jobs out (#273 PR A2)."""
+    return DisputeRepository.all_jobs()
+
+
 def open_dispute_jobs() -> Subquery:
     """The job (`job_id`) of every open dispute, as a subquery: the transfer sweep leaves
     those jobs out in its own query."""
