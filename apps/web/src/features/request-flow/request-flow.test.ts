@@ -795,22 +795,32 @@ describe("the review and the send", () => {
 });
 
 describe("the browser's Back and Forward (#86)", () => {
-  /** The browser's Back or Forward: the history moves, then the page hears popstate. */
+  /**
+   * The browser's Back or Forward, and each step back the flow takes on its own (passing over a
+   * screen). jsdom makes every move in later tasks and fires popstate with it: this waits until
+   * every move asked for was heard, not for a quiet spell. On a busy machine (the whole suite at
+   * once) a quiet-spell timer can come due before jsdom's next task runs.
+   */
   async function browser(direction: "back" | "forward"): Promise<void> {
-    const before = window.location.href;
-    await act(async () => {
-      window.history[direction]();
-      // jsdom moves the history in a later task: wait for the address to change, then to
-      // settle (passing over a screen moves it once more).
-      for (let tries = 0; tries < 200 && window.location.href === before; tries += 1) {
-        await new Promise((done) => setTimeout(done, 5));
-      }
-      let last = "";
-      while (last !== window.location.href) {
-        last = window.location.href;
-        await new Promise((done) => setTimeout(done, 30));
-      }
-    });
+    const moves = [vi.spyOn(window.history, "back"), vi.spyOn(window.history, "forward")];
+    const asked = () => moves.reduce((sum, move) => sum + move.mock.calls.length, 0);
+    let heard = 0;
+    const hear = () => {
+      heard += 1;
+    };
+    window.addEventListener("popstate", hear);
+    try {
+      await act(async () => {
+        window.history[direction]();
+        for (let tries = 0; heard < asked(); tries += 1) {
+          if (tries === 2000) throw new Error(`${asked() - heard} history moves never happened`);
+          await new Promise((done) => setTimeout(done, 1));
+        }
+      });
+    } finally {
+      window.removeEventListener("popstate", hear);
+      for (const move of moves) move.mockRestore();
+    }
   }
 
   it("moves between the screens seen, everything kept, the heading focused", async () => {
