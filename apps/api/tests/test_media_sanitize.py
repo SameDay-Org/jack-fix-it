@@ -13,12 +13,14 @@ import os
 import shutil
 import struct
 import subprocess
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from PIL import Image, PngImagePlugin
 
+from app.config import MEDIA_SANITIZE_TOOL_RUNS
 from app.modules.media import sanitize as sanitize_module
 from app.modules.media.sanitize import (
     SafeFile,
@@ -30,6 +32,7 @@ from app.modules.media.sanitize import (
     _Stream,
     sanitize,
 )
+from tests.conftest import make_settings
 
 CONFIG = SanitizeConfig(
     max_image_pixels=1_000_000, jpeg_quality=85, ffmpeg_path="ffmpeg", timeout_seconds=60
@@ -623,3 +626,486 @@ async def test_opus_audio_declared_as_quicktime_is_written_as_mp4(
 
     assert (safe.content_type, safe.extension) == ("video/mp4", ".mp4")
     assert video_kinds(tools, safe.path) == [("video", "h264"), ("audio", "opus")]
+
+
+# SEI user data (#182): a drone or a dashcam can write its GPS inside the video bitstream, in a
+# user data SEI of each frame, which a remux copies unless it is dropped.
+
+SEI_GPS = "GPS 12.3456 -65.4321 fixture"  # a marker, no real place
+SEI_UUID = "086f3693-b7b3-4f2c-9653-21492feee5b8"
+USER_DATA_UNREGISTERED, USER_DATA_T35, MASTERING_DISPLAY = 5, 4, 137
+HEVC_VPS, HEVC_PREFIX_SEI, HEVC_SUFFIX_SEI = 32, 39, 40
+
+
+def require_encoder(tools: Tools, encoder: str) -> None:
+    """The encoder in this ffmpeg build. In CI its absence is a failure, not a skip."""
+    listed = subprocess.run(  # noqa: S603 - fixed arguments, test fixture
+        [tools.ffmpeg, "-hide_banner", "-encoders"], check=True, capture_output=True, text=True
+    ).stdout
+    if any(line.split()[1:2] == [encoder] for line in listed.splitlines() if line.strip()):
+        return
+    if os.environ.get("CI") == "true":
+        pytest.fail(f"ffmpeg has no {encoder} encoder; the #182 fixtures need it")
+    pytest.skip(f"this ffmpeg has no {encoder} encoder")
+
+
+def user_data_frames(tools: Tools, path: Path) -> int:
+    """How many decoded frames ffprobe reports user data SEI side data on."""
+    command = [
+        tools.ffprobe, "-v", "error", "-select_streams", "v:0", "-show_frames",
+        "-show_entries", "frame_side_data=side_data_type", "-of", "json", str(path),
+    ]  # fmt: skip
+    result = subprocess.run(  # noqa: S603 - fixed arguments, test fixture
+        command, check=True, capture_output=True, text=True
+    )
+    frames = json.loads(result.stdout).get("frames", [])
+    return sum(
+        any(
+            "User Data" in side.get("side_data_type", "")
+            for side in frame.get("side_data_list", [])
+        )
+        for frame in frames
+    )
+
+
+def frame_count(tools: Tools, path: Path) -> int:
+    command = [
+        tools.ffprobe, "-v", "error", "-count_frames", "-select_streams", "v:0",
+        "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", str(path),
+    ]  # fmt: skip
+    result = subprocess.run(  # noqa: S603 - fixed arguments, test fixture
+        command, check=True, capture_output=True, text=True
+    )
+    return int(result.stdout.strip())
+
+
+def make_h264_with_sei_gps(tools: Tools, path: Path, container: str) -> None:
+    """H.264 and AAC, with ffmpeg's h264_metadata writing the marker in a user data SEI."""
+    run_ffmpeg(
+        tools, "-f", "lavfi", "-i", "testsrc=duration=1:size=64x48:rate=10",
+        "-f", "lavfi", "-i", "sine=duration=1",
+        "-c:v", "libx264", "-bsf:v", f"h264_metadata=sei_user_data={SEI_UUID}+{SEI_GPS}",
+        "-c:a", "aac", "-shortest", "-f", container, str(path),
+    )  # fmt: skip
+
+
+def escaped(rbsp: bytes) -> bytes:
+    """The payload as a NAL unit carries it: 0x03 after two zero bytes before 0x00 to 0x03."""
+    out, zeros = bytearray(), 0
+    for byte in rbsp:
+        if zeros >= 2 and byte <= 3:
+            out.append(3)
+            zeros = 0
+        out.append(byte)
+        zeros = zeros + 1 if byte == 0 else 0
+    return bytes(out)
+
+
+def sei_number(value: int) -> bytes:
+    return b"\xff" * (value // 255) + bytes([value % 255])
+
+
+def hevc_sei(*messages: tuple[int, bytes], nal_type: int = HEVC_PREFIX_SEI) -> bytes:
+    """An HEVC SEI NAL unit (header, escaped messages, trailing bits), without a start code."""
+    body = b"".join(sei_number(kind) + sei_number(len(data)) + data for kind, data in messages)
+    return bytes([nal_type << 1, 1]) + escaped(body + b"\x80")
+
+
+def with_sei_before_each_picture(stream: bytes, sei: bytes) -> bytes:
+    """An HEVC Annex B stream with `sei` before the first slice of every picture."""
+    starts = [i for i in range(len(stream) - 2) if stream[i : i + 3] == b"\x00\x00\x01"]
+    out = bytearray()
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(stream)
+        unit = (
+            stream[start + 3 : end].rstrip(b"\x00") if end != len(stream) else stream[start + 3 :]
+        )
+        nal_type = (unit[0] >> 1) & 0x3F
+        if nal_type < 32 and unit[2] & 0x80:  # a slice that starts its picture
+            out += b"\x00\x00\x00\x01" + sei
+        out += b"\x00\x00\x00\x01" + unit
+    return bytes(out)
+
+
+def with_sei_after_each_picture_slice(stream: bytes, sei: bytes) -> bytes:
+    """An HEVC Annex B stream with `sei` (a suffix SEI) after the first slice of every
+    picture, where a suffix SEI goes."""
+    starts = [i for i in range(len(stream) - 2) if stream[i : i + 3] == b"\x00\x00\x01"]
+    out = bytearray()
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(stream)
+        unit = (
+            stream[start + 3 : end].rstrip(b"\x00") if end != len(stream) else stream[start + 3 :]
+        )
+        out += b"\x00\x00\x00\x01" + unit
+        if (unit[0] >> 1) & 0x3F < 32 and unit[2] & 0x80:
+            out += b"\x00\x00\x00\x01" + sei
+    return bytes(out)
+
+
+def make_hevc_with_sei_gps(
+    tools: Tools, path: Path, tmp_path: Path, *, suffix: bool = False
+) -> None:
+    """HEVC with the marker in a user data SEI of every frame (in the packets, not in hvcC):
+    a prefix SEI before each picture, or with `suffix` a suffix SEI after its first slice.
+    ffmpeg writes no such SEI into HEVC, so it is inserted here into the elementary stream.
+    x265's own settings SEI is off (info=0), and no B-frames (the elementary stream carries no
+    timestamps, so reordered frames would come back hidden by an edit list)."""
+    require_encoder(tools, "libx265")
+    elementary = tmp_path / "plain.hevc"
+    run_ffmpeg(
+        tools, "-f", "lavfi", "-i", "testsrc=duration=1:size=64x48:rate=10",
+        "-c:v", "libx265", "-x265-params", "log-level=none:info=0:bframes=0",
+        "-f", "hevc", str(elementary),
+    )  # fmt: skip
+    user_data = (USER_DATA_UNREGISTERED, uuid.UUID(SEI_UUID).bytes + SEI_GPS.encode())
+    marked = tmp_path / "marked.hevc"
+    if suffix:
+        sei = hevc_sei(user_data, nal_type=HEVC_SUFFIX_SEI)
+        marked.write_bytes(with_sei_after_each_picture_slice(elementary.read_bytes(), sei))
+    else:
+        marked.write_bytes(
+            with_sei_before_each_picture(elementary.read_bytes(), hevc_sei(user_data))
+        )
+    run_ffmpeg(
+        tools, "-f", "hevc", "-framerate", "10", "-i", str(marked),
+        "-c", "copy", "-tag:v", "hvc1", "-f", "mp4", str(path),
+    )  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("content_type", "container"), [("video/mp4", "mp4"), ("video/quicktime", "mov")]
+)
+async def test_gps_in_h264_user_data_is_removed(
+    tmp_path: Path, workdir: Path, tools: Tools, content_type: str, container: str
+) -> None:
+    source = tmp_path / "original"
+    make_h264_with_sei_gps(tools, source, container)
+    assert SEI_GPS.encode() in source.read_bytes()  # the fixture does carry it
+    assert user_data_frames(tools, source) > 0
+
+    safe = await sanitize(source, content_type, workdir, CONFIG)
+
+    copied = safe.path.read_bytes()
+    assert SEI_GPS.encode() not in copied
+    assert b"x264 - core" not in copied  # the encoder's own user data SEI went too
+    assert user_data_frames(tools, safe.path) == 0
+    assert frame_count(tools, safe.path) == frame_count(tools, source)  # every frame plays
+    assert codecs(probe(tools, safe.path)) == ["h264", "aac"]  # copied, not re-encoded
+
+
+async def test_gps_in_hevc_user_data_is_removed(
+    tmp_path: Path, workdir: Path, tools: Tools
+) -> None:
+    source = tmp_path / "original"
+    make_hevc_with_sei_gps(tools, source, tmp_path)
+    assert source.read_bytes().count(SEI_GPS.encode()) == frame_count(tools, source)
+    assert user_data_frames(tools, source) > 0
+
+    safe = await sanitize(source, "video/mp4", workdir, CONFIG)
+
+    assert SEI_GPS.encode() not in safe.path.read_bytes()
+    assert user_data_frames(tools, safe.path) == 0
+    assert frame_count(tools, safe.path) == frame_count(tools, source)
+    assert codecs(probe(tools, safe.path)) == ["hevc"]
+
+
+async def test_gps_in_an_hevc_suffix_sei_is_removed(
+    tmp_path: Path, workdir: Path, tools: Tools
+) -> None:
+    # The Gatekeeper's #532 r1 B2: a suffix SEI (type 40) after each picture's slice; the
+    # filter must drop suffix SEI as well as prefix SEI.
+    source = tmp_path / "original"
+    make_hevc_with_sei_gps(tools, source, tmp_path, suffix=True)
+    assert source.read_bytes().count(SEI_GPS.encode()) == frame_count(tools, source)
+
+    safe = await sanitize(source, "video/mp4", workdir, CONFIG)
+
+    assert SEI_GPS.encode() not in safe.path.read_bytes()
+    assert frame_count(tools, safe.path) == frame_count(tools, source)
+
+
+def run_breaking_the_configuration_read(monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
+    """The copy's configuration read (ffprobe -show_data) answering as `failure` says; every
+    other run as it is."""
+    original = sanitize_module._run
+
+    async def broken(
+        program: str, arguments: list[str], timeout_seconds: float, *, capture: bool = False
+    ) -> tuple[int, bytes]:
+        code, output = await original(program, arguments, timeout_seconds, capture=capture)
+        if "stream=extradata" not in arguments:
+            return code, output
+        if failure == "exit_code":
+            return 1, output
+        if failure == "not_json":
+            return 0, b"not json at all"
+        probed = json.loads(output)
+        for stream in probed["streams"]:
+            stream["extradata"] = str(stream["extradata"]) + "\nnot a line of a hex dump"
+        return 0, json.dumps(probed).encode()
+
+    monkeypatch.setattr(sanitize_module, "_run", broken)
+
+
+@pytest.mark.parametrize("failure", ["exit_code", "not_json", "odd_dump_line"])
+async def test_a_configuration_that_cannot_be_read_fails_the_copy(
+    tmp_path: Path,
+    workdir: Path,
+    tools: Tools,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    # #532 r1 B2: the three ways the read fails closed. The source's configuration is clean
+    # (x265's settings SEI off), so a read taken as clean would copy it.
+    source = tmp_path / "original"
+    make_hevc_with_sei_gps(tools, source, tmp_path)
+    run_breaking_the_configuration_read(monkeypatch, failure)
+
+    with pytest.raises(SanitizeError) as error:
+        await sanitize(source, "video/mp4", workdir, CONFIG)
+
+    assert error.value.reason == SanitizeFailure.UNREADABLE
+
+
+async def test_an_hevc_configuration_of_unknown_size_is_still_read(
+    tmp_path: Path, workdir: Path, tools: Tools, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # #532 r1 (non-blocking, closed now): an ffprobe that prints no extradata_size (before
+    # ffmpeg 4.4) reads as size 0; the record is read anyway, and x265's settings SEI refused.
+    require_encoder(tools, "libx265")
+    source = tmp_path / "original"
+    run_ffmpeg(
+        tools, "-f", "lavfi", "-i", "testsrc=duration=1:size=64x48:rate=10",
+        "-c:v", "libx265", "-x265-params", "log-level=none", "-tag:v", "hvc1",
+        "-f", "mp4", str(source),
+    )  # fmt: skip
+    original = sanitize_module._run
+
+    async def older(
+        program: str, arguments: list[str], timeout_seconds: float, *, capture: bool = False
+    ) -> tuple[int, bytes]:
+        code, output = await original(program, arguments, timeout_seconds, capture=capture)
+        if capture and any("extradata_size" in argument for argument in arguments):
+            probed = json.loads(output)
+            for stream in probed.get("streams", []):
+                stream.pop("extradata_size", None)
+            output = json.dumps(probed).encode()
+        return code, output
+
+    monkeypatch.setattr(sanitize_module, "_run", older)
+
+    with pytest.raises(SanitizeError) as error:
+        await sanitize(source, "video/mp4", workdir, CONFIG)
+
+    assert error.value.reason == SanitizeFailure.METADATA_REMAINS
+
+
+def recorded_runs(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """The programs sanitize runs, in order."""
+    programs: list[str] = []
+    original = sanitize_module._run
+
+    async def recording(
+        program: str, arguments: list[str], timeout_seconds: float, *, capture: bool = False
+    ) -> tuple[int, bytes]:
+        programs.append(Path(program).stem.lower())
+        return await original(program, arguments, timeout_seconds, capture=capture)
+
+    monkeypatch.setattr(sanitize_module, "_run", recording)
+    return programs
+
+
+@pytest.mark.parametrize("codec", ["h264", "hevc"])
+async def test_one_video_s_tool_runs_are_the_ones_its_budget_counts(
+    tmp_path: Path,
+    workdir: Path,
+    tools: Tools,
+    monkeypatch: pytest.MonkeyPatch,
+    codec: str,
+) -> None:
+    # #532 r1 B1: an HEVC copy is the most tool runs one file takes, and the budget of one
+    # file (config.MEDIA_SANITIZE_TOOL_RUNS) counts exactly those: a new run fails here.
+    source = tmp_path / "original"
+    if codec == "h264":
+        make_h264_with_sei_gps(tools, source, "mp4")
+    else:
+        make_hevc_with_sei_gps(tools, source, tmp_path)
+    runs = recorded_runs(monkeypatch)
+
+    await sanitize(source, "video/mp4", workdir, CONFIG)
+
+    assert len(runs) == (MEDIA_SANITIZE_TOOL_RUNS if codec == "hevc" else 4), runs
+
+
+def test_the_budget_of_one_file_counts_its_download_tool_runs_and_upload() -> None:
+    settings = make_settings()
+    steps = (
+        settings.media_sanitize_row_budget_seconds - settings.media_sanitize_overhead_seconds
+    ) / settings.media_sanitize_timeout_seconds
+    assert steps == MEDIA_SANITIZE_TOOL_RUNS + 2
+
+
+async def test_user_data_in_the_hevc_configuration_fails_the_copy(
+    tmp_path: Path, workdir: Path, tools: Tools
+) -> None:
+    # x265 writes its settings as a user data SEI into the decoder configuration (hvcC), which
+    # the SEI filter does not reach: the copy is refused rather than served with it.
+    require_encoder(tools, "libx265")
+    source = tmp_path / "original"
+    run_ffmpeg(
+        tools, "-f", "lavfi", "-i", "testsrc=duration=1:size=64x48:rate=10",
+        "-c:v", "libx265", "-x265-params", "log-level=none", "-tag:v", "hvc1",
+        "-f", "mp4", str(source),
+    )  # fmt: skip
+    assert b"x265 (build" in source.read_bytes()
+
+    with pytest.raises(SanitizeError) as error:
+        await sanitize(source, "video/mp4", workdir, CONFIG)
+
+    assert error.value.reason == SanitizeFailure.METADATA_REMAINS
+
+
+async def test_a_video_codec_without_an_sei_filter_is_not_copied(
+    tmp_path: Path, workdir: Path, tools: Tools
+) -> None:
+    # Allowed by the settings, but the copy has no way to drop its user data: never copied.
+    source = tmp_path / "original"
+    run_ffmpeg(
+        tools, "-f", "lavfi", "-i", "testsrc=duration=1:size=64x48:rate=10",
+        "-c:v", "mpeg4", "-f", "mp4", str(source),
+    )  # fmt: skip
+    config = dataclasses.replace(CONFIG, video_codecs=frozenset({"h264", "hevc", "mpeg4"}))
+
+    with pytest.raises(SanitizeError) as error:
+        await sanitize(source, "video/mp4", workdir, config)
+
+    assert error.value.reason == SanitizeFailure.UNSUPPORTED_CODEC
+    assert not made_a_copy(workdir)
+
+
+def hvcc(*units: bytes, array_type: int | None = None) -> bytes:
+    """An HEVC decoder configuration record: version 1, zeroed fields, one array per unit."""
+    record = bytearray([1, *bytes(21), len(units)])
+    for unit in units:
+        kind = (unit[0] >> 1) & 0x3F if array_type is None else array_type
+        record += bytes([kind]) + (1).to_bytes(2) + len(unit).to_bytes(2) + unit
+    return bytes(record)
+
+
+VPS_UNIT = bytes([HEVC_VPS << 1, 1, 0x0C, 0x01, 0xFF, 0xFF])
+UNREGISTERED = (USER_DATA_UNREGISTERED, uuid.UUID(SEI_UUID).bytes + SEI_GPS.encode())
+
+
+SCALABLE_NESTING = 133
+# Every SEI a copy's configuration may keep: mastering display, content light level, alternative
+# transfer, ambient viewing, content colour volume.
+HDR_AND_COLOUR = [
+    (137, bytes(24)),
+    (144, bytes(4)),
+    (147, b"\x12"),
+    (148, bytes(8)),
+    (149, b"\x10"),
+]
+
+
+@pytest.mark.parametrize(
+    ("record", "unsafe"),
+    [
+        pytest.param(hvcc(VPS_UNIT), False, id="parameter_sets_only"),
+        pytest.param(hvcc(VPS_UNIT, hevc_sei(*HDR_AND_COLOUR)), False, id="hdr_and_colour"),
+        pytest.param(
+            # 00 00 01 is carried as 00 00 03 01: read escaped, the message runs a byte long and
+            # what follows reads as another message.
+            hvcc(hevc_sei((MASTERING_DISPLAY, b"\x00\x00\x01" + bytes(21)))),
+            False,
+            id="hdr_with_escaped_zero_bytes",
+        ),
+        pytest.param(hvcc(hevc_sei(UNREGISTERED)), True, id="unregistered"),
+        pytest.param(hvcc(hevc_sei((USER_DATA_T35, b"\xb5\x00\x31GPS"))), True, id="t35"),
+        pytest.param(
+            # A user data message nested in a scalable nesting one: the nesting is refused whole.
+            hvcc(hevc_sei((SCALABLE_NESTING, b"\x80" + bytes([5, 4]) + b"GPS!"))),
+            True,
+            id="scalable_nesting",
+        ),
+        pytest.param(hvcc(hevc_sei((260, b"\x01\x02"))), True, id="reserved_type_past_255"),
+        pytest.param(hvcc(hevc_sei(UNREGISTERED, nal_type=HEVC_SUFFIX_SEI)), True, id="suffix_sei"),
+        pytest.param(
+            hvcc(hevc_sei((MASTERING_DISPLAY, bytes(300)), UNREGISTERED)),
+            True,
+            id="after_a_long_message",
+        ),
+        pytest.param(
+            hvcc(VPS_UNIT, hevc_sei(UNREGISTERED)), True, id="user_data_in_the_second_array"
+        ),
+        pytest.param(
+            hvcc(hevc_sei(UNREGISTERED), array_type=HEVC_VPS), True, id="sei_in_another_array"
+        ),
+        pytest.param(b"", True, id="empty"),
+        pytest.param(hvcc(hevc_sei(UNREGISTERED))[:-4], True, id="truncated"),
+        pytest.param(hvcc(VPS_UNIT) + b"\x00", True, id="trailing_bytes"),
+        pytest.param(bytes([2]) + hvcc(VPS_UNIT)[1:], True, id="another_version"),
+        pytest.param(
+            hvcc(bytes([HEVC_PREFIX_SEI << 1, 1, MASTERING_DISPLAY, 200, 1, 2, 0x80])),
+            True,
+            id="message_past_the_unit",
+        ),
+    ],
+)
+def test_an_hevc_configuration_keeps_hdr_and_colour_sei_only(record: bytes, unsafe: bool) -> None:
+    assert sanitize_module.hevc_configuration_is_unsafe(record) is unsafe
+
+
+async def test_an_oversized_hevc_configuration_fails_the_copy_unread(
+    tmp_path: Path, workdir: Path, tools: Tools, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "original"
+    make_hevc_with_sei_gps(tools, source, tmp_path)  # a clean configuration of about 110 bytes
+    monkeypatch.setattr(sanitize_module, "_HEVC_CONFIGURATION_MAX_BYTES", 16)
+    dumps = record_runs(monkeypatch, "-show_data")
+
+    with pytest.raises(SanitizeError) as error:
+        await sanitize(source, "video/mp4", workdir, CONFIG)
+
+    assert error.value.reason == SanitizeFailure.METADATA_REMAINS
+    assert dumps == []
+
+
+def record_runs(monkeypatch: pytest.MonkeyPatch, flag: str) -> list[list[str]]:
+    """The arguments of every ffmpeg or ffprobe run that passes `flag`, as they happen."""
+    runs: list[list[str]] = []
+    original = sanitize_module._run
+
+    async def recording(
+        program: str, arguments: list[str], timeout_seconds: float, *, capture: bool = False
+    ) -> tuple[int, bytes]:
+        if flag in arguments:
+            runs.append(list(arguments))
+        return await original(program, arguments, timeout_seconds, capture=capture)
+
+    monkeypatch.setattr(sanitize_module, "_run", recording)
+    return runs
+
+
+@pytest.mark.parametrize("codec", ["h264", "hevc"])
+async def test_only_the_copy_s_video_configuration_is_ever_dumped(
+    tmp_path: Path, workdir: Path, tools: Tools, monkeypatch: pytest.MonkeyPatch, codec: str
+) -> None:
+    # The original's streams are never dumped: a crafted file's decoder configuration can be
+    # as large as the upload, and its dump four times that (review of #182).
+    source = tmp_path / "original"
+    if codec == "h264":
+        make_h264_with_sei_gps(tools, source, "mp4")
+    else:
+        make_hevc_with_sei_gps(tools, source, tmp_path)
+    dumps = record_runs(monkeypatch, "-show_data")
+
+    safe = await sanitize(source, "video/mp4", workdir, CONFIG)
+
+    if codec == "h264":
+        assert dumps == []  # avcC holds parameter sets only: nothing to read
+    else:
+        [arguments] = dumps
+        assert arguments[-1] == str(safe.path)
+        assert arguments[arguments.index("-select_streams") + 1] == "v:0"
