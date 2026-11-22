@@ -226,6 +226,7 @@ function QuoteFlow({ opportunity, sending, onSend }: QuoteFlowProps) {
             quote={quote}
             takeRateBps={opportunity.take_rate_bps}
             preferredDate={opportunity.preferred_date}
+            preferredPeriod={opportunity.preferred_period}
             onReview={review}
             refusal={step.refusal}
             scrollRef={scrollRef}

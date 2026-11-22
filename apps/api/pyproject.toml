@@ -49,7 +49,7 @@ select = ["E", "W", "F", "I", "B", "UP", "N", "S", "ASYNC", "BLE", "SIM", "PT", 
 "scripts/**" = ["T20"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["app", "tests", "scripts", "demo_seed", "seed_demo"]
+known-first-party = ["app", "tests", "scripts", "demo_seed", "seed_demo", "demo_api"]
 known-third-party = ["alembic"]
 
 [tool.mypy]

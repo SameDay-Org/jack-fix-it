@@ -140,6 +140,21 @@ describe("EarningsScreen", () => {
     expect(screen.queryByText(/SENTINEL/, HIDDEN)).toBeNull();
   });
 
+  it("a customer's tip shows under the job's amount and is read with the row (#273)", async () => {
+    // CONTRACT: `tip_cents` arrives with the tips API (A2); the row reads it through the tips module.
+    const tipped = { ...earning(1), tip_cents: 1250 } as ReturnType<typeof earning>;
+    answers.set(undefined, earningsPage([tipped, ON_THE_WAY]));
+    await renderWithQuery(<EarningsScreen />);
+    await screen.findByTestId(`earning-${jobId(1)}`);
+
+    expect(screen.getByTestId(`earning-${jobId(1)}-tip`, HIDDEN)).toHaveTextContent("+ $12.50 tip");
+    expect(
+      screen.getByLabelText("House cleaning, $120.00, Paid, Paid on Nov 12, + $12.50 tip"),
+    ).toBeTruthy();
+    // No tip, no line.
+    expect(screen.queryByTestId(`earning-${jobId(2)}-tip`, HIDDEN)).toBeNull();
+  });
+
   it("loads the next page on the cursor as the end nears and appends it, each job once", async () => {
     answers.set(undefined, earningsPage([earning(1), ON_THE_WAY], "c1"));
     answers.set("c1", earningsPage([ON_THE_WAY, AWAITING], "c2"));

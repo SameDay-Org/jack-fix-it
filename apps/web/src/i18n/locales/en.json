@@ -516,6 +516,11 @@
         "unavailable": "We couldn't sign you in right now. Try again in a moment."
       }
     },
+    "busy": {
+      "title": "The panel is busy right now",
+      "body": "You're still signed in; try again in a moment.",
+      "retry": "Try again"
+    },
     "nav": {
       "label": "Panel",
       "home": "Home",
