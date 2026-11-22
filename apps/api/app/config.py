@@ -371,6 +371,16 @@ class Settings(BaseSettings):
     interest_ip_limit: int = Field(default=10, gt=0)
     interest_email_limit: int = Field(default=3, gt=0)
     interest_window_seconds: int = Field(default=3_600, gt=0)
+    # Web requests without an account (#86): creates per visitor address, per email and per
+    # phone (both hashed), per WEB_REQUEST_WINDOW_SECONDS; then a daily cap per email and per
+    # phone, per WEB_REQUEST_DAILY_WINDOW_SECONDS; and the body's size, refused unread past it.
+    web_request_ip_limit: int = Field(default=10, gt=0)
+    web_request_email_limit: int = Field(default=3, gt=0)
+    web_request_phone_limit: int = Field(default=3, gt=0)
+    web_request_window_seconds: int = Field(default=3_600, gt=0)
+    web_request_daily_limit: int = Field(default=5, gt=0)
+    web_request_daily_window_seconds: int = Field(default=86_400, gt=0)
+    web_request_max_body_bytes: int = Field(default=65_536, gt=0)
     # Saved addresses (D8.2, #214): the most one customer may keep in their address book, and
     # how many writes (create, edit, delete together) one customer may make per window.
     saved_addresses_max_per_user: int = Field(default=4, gt=0)

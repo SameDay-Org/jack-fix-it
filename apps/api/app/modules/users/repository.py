@@ -25,6 +25,15 @@ class UserRepository:
             statement = statement.order_by(User.id).with_for_update(read=True)
         return set((await self._session.scalars(statement)).all())
 
+    @staticmethod
+    def guest_ids() -> Select[uuid.UUID]:
+        """The guests' ids (#86), as a statement for another module's query."""
+        return select(User.id).where(User.status == UserStatus.GUEST)
+
+    async def is_guest(self, user_id: uuid.UUID) -> bool:
+        statement = select(User.status).where(User.id == user_id)
+        return await self._session.scalar(statement) is UserStatus.GUEST
+
     async def ids_with_role(
         self, user_ids: Collection[uuid.UUID], role: UserRole
     ) -> set[uuid.UUID]:

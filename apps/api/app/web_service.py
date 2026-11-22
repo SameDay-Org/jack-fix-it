@@ -8,11 +8,16 @@ a valid address), for the per-address limits. Without one, the limits fall back 
 own address (`client_ip`: the socket's, which uvicorn rewrites from X-Forwarded-For only for
 FORWARDED_ALLOW_IPS). A client's X-Forwarded-For is never read here.
 
+Two public routes the app and the web both call (the ZIP check and the waitlist join, #86) take
+the forwarded address the same way, only behind a valid key (`visitor_address`), but never
+refuse a call without one: the app's own calls count against their socket address.
+
 Logs name the refusal only: never a key, an address or a header's value.
 """
 
 import hmac
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Annotated, Final
 
@@ -22,7 +27,7 @@ from starlette.requests import Request
 
 from app.config import Settings, get_app_settings
 from app.errors import AppError
-from app.rate_limit import client_ip, normalized_ip
+from app.rate_limit import RateLimiter, client_ip, enforce_limit, get_rate_limiter, normalized_ip
 
 logger = logging.getLogger(__name__)
 
@@ -74,3 +79,33 @@ async def require_web_service(
 
 
 WebService = Annotated[WebCaller, Depends(require_web_service)]
+
+
+def visitor_address(request: Request, settings: Settings) -> str:
+    """The address a public route's per-address limit counts (#86): the web service's
+    forwarded X-JFI-Client-IP behind its valid key, else the caller's own (`client_ip`). A
+    wrong or missing key is no refusal here: the route is the app's too."""
+    if key_matches(request.headers.get(WEB_KEY_HEADER), settings.web_service_key):
+        return visitor_ip(request) or client_ip(request)
+    return client_ip(request)
+
+
+def limit_per_visitor(scope: str) -> Callable[..., Awaitable[None]]:
+    """rate_limit.limit_per_ip, counted per `visitor_address`: AUTH_RATE_LIMIT_REQUESTS per
+    visitor per window on one public route the web service calls for its visitors."""
+
+    async def dependency(
+        request: Request,
+        limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+        settings: Annotated[Settings, Depends(get_app_settings)],
+    ) -> None:
+        await enforce_limit(
+            limiter,
+            scope,
+            visitor_address(request, settings),
+            limit=settings.auth_rate_limit_requests,
+            window_seconds=settings.auth_rate_limit_window_seconds,
+            timeout_seconds=settings.rate_limit_timeout_seconds,
+        )
+
+    return dependency
