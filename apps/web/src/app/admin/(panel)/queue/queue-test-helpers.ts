@@ -58,7 +58,9 @@ export function card(extra: Partial<RequestCard> = {}): RequestCard {
       phone: "+13055550181",
       email: "ana.probe+81@example.com",
       language: "es",
+      has_account: true,
     },
+    utm: null,
     address: {
       line1: "742 Evergreen Terrace",
       line2: "Apt 81",
