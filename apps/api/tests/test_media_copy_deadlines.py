@@ -46,6 +46,20 @@ FAST: dict[str, object] = {
     "media_sanitize_max_tries": 2,
     "media_sanitize_retry_seconds": 1,
 }
+# The stalled-transfer test on the real worker counts tries, so only the stall may reach a bound.
+# It never ends: its 1 s step always cuts it, however loaded the machine. Every other step stays
+# far from its own bound: a database step has 2 s (on CI a write slower than FAST's 0.2 s was cut
+# mid-query, and its session failed every later try: 3 retries, not 1), and the upload stage's
+# download and image transform 1 s each. The job is the shortest the settings accept,
+# 2 + (6 x 1 + 2) + 4 = 14 s. A stall its step did not cut would hold its try until then, and
+# the test would fail on run_job's 15 s bound; a passing run takes about 3 s.
+STALL_ONLY: dict[str, object] = {
+    **FAST,
+    "media_sanitize_timeout_seconds": 1.0,
+    "media_sanitize_overhead_seconds": 2.0,
+    "media_sanitize_settle_seconds": 4.0,
+    "media_sanitize_job_timeout_seconds": 14,
+}
 # For the tests on the real clock, FAST three times over (#448): under load a database step can
 # take most of a 0.1 s step, and a retry found no time left to start its file (one upload seen,
 # not two). The proportions these tests reason on stay the same; the scripted clocks keep FAST.
@@ -193,13 +207,13 @@ async def test_a_stalled_transfer_is_retried_then_failed_never_left_pending(
 ) -> None:
     storage = stalled(released, stage)
     media = await make_media(db_session, storage, gps_jpeg())
-    settings = make_settings(**REAL_CLOCK)
+    settings = make_settings(**STALL_ONLY)
 
     async with worker_for(db_session, settings, storage, media.request_id) as (worker, redis):
         queued = await run_job(worker, redis, media.request_id)
 
-    # Try 1 waits on the step's timeout and asks for a retry; try 2 (MEDIA_SANITIZE_MAX_TRIES)
-    # fails the row. ARQ's own timeout never ends a try.
+    # Try 1's stall is cut by its step, and the try asks for a retry; try 2
+    # (MEDIA_SANITIZE_MAX_TRIES) fails the row. ARQ's own timeout never ends a try.
     assert (worker.jobs_retried, worker.jobs_failed, worker.jobs_complete) == (1, 0, 1)
     assert not queued
     assert (await row(db_session, media.media_id)).safe_status == MediaSafeStatus.FAILED
