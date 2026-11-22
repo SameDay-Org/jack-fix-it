@@ -9982,6 +9982,200 @@
         ]
       }
     },
+    "/v1/me/terms": {
+      "get": {
+        "tags": [
+          "terms"
+        ],
+        "summary": "The legal documents I must accept",
+        "description": "The versions in force of the documents the caller's role accepts (terms and privacy;\npros also the pro agreement), and whether the caller accepted each. The texts are the\napps'; the API names each by its version id.",
+        "operationId": "get_my_terms_v1_me_terms_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/me/terms-acceptance": {
+      "post": {
+        "tags": [
+          "terms"
+        ],
+        "summary": "Accept a legal document",
+        "description": "Records that the caller accepted this version. Idempotent: accepting the same version\nagain answers the same, with the time of the first acceptance.",
+        "operationId": "accept_terms_v1_me_terms_acceptance_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TermsAcceptanceIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermsDocumentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: an unknown kind, a version that is not an id, an extra field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "terms_not_current: not the version in force, a document the caller's role does not accept, or one with no version published.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/me/delete": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Delete my account",
+        "description": "Deletes the caller's account, confirmed with its current password, as the stores\nrequire. The account is anonymised: the name, email, phone, addresses, photos, documents,\ndevices and saved cards go; jobs, payments and reviews stay for the other side and for tax,\nshown as \"Deleted user\". A customer's requests still open are cancelled. Every session ends\nat once. Refused while a job, a dispute, a refund, a payment, a payout or a quote is still in\nflight (409, the code says which).",
+        "operationId": "delete_my_account_v1_me_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountDeletionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Deleted: every session ends now, and the email may sign up again as a new account."
+          },
+          "422": {
+            "description": "validation_error: no password, or an extra field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "invalid_password: not the account's password. staff_account: agents and admins are removed by an administrator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Something must settle first, one code per reason: active_job (a job in progress, waiting for confirmation, or, for a pro, for its payout), open_dispute, refund_pending, payment_in_progress, payout_pending, active_quote (a pro's quote still open or being paid).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many tries; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/v1/requests/{request_id}/job/tip": {
       "post": {
         "tags": [
@@ -10436,6 +10630,23 @@
   },
   "components": {
     "schemas": {
+      "AccountDeletionIn": {
+        "properties": {
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Password",
+            "description": "The account's current password: the confirmation that the holder asks."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "title": "AccountDeletionIn"
+      },
       "AddressIn": {
         "properties": {
           "line1": {
@@ -20582,6 +20793,98 @@
         ],
         "title": "SupportTicketStatusIn"
       },
+      "TermsAcceptanceIn": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/TermsKind"
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+            "title": "Version",
+            "description": "The version the app showed, as GET /v1/me/terms gave it."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "version"
+        ],
+        "title": "TermsAcceptanceIn"
+      },
+      "TermsDocumentOut": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/TermsKind",
+            "description": "terms, privacy or pro_agreement (pros only)."
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "The version in force: the id of the text the app shows."
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted",
+            "description": "Whether the caller accepted this version."
+          },
+          "accepted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At",
+            "description": "When the caller first accepted this version; null until then."
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "version",
+          "accepted",
+          "accepted_at"
+        ],
+        "title": "TermsDocumentOut"
+      },
+      "TermsKind": {
+        "type": "string",
+        "enum": [
+          "terms",
+          "privacy",
+          "pro_agreement"
+        ],
+        "title": "TermsKind"
+      },
+      "TermsOut": {
+        "properties": {
+          "terms_required": {
+            "type": "boolean",
+            "title": "Terms Required",
+            "description": "True while a document below is not accepted: the app asks for it before anything else. False when nothing is in force yet."
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/TermsDocumentOut"
+            },
+            "type": "array",
+            "title": "Documents",
+            "description": "The documents in force for the caller's role, with a version published."
+          }
+        },
+        "type": "object",
+        "required": [
+          "terms_required",
+          "documents"
+        ],
+        "title": "TermsOut"
+      },
       "TextQuestion": {
         "properties": {
           "key": {
@@ -21190,6 +21493,11 @@
             "format": "date",
             "title": "Member Since",
             "description": "The day (UTC) the account was created."
+          },
+          "terms_required": {
+            "type": "boolean",
+            "title": "Terms Required",
+            "description": "True while a legal document in force for the account is not accepted in its version (GET /v1/me/terms): the app asks for it before anything else (#97). Absent from an API older than #97: read it as false."
           }
         },
         "type": "object",
@@ -21227,7 +21535,8 @@
         "enum": [
           "active",
           "suspended",
-          "guest"
+          "guest",
+          "deleted"
         ],
         "title": "UserStatus"
       },
