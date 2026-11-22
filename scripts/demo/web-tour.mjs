@@ -24,8 +24,10 @@
 //   DEMO_TIME_ZONE            the zone the panel's times read in (default America/New_York)
 //   DEMO_BROWSER_CHANNEL      the installed browser Playwright drives (default msedge)
 //   DEMO_REQUEST_ZIP          a served ZIP for the web request (default 33316, in the seed)
-//   DEMO_REQUEST_EMAIL        the web request's email (default avery@example.com); the API
-//                             takes a few sends per email an hour: change it for more takes
+//   DEMO_REQUEST_EMAIL        the web request's email (default avery@example.com)
+//   DEMO_REQUEST_PHONE        its mobile number (default (954) 555-0142). The API takes 3 sends
+//                             an hour per email and per number (WEB_REQUEST_EMAIL_LIMIT,
+//                             WEB_REQUEST_PHONE_LIMIT): change both for a fourth take
 //   DEMO_INTEREST_EMAIL       the /app interest form's email (default jordan@example.com)
 // The request and interest scenes need the web built with REQUEST_FLOW_ENABLED and
 // INTEREST_FORM_ENABLED (and their secrets, docs/railway.md); without them they fail on the
@@ -77,6 +79,7 @@ const TIME_ZONE = process.env.DEMO_TIME_ZONE ?? "America/New_York";
 const CHANNEL = process.env.DEMO_BROWSER_CHANNEL ?? "msedge";
 const REQUEST_ZIP = process.env.DEMO_REQUEST_ZIP ?? "33316";
 const REQUEST_EMAIL = process.env.DEMO_REQUEST_EMAIL ?? "avery@example.com";
+const REQUEST_PHONE = process.env.DEMO_REQUEST_PHONE ?? "(954) 555-0142";
 const INTEREST_EMAIL = process.env.DEMO_INTEREST_EMAIL ?? "jordan@example.com";
 const VIEW = { width: 1280, height: 720 };
 // The public site's own words (the copy may still change): the request flow and the /app form.
@@ -846,7 +849,7 @@ const SCENES = {
 
     await heading(REQUEST.contact.title);
     await type(page, page.getByLabel(REQUEST.contact.firstName, { exact: true }), "Avery", 60);
-    await type(page, page.getByLabel(REQUEST.contact.phone, { exact: true }), "(954) 555-0142", 50);
+    await type(page, page.getByLabel(REQUEST.contact.phone, { exact: true }), REQUEST_PHONE, 50);
     await type(page, page.getByLabel(REQUEST.contact.email, { exact: true }), REQUEST_EMAIL, 45);
     await beat(page, 500);
     await next();
@@ -860,9 +863,10 @@ const SCENES = {
     await beat(page, 1200);
     await press(page, send);
     await heading(REQUEST.sent.title);
-    // The number the team will quote: the cursor rests on it.
-    await glide(page, page.locator("strong, b").filter({ hasText: /^JF-/ }).first(), {
-      pause: 600,
+    // The number the team will quote: the cursor points at it, just past its end.
+    const number = await glide(page, page.locator("strong").filter({ hasText: /^JF-/ }).first());
+    await page.mouse.move(number.x + number.width + 18, number.y + number.height / 2, {
+      steps: 8,
     });
     await beat(page, 2000);
     await still("sent");
@@ -884,7 +888,8 @@ const SCENES = {
     // The form gives way to one line: bring it to the middle of the frame.
     const y = await joined.evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
     await scrollTo(page, Math.max(0, y - VIEW.height / 2 + 40), 900);
-    await glide(page, joined, { pause: 400 });
+    const line = await glide(page, joined, { pause: 400 });
+    await page.mouse.move(line.x + line.width / 2, line.y + line.height + 36, { steps: 8 });
     await beat(page, 2000);
     await still("joined");
   },
