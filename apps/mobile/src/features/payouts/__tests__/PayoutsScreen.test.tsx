@@ -166,10 +166,10 @@ describe("PayoutsScreen: where the payout account stands", () => {
 
     expect(screen.getByTestId("payouts-status")).toHaveTextContent("Not set up");
     expect(message()).toHaveTextContent(
-      "Set up how you get paidJack Fix It pays you through Stripe. You need a payout account before requests can reach you.",
+      "Set up how you get paidJohn Got It pays you through Stripe. You need a payout account before requests can reach you.",
     );
     expect(screen.getByTestId("payouts-asks")).toHaveTextContent(
-      "What Stripe will ask forA bank account, where your payouts goYour identity, to confirm it's youStripe collects and keeps these details. Jack Fix It never sees them.",
+      "What Stripe will ask forA bank account, where your payouts goYour identity, to confirm it's youStripe collects and keeps these details. John Got It never sees them.",
     );
     expect(screen.getByRole("button", { name: "Set up payouts" })).toBeTruthy();
     // Opening the screen asks for the status and for no link.

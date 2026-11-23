@@ -49,7 +49,7 @@ describe("CodeInput", () => {
 
     await fireEvent.changeText(field(), "123-456");
     expect(onChangeText).toHaveBeenLastCalledWith("123456");
-    await fireEvent.changeText(field(), "Your Jack Fix It code is 123456");
+    await fireEvent.changeText(field(), "Your John Got It code is 123456");
     expect(onChangeText).toHaveBeenLastCalledWith("123456");
   });
 

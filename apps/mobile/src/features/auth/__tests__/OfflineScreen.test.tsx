@@ -21,7 +21,7 @@ describe("OfflineScreen", () => {
     jest.mocked(restoreSession).mockReturnValue(pending.promise);
     await renderInSafeArea(<OfflineScreen />);
 
-    expect(screen.getByText("Can't reach Jack right now")).toBeTruthy();
+    expect(screen.getByText("Can't reach John right now")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
 
     expect(restoreSession).toHaveBeenCalledTimes(1);

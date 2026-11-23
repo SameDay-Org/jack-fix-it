@@ -29,7 +29,7 @@ const STATUS_TONE: Record<TicketStatus, StatusTone> = {
 };
 
 /**
- * "Talk to Jack" (#274, part 2): a message to the Jack Fix It team from Help. A topic, the text,
+ * "Talk to John" (#274, part 2): a message to the John Got It team from Help. A topic, the text,
  * and the job it is about when the person has one; then what they sent, with its status.
  *
  * - The draft lives in memory (`draft.ts`): leaving the form keeps it, a sign-out forgets it.

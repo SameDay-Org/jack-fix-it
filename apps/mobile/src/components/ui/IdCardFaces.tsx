@@ -190,7 +190,7 @@ const PHONE_MIN_SCALE = 0.7;
 const CODE_TYPE = { size: 22, lineHeight: 28, tracking: 2.6 } as const;
 const BADGE_TYPE = { size: 10, lineHeight: 12, tracking: 1.6 } as const;
 const MICRO_TYPE = { size: 3.6, lineHeight: 4, tracking: 0.35 } as const;
-/** "JACK FIX IT · " repeated past any card width, then clipped. */
+/** "JOHN GOT IT · " repeated past any card width, then clipped. */
 const MICRO_REPEATS = 14;
 /** The relief's depth: half a design dp, a pixel or so on a phone. */
 const RELIEF_DEPTH = 0.5;
@@ -568,7 +568,7 @@ function Label({ children, palette, unit }: { children: string; palette: Palette
   );
 }
 
-/** "JACK FIX IT · JACK FIX IT · …": a line until you look closely, as on printed IDs. */
+/** "JOHN GOT IT · JOHN GOT IT · …": a line until you look closely, as on printed IDs. */
 function Microtext({ palette, unit }: { palette: Palette; unit: number }) {
   const { t, i18n } = useTranslation();
   const line = `${t("idCard.brand").toLocaleUpperCase(i18n.language)} · `.repeat(MICRO_REPEATS);
@@ -599,7 +599,7 @@ function Microtext({ palette, unit }: { palette: Palette; unit: number }) {
   );
 }
 
-/** The brand: a short lime bar over "Jack Fix It", as the app's launch screen sets it. */
+/** The brand: a short lime bar over "John Got It", as the app's launch screen sets it. */
 function Wordmark({ palette, unit }: { palette: Palette; unit: number }) {
   const { t } = useTranslation();
   return (

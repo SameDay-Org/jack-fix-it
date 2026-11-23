@@ -60,8 +60,8 @@ describe("AccessoryBanner", () => {
 
     await rerender(
       <AccessoryBanner
-        main="Jack is finding a pro"
-        accessibilityLabel="Jack is finding a pro"
+        main="John is finding a pro"
+        accessibilityLabel="John is finding a pro"
         accessibilityHint="Opens your request"
         onPress={jest.fn()}
         testID="banner"
@@ -118,14 +118,14 @@ describe("AccessoryBanner", () => {
 
     await rerender(
       <AccessoryBanner
-        main="Jack is finding a pro for your request"
-        accessibilityLabel="Jack is finding a pro for your request"
+        main="John is finding a pro for your request"
+        accessibilityLabel="John is finding a pro for your request"
         accessibilityHint="Opens your request"
         onPress={jest.fn()}
         testID="banner"
       />,
     );
-    expect(screen.getByText("Jack is finding a pro for your request").props.numberOfLines).toBe(2);
+    expect(screen.getByText("John is finding a pro for your request").props.numberOfLines).toBe(2);
     expect(screen.queryByTestId("banner-tail")).toBeNull();
   });
 

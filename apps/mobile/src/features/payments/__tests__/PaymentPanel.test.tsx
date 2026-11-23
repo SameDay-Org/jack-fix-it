@@ -155,7 +155,7 @@ describe("paying an accepted quote", () => {
     );
     expect(initPaymentSheet).toHaveBeenCalledWith(
       expect.objectContaining({
-        merchantDisplayName: "Jack Fix It",
+        merchantDisplayName: "John Got It",
         customerId: "cus_jack",
         customerSessionClientSecret: "cuss_secret_789",
         paymentIntentClientSecret: "pi_123_secret_456",

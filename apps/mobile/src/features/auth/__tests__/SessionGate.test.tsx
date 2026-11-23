@@ -167,7 +167,7 @@ describe("session gate", () => {
 
     await renderRouter(routes);
 
-    expect(screen.getByText("Can't reach Jack right now")).toBeTruthy();
+    expect(screen.getByText("Can't reach John right now")).toBeTruthy();
     expect(screen.queryByText("welcome stub")).toBeNull();
 
     await fireEvent.press(screen.getByRole("button", { name: "Try again" }));

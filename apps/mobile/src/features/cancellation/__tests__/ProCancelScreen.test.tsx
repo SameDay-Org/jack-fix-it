@@ -193,7 +193,7 @@ describe("ProCancelScreen", () => {
     expect(screen.getByTestId("cancel-form")).toBeTruthy();
   });
 
-  it("says a started job can't be cancelled, points to Talk to Jack, and sends nothing", async () => {
+  it("says a started job can't be cancelled, points to Talk to John, and sends nothing", async () => {
     job = working();
     await renderScreen();
     expect(screen.getByTestId("cancel-closed")).toBeTruthy();
@@ -330,7 +330,7 @@ describe("ProCancelScreen", () => {
     expect(screen.queryByText("cancel_not_allowed")).toBeNull();
   });
 
-  it("a cancel the API holds for staff (needs review) says so, points to Jack, and stops", async () => {
+  it("a cancel the API holds for staff (needs review) says so, points to John, and stops", async () => {
     const announce = announced();
     await renderScreen();
     await pick();
@@ -338,7 +338,7 @@ describe("ProCancelScreen", () => {
     await answer(0, errorResponse(409, "cancel_needs_review"));
     expect(await screen.findByText("We need to look at this job first")).toBeTruthy();
     expect(announce).toHaveBeenCalledWith(
-      "We need to look at this job first. Something about its payment needs our team. Talk to Jack and we'll sort it out.",
+      "We need to look at this job first. Something about its payment needs our team. Talk to John and we'll sort it out.",
       { queue: true },
     );
     expect(screen.getByTestId("cancel-talk")).toBeTruthy();
