@@ -8,8 +8,12 @@ a valid address), for the per-address limits. Without one, the limits fall back 
 own address (`client_ip`: the socket's, which uvicorn rewrites from X-Forwarded-For only for
 FORWARDED_ALLOW_IPS). A client's X-Forwarded-For is never read here.
 
+The auth routes' per-IP limits count the same way (#530, `caller_ip`): the admin panel's login,
+refresh and logout are called by the web's server, and counted by its one address every panel
+visitor shared a bucket, so one anonymous script could lock the staff out and sign them out.
+
 Two public routes the app and the web both call (the ZIP check and the waitlist join, #86) take
-the forwarded address the same way, only behind a valid key (`visitor_address`), but never
+the forwarded address the same way, only behind a valid key (`caller_ip`), but never
 refuse a call without one: the app's own calls count against their socket address.
 
 Logs name the refusal only: never a key, an address or a header's value.
@@ -81,18 +85,24 @@ async def require_web_service(
 WebService = Annotated[WebCaller, Depends(require_web_service)]
 
 
-def visitor_address(request: Request, settings: Settings) -> str:
-    """The address a public route's per-address limit counts (#86): the web service's
-    forwarded X-JFI-Client-IP behind its valid key, else the caller's own (`client_ip`). A
-    wrong or missing key is no refusal here: the route is the app's too."""
-    if key_matches(request.headers.get(WEB_KEY_HEADER), settings.web_service_key):
-        return visitor_ip(request) or client_ip(request)
-    return client_ip(request)
+def caller_ip(request: Request, settings: Settings) -> str:
+    """The address a per-IP limit counts (#530). Behind the web service's key, the visitor's it
+    forwarded (X-JFI-Client-IP); its own address when it forwarded none, logged, as that is
+    the one bucket every visitor would share. Without the key, or with another one, the
+    caller's own address (client_ip): the header is not read."""
+    if not key_matches(request.headers.get(WEB_KEY_HEADER), settings.web_service_key):
+        return client_ip(request)
+    visitor = visitor_ip(request)
+    if visitor is None:
+        logger.warning("web_service_visitor_ip_missing")
+        return client_ip(request)
+    return visitor
 
 
-def limit_per_visitor(scope: str) -> Callable[..., Awaitable[None]]:
-    """rate_limit.limit_per_ip, counted per `visitor_address`: AUTH_RATE_LIMIT_REQUESTS per
-    visitor per window on one public route the web service calls for its visitors."""
+def limit_per_caller_ip(scope: str) -> Callable[..., Awaitable[None]]:
+    """A dependency allowing AUTH_RATE_LIMIT_REQUESTS per caller_ip per window on one route:
+    rate_limit.limit_per_ip, for the routes the web's server calls on a visitor's behalf (the
+    auth routes, #530; the ZIP check, #86)."""
 
     async def dependency(
         request: Request,
@@ -102,7 +112,7 @@ def limit_per_visitor(scope: str) -> Callable[..., Awaitable[None]]:
         await enforce_limit(
             limiter,
             scope,
-            visitor_address(request, settings),
+            caller_ip(request, settings),
             limit=settings.auth_rate_limit_requests,
             window_seconds=settings.auth_rate_limit_window_seconds,
             timeout_seconds=settings.rate_limit_timeout_seconds,

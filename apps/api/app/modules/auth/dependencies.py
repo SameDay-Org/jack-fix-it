@@ -38,12 +38,11 @@ from app.rate_limit import (
     IdentifierHasher,
     RateLimitedError,
     RateLimiter,
-    client_ip,
     enforce_limit,
     get_identifier_hasher,
     get_rate_limiter,
-    limit_per_ip,
 )
+from app.web_service import caller_ip, limit_per_caller_ip
 
 # auto_error=False: a missing or non-Bearer header becomes our 401 invalid_token, not FastAPI's.
 _bearer = HTTPBearer(auto_error=False, bearerFormat="JWT")
@@ -111,10 +110,12 @@ OptionalUser = Annotated[UserAccount | None, Depends(get_optional_user)]
 
 
 # Rate limits on the unauthenticated routes (D4.4, #28): register and login run Argon2.
-limit_register = limit_per_ip("auth_register")
-limit_login_per_ip = limit_per_ip("auth_login")
-limit_refresh = limit_per_ip("auth_refresh")
-limit_logout = limit_per_ip("auth_logout")
+# Counted by caller_ip (#530): the admin panel's calls come from the web's server, which
+# forwards each visitor's address behind its key.
+limit_register = limit_per_caller_ip("auth_register")
+limit_login_per_ip = limit_per_caller_ip("auth_login")
+limit_refresh = limit_per_caller_ip("auth_refresh")
+limit_logout = limit_per_caller_ip("auth_logout")
 
 
 async def limit_login(
@@ -263,7 +264,7 @@ async def _limit_password(
     email: str,
 ) -> None:
     """Per IP first, then per email; the address enters the key only as a keyed hash."""
-    for kind, identifier in (("ip", client_ip(request)), ("email", hasher(email))):
+    for kind, identifier in (("ip", caller_ip(request, settings)), ("email", hasher(email))):
         await enforce_limit(
             limiter,
             f"{scope}_{kind}",

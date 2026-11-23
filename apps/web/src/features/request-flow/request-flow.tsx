@@ -1,14 +1,6 @@
 "use client";
 
-import {
-  type FormEvent,
-  type ReactNode,
-  type RefObject,
-  useEffect,
-  useRef,
-  useState,
-  useTransition,
-} from "react";
+import { type FormEvent, useEffect, useRef, useState, useTransition } from "react";
 
 import type { Locale } from "@/i18n/config";
 
@@ -25,12 +17,32 @@ import {
   SECONDARY,
   TEXT_BUTTON,
 } from "./fields";
-import { DESCRIPTION_MAX_LENGTH, descriptionFits, emailInput, phoneInput, zipInput } from "./input";
+import {
+  dayInput,
+  DESCRIPTION_MAX_LENGTH,
+  descriptionFits,
+  emailInput,
+  firstDay,
+  phoneInput,
+  zipInput,
+} from "./input";
+import { type LaterSteps, loadLaterSteps } from "./later-steps-loader";
 import { QuestionField, questionErrorText, questionFieldId } from "./question-field";
-import { type IntakeAnswers, questionErrors } from "./questions";
+import { type IntakeAnswers, intakeAnswersFor, questionErrors } from "./questions";
+import type { ReviewRefusal } from "./review-step";
 import type { RequestCategory } from "./server";
+import { addressErrors, contactErrors } from "./step-checks";
+import { Actions, type Heading, type Problem, ProblemBox, StepFrame } from "./step-parts";
 import type {
+  AddressDraft,
+  ContactDraft,
+  PreferredPeriod,
+  RequestDraft,
   RequestFlowText,
+  SendInput,
+  SendResult,
+  StoreLinks,
+  Utm,
   WaitlistError,
   WaitlistInput,
   WaitlistResult,
@@ -39,11 +51,27 @@ import type {
 } from "./types";
 
 /** The steps of the flow, in order. The waitlist is a way out of the first, not a step. */
-export type StepId = "zip" | "describe" | "questions";
+export type StepId = "zip" | "describe" | "questions" | "where" | "when" | "contact" | "review";
 
-/** What the flow can show: a step, or the waitlist. */
-type Screen = StepId | "waitlist";
-const SCREENS: readonly Screen[] = ["zip", "describe", "questions", "waitlist"];
+/** The steps a visitor goes through: the questions only for a service that asks some. */
+export function stepsFor(category: RequestCategory | null): StepId[] {
+  const questions: StepId[] = category && category.questions.length > 0 ? ["questions"] : [];
+  return ["zip", "describe", ...questions, "where", "when", "contact", "review"];
+}
+
+/** What the flow can show: a step, the waitlist, or the end (sent, or put on the waitlist). */
+type Screen = StepId | "waitlist" | "done";
+const SCREENS: readonly Screen[] = [
+  "zip",
+  "describe",
+  "questions",
+  "where",
+  "when",
+  "contact",
+  "review",
+  "waitlist",
+  "done",
+];
 
 /**
  * The query parameter that names the screen (none for the ZIP step), so the browser's Back and
@@ -92,13 +120,6 @@ function screenUrl(screen: Screen): string {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
-/** The steps a visitor goes through: the questions only for a service that asks some. */
-export function stepsFor(category: RequestCategory | null): StepId[] {
-  return category && category.questions.length > 0
-    ? ["zip", "describe", "questions"]
-    : ["zip", "describe"];
-}
-
 export type RequestFlowProps = {
   locale: Locale;
   text: RequestFlowText;
@@ -108,27 +129,48 @@ export type RequestFlowProps = {
   initialCategoryId: string | null;
   /** The calling code numbers are checked with (PHONE_COUNTRY_CODE). */
   countryCode: string;
-  /** The home page in the page's language: where the waitlist's "done" leads. */
+  /** The signed form token (lib/public-form), minted with the page; a refused send may renew it. */
+  formToken: string;
+  /** Where the visitor came from (attribution.ts), sent with the request. */
+  utm: Utm | null;
+  /** The app's store pages, once set (config.ts); else the sent screen links to `appHref`. */
+  storeLinks: StoreLinks | null;
+  appHref: string;
+  /** The home page in the page's language: where the waitlist's and the sent screen's "done" lead. */
   homeHref: string;
+  termsHref: string;
+  privacyHref: string;
   checkZip: (zip: string) => Promise<ZipCheckResult>;
   joinWaitlist: (input: WaitlistInput) => Promise<WaitlistResult>;
-  /**
-   * What the last step's Continue does once its answers fit. The next steps (where, when, how we
-   * reach you) are not built yet (#86 W1b): without it the last step has no Continue.
-   */
-  onComplete?: () => void;
+  sendRequest: (input: SendInput) => Promise<SendResult>;
 };
 
-type Problem = { id: string | null; message: string };
+const EMPTY_ADDRESS: AddressDraft = { line1: "", line2: "", city: "", state: "" };
+const EMPTY_CONTACT: ContactDraft = { firstName: "", phone: "", email: "" };
+/** The city and state a ZIP answer filled in: none. */
+const NO_PLACE = { city: "", state: "" };
+
+const LATER_SCREENS: readonly Screen[] = ["where", "when", "contact", "review", "done"];
+
+/** How the flow ended: sent (with its number; none for the trap field), or on the waitlist. */
+type Finished = { kind: "sent"; code: string | null } | { kind: "waitlisted" };
+
+/** A day the API takes: none (any day), or today or later. */
+function dayFits(date: string): boolean {
+  return date === "" || dayInput(date, firstDay(new Date())) !== null;
+}
 
 /**
- * The web request flow (#86): one step at a time, everything kept while going back and forth.
- * Moving to a step puts the focus on its heading; a step that cannot go on lists what needs a
- * look in a box at its top (focused, each line a link to its field) and under each field.
+ * The web request flow (#86): one step at a time, everything kept while going back and forth
+ * and after a refused send. Moving to a step puts the focus on its heading; a step that cannot
+ * go on lists what needs a look in a box at its top (focused, each line a link to its field)
+ * and under each field. A refusal the visitor can fix sends them to its step with a line saying
+ * why.
  */
 export function RequestFlow(props: RequestFlowProps) {
   const { text, categories } = props;
-  const [step, setStep] = useState<Screen>("zip");
+  const [screen, setScreen] = useState<Screen>("zip");
+  const [notice, setNotice] = useState<string | null>(null);
   const [zip, setZip] = useState("");
   const [area, setArea] = useState("");
   /** The last ZIP check's answer for `area`: served or not; null before any. */
@@ -136,37 +178,105 @@ export function RequestFlow(props: RequestFlowProps) {
   const [description, setDescription] = useState("");
   const [categoryId, setCategoryId] = useState(props.initialCategoryId);
   const [answers, setAnswers] = useState<Record<string, IntakeAnswers>>({});
-  const [servedNow, setServedNow] = useState(false);
+  const [address, setAddress] = useState(EMPTY_ADDRESS);
+  /** What the last ZIP answer put in the city and state, told apart from what was typed. */
+  const [zipPlace, setZipPlace] = useState(NO_PLACE);
+  const [date, setDate] = useState("");
+  const [period, setPeriod] = useState<PreferredPeriod>("flexible");
+  const [contact, setContact] = useState(EMPTY_CONTACT);
+  const [token, setToken] = useState(props.formToken);
+  const [finished, setFinished] = useState<Finished | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const moved = useRef(false);
 
+  const [later, setLater] = useState<LaterSteps | null>(null);
+  const needsLater = LATER_SCREENS.includes(screen);
+  /** Counts the visitor's "Try again" presses when the later steps' code did not come. */
+  const [laterTry, setLaterTry] = useState(0);
+  /** The ask that failed last: its try, and whether a later screen was waiting for it. */
+  const [laterFailure, setLaterFailure] = useState<{ attempt: number; needed: boolean } | null>(
+    null,
+  );
+  // Asked for as soon as the flow shows, so they are there long before the visitor is; asked
+  // again on reaching one of them if that first ask failed, and on each "Try again".
+  useEffect(() => {
+    if (later) return;
+    let live = true;
+    loadLaterSteps().then(
+      (steps) => {
+        if (live) setLater(steps);
+      },
+      () => {
+        if (live) setLaterFailure({ attempt: laterTry, needed: needsLater });
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [later, needsLater, laterTry]);
+  /** Whether the latest ask failed: one made since (a later screen reached, "Try again") waits. */
+  const laterFailed =
+    laterFailure !== null &&
+    laterFailure.attempt === laterTry &&
+    laterFailure.needed === needsLater;
+  /** Whether the screen itself shows (a later step waits for its code). */
+  const shown = !needsLater || later !== null;
+
   useEffect(() => {
     if (moved.current) heading.current?.focus();
-  }, [step]);
+  }, [screen, shown, laterFailed]);
 
   const category = categories?.find((item) => item.id === categoryId) ?? null;
+  const questions = category?.questions ?? [];
+  const categoryAnswers = (category && answers[category.id]) ?? {};
   const steps = stepsFor(category);
-  /** Whether `screen` can show with what the visitor has given so far. */
-  const reachable = (screen: Screen): boolean => {
-    if (screen === "zip") return true;
-    if (screen === "waitlist") return served === false;
-    if (screen === "describe") return served === true;
-    return served === true && steps.includes("questions") && descriptionFits(description);
+  /** Whether a step's answers would go on: what the steps after it need. */
+  const fits = (id: StepId): boolean => {
+    switch (id) {
+      case "zip":
+        return served === true;
+      case "describe":
+        return descriptionFits(description);
+      case "questions":
+        return Object.keys(questionErrors(questions, categoryAnswers)).length === 0;
+      case "where":
+        return addressErrors(address).length === 0;
+      case "when":
+        return dayFits(date);
+      case "contact":
+        return contactErrors(contact, props.countryCode).length === 0;
+      case "review":
+        return true;
+    }
+  };
+  /**
+   * Whether `target` can show with what the visitor has given so far: a step once every step
+   * before it would go on; the waitlist for an unserved ZIP; the end only once it is reached,
+   * and then nothing else (Back leaves a sent request rather than offer to send it again).
+   */
+  const reachable = (target: Screen): boolean => {
+    if (finished) return target === "done";
+    if (target === "done") return false;
+    if (target === "waitlist") return served === false;
+    const at = steps.indexOf(target);
+    return at >= 0 && steps.slice(0, at).every(fits);
   };
   // Each move is a history entry of this page load (marked with its id), so the browser's Back
   // and Forward go through the screens the visitor saw. A screen that cannot show any more (a
-  // ZIP checked again, the description emptied, another service) is passed over with one more
-  // step back: going back, that reaches the screen before it; going forward, the screen the
-  // visitor was on.
+  // ZIP checked again, an answer emptied, another service, a request sent) is passed over with
+  // one more step back: going back, that reaches the screen before it; going forward, the
+  // screen the visitor was on.
   const [load] = useState(newLoadId);
-  const go = (next: Screen) => {
+  /** To `next`, with a line about why when there is one to say. */
+  const go = (next: Screen, why: string | null = null) => {
     moved.current = true;
     window.history.pushState(entryState(load), "", screenUrl(next));
-    setStep(next);
+    setNotice(why);
+    setScreen(next);
   };
-  const latest = useRef({ step, reachable });
+  const latest = useRef({ screen, reachable });
   useEffect(() => {
-    latest.current = { step, reachable };
+    latest.current = { screen, reachable };
   });
   useEffect(() => {
     // Nothing typed survives a reload: the page starts again at the ZIP, whatever the address
@@ -176,7 +286,7 @@ export function RequestFlow(props: RequestFlowProps) {
     function onPopState(event: PopStateEvent) {
       if (window.location.pathname !== path) return; // another page: not the flow's to handle
       const target = screenOf(window.location.search);
-      const { step: current, reachable: canShow } = latest.current;
+      const { screen: current, reachable: canShow } = latest.current;
       // A screen from before a reload (nothing it showed is kept), or one that cannot show any
       // more: one more step back passes over it.
       if (!isOwnEntry(event.state, load) || !canShow(target)) {
@@ -185,178 +295,271 @@ export function RequestFlow(props: RequestFlowProps) {
       }
       if (target === current) return;
       moved.current = true;
-      setStep(target);
+      setNotice(null);
+      setScreen(target);
     }
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, [load]);
   const progress = (id: StepId) =>
     fill(text.progress, { current: steps.indexOf(id) + 1, total: steps.length });
-  const after = (id: StepId): StepId | null => steps[steps.indexOf(id) + 1] ?? null;
-  const proceed = (id: StepId) => {
-    const next = after(id);
-    if (next) go(next);
-    else props.onComplete?.();
-  };
-  const canProceed = (id: StepId) => after(id) !== null || props.onComplete !== undefined;
 
-  if (step === "waitlist") {
-    return (
-      <Waitlist
-        {...props}
-        zip={area}
-        categoryId={categoryId}
-        heading={heading}
-        onOtherZip={() => go("zip")}
-        onServed={() => {
-          setServedNow(true);
-          setServed(true);
-          go("describe");
-        }}
-      />
-    );
+  /** Sends, and answers the refusal the review shows itself, or null once it was handled. */
+  async function send(website: string): Promise<ReviewRefusal | null> {
+    const draft: RequestDraft = {
+      zip: area,
+      description,
+      categoryId: category?.id ?? null,
+      answers: intakeAnswersFor(questions, categoryAnswers),
+      address,
+      date,
+      period,
+      contact,
+      locale: props.locale,
+      utm: props.utm,
+    };
+    const result = await props.sendRequest({ token, website, draft });
+    if (result.kind === "sent") {
+      setFinished({ kind: "sent", code: result.code });
+      go("done");
+      return null;
+    }
+    if (result.token) setToken(result.token);
+    switch (result.error) {
+      case "out_of_area":
+        // No request: the API put the contact on the ZIP's waitlist.
+        setServed(false);
+        setFinished({ kind: "waitlisted" });
+        go("done");
+        return null;
+      case "invalid_category":
+        setCategoryId(null);
+        go("describe", text.notices.invalidCategory);
+        return null;
+      case "invalid_answers":
+        go(questions.length > 0 ? "questions" : "describe", text.notices.invalidAnswers);
+        return null;
+      default:
+        return { error: result.error, waitMinutes: result.waitMinutes ?? null };
+    }
   }
 
-  if (step === "zip") {
-    return (
-      <ZipStep
-        text={text}
-        progress={progress("zip")}
-        heading={heading}
-        zip={zip}
-        onZip={setZip}
-        checkZip={props.checkZip}
-        onAnswer={(result) => {
-          setArea(result.zip);
-          setServedNow(false);
-          setServed(result.kind === "served");
-          go(result.kind === "served" ? "describe" : "waitlist");
-        }}
-      />
-    );
+  /** A screen after the description, with its code loaded. */
+  function laterScreen(steps: LaterSteps) {
+    switch (screen) {
+      case "done":
+        if (finished?.kind === "waitlisted") {
+          return (
+            <steps.WaitlistedScreen
+              text={text}
+              heading={heading}
+              zip={area}
+              homeHref={props.homeHref}
+            />
+          );
+        }
+        return (
+          <steps.SentScreen
+            text={text}
+            heading={heading}
+            code={finished?.code ?? null}
+            storeLinks={props.storeLinks}
+            appHref={props.appHref}
+            homeHref={props.homeHref}
+          />
+        );
+      case "where":
+        return (
+          <steps.WhereStep
+            text={text}
+            progress={progress("where")}
+            heading={heading}
+            zip={area}
+            address={address}
+            onAddress={setAddress}
+            onChangeZip={() => go("zip")}
+            onBack={() => go(questions.length > 0 ? "questions" : "describe")}
+            onNext={() => go("when")}
+          />
+        );
+      case "when":
+        return (
+          <steps.WhenStep
+            text={text}
+            progress={progress("when")}
+            heading={heading}
+            date={date}
+            period={period}
+            onDate={setDate}
+            onPeriod={setPeriod}
+            onBack={() => go("where")}
+            onNext={() => go("contact")}
+          />
+        );
+      case "contact":
+        return (
+          <steps.ContactStep
+            text={text}
+            progress={progress("contact")}
+            heading={heading}
+            notice={notice}
+            countryCode={props.countryCode}
+            contact={contact}
+            onContact={setContact}
+            onBack={() => go("when")}
+            onNext={() => go("review")}
+          />
+        );
+      case "review":
+        return (
+          <steps.ReviewStep
+            text={text}
+            locale={props.locale}
+            progress={progress("review")}
+            heading={heading}
+            zip={area}
+            description={description}
+            serviceName={category?.name ?? null}
+            questions={questions}
+            answers={categoryAnswers}
+            address={address}
+            date={date}
+            period={period}
+            contact={contact}
+            phone={phoneInput(contact.phone, props.countryCode) ?? contact.phone}
+            termsHref={props.termsHref}
+            privacyHref={props.privacyHref}
+            onEdit={(target) => go(target)}
+            onBack={() => go("contact")}
+            onSend={send}
+          />
+        );
+      default:
+        return null;
+    }
   }
 
-  if (step === "describe") {
-    return (
-      <DescribeStep
-        text={text}
-        progress={progress("describe")}
-        heading={heading}
-        notice={servedNow ? fill(text.waitlist.servedNow, { zip: area }) : null}
-        description={description}
-        onDescription={setDescription}
-        categories={categories}
-        categoryId={categoryId}
-        onCategory={setCategoryId}
-        onBack={() => go("zip")}
-        onNext={canProceed("describe") ? () => proceed("describe") : null}
-      />
-    );
-  }
-
-  // The questions step only exists for a service that asks some.
-  const questions = category?.questions ?? [];
-  const categoryAnswers = (category && answers[category.id]) ?? {};
-  return (
-    <QuestionsStep
-      text={text}
-      locale={props.locale}
-      progress={progress("questions")}
-      heading={heading}
-      title={category?.name ?? ""}
-      questions={questions}
-      answers={categoryAnswers}
-      onAnswer={(key, answer) => {
-        if (!category) return;
-        setAnswers((all) => {
-          const next = { ...all[category.id] };
-          if (answer === undefined) delete next[key];
-          else next[key] = answer;
-          return { ...all, [category.id]: next };
-        });
-      }}
-      onBack={() => go("describe")}
-      onNext={canProceed("questions") ? () => proceed("questions") : null}
-    />
-  );
-}
-
-type StepFrameProps = {
-  heading: RefObject<HTMLHeadingElement | null>;
-  progress: string | null;
-  title: string;
-  support: string | null;
-  children: ReactNode;
-};
-
-/** A step's top: where it is in the flow, its heading (focused on arrival) and one line. */
-function StepFrame({ heading, progress, title, support, children }: StepFrameProps) {
-  return (
-    <section aria-labelledby="request-step-title" className="flex flex-col gap-6">
-      <div>
-        {progress ? <p className="text-sm font-bold text-green-700">{progress}</p> : null}
-        <h2
-          id="request-step-title"
-          ref={heading}
-          tabIndex={-1}
-          className="mt-1 text-2xl font-extrabold tracking-tight text-navy-900 outline-none sm:text-3xl"
+  if (needsLater) {
+    if (later) return laterScreen(later);
+    // Each its own frame (key), so its heading is focused, and read, as it shows.
+    if (laterFailed) {
+      return (
+        <StepFrame
+          key="later-failed"
+          heading={heading}
+          progress={null}
+          title={text.loadFailed.title}
+          support={text.loadFailed.body}
         >
-          {title}
-        </h2>
-        {support ? <p className="mt-2 text-base text-gray-500">{support}</p> : null}
-      </div>
-      {children}
-    </section>
-  );
-}
+          <Actions>
+            <button type="button" className={PRIMARY} onClick={() => setLaterTry((n) => n + 1)}>
+              {text.loadFailed.retry}
+            </button>
+          </Actions>
+        </StepFrame>
+      );
+    }
+    return (
+      <StepFrame
+        key="later-loading"
+        heading={heading}
+        progress={null}
+        title={text.loading}
+        support={null}
+      >
+        {null}
+      </StepFrame>
+    );
+  }
 
-/**
- * What stops the step, at its top: focused each time Continue is refused, its lines links to the
- * fields (or plain text for what no field can fix, like a service that is down).
- */
-function ProblemBox({
-  title,
-  problems,
-  attempt,
-}: {
-  title: string;
-  problems: Problem[];
-  attempt: number;
-}) {
-  const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (attempt > 0) box.current?.focus();
-  }, [attempt]);
-  if (problems.length === 0) return null;
-  return (
-    <div
-      ref={box}
-      tabIndex={-1}
-      aria-labelledby="request-problems-title"
-      className="rounded-lg border-2 border-danger bg-white p-4 outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2"
-    >
-      <p id="request-problems-title" className="font-bold text-navy-900">
-        {title}
-      </p>
-      <ul className="mt-2 flex list-disc flex-col gap-1 pl-5">
-        {problems.map((problem) => (
-          <li key={`${problem.id}:${problem.message}`} className="text-danger">
-            {problem.id ? (
-              <a href={`#${problem.id}`} className="font-semibold underline underline-offset-4">
-                {problem.message}
-              </a>
-            ) : (
-              <span className="font-semibold">{problem.message}</span>
-            )}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function Actions({ children }: { children: ReactNode }) {
-  return <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center">{children}</div>;
+  switch (screen) {
+    case "waitlist":
+      return (
+        <Waitlist
+          {...props}
+          zip={area}
+          categoryId={categoryId}
+          heading={heading}
+          onOtherZip={() => go("zip")}
+          onServed={() => {
+            setServed(true);
+            go("describe", fill(text.waitlist.servedNow, { zip: area }));
+          }}
+        />
+      );
+    case "zip":
+      return (
+        <ZipStep
+          text={text}
+          progress={progress("zip")}
+          heading={heading}
+          zip={zip}
+          onZip={setZip}
+          checkZip={props.checkZip}
+          onAnswer={(result) => {
+            setArea(result.zip);
+            setServed(result.kind === "served");
+            // A served ZIP fills in its city and state. A new answer replaces what the last one
+            // filled in (or clears it when it names none); what the visitor typed stays.
+            const place =
+              result.kind === "served"
+                ? { city: result.city ?? "", state: result.state ?? "" }
+                : NO_PLACE;
+            const filled = (typed: string, before: string, now: string) =>
+              typed === "" || typed === before ? now : typed;
+            setAddress((current) => ({
+              ...current,
+              city: filled(current.city, zipPlace.city, place.city),
+              state: filled(current.state, zipPlace.state, place.state),
+            }));
+            setZipPlace(place);
+            go(result.kind === "served" ? "describe" : "waitlist");
+          }}
+        />
+      );
+    case "describe":
+      return (
+        <DescribeStep
+          text={text}
+          progress={progress("describe")}
+          heading={heading}
+          notice={notice}
+          description={description}
+          onDescription={setDescription}
+          categories={categories}
+          categoryId={categoryId}
+          onCategory={setCategoryId}
+          onBack={() => go("zip")}
+          onNext={() => go(questions.length > 0 ? "questions" : "where")}
+        />
+      );
+    case "questions":
+      return (
+        <QuestionsStep
+          text={text}
+          locale={props.locale}
+          progress={progress("questions")}
+          heading={heading}
+          notice={notice}
+          title={category?.name ?? ""}
+          questions={questions}
+          answers={categoryAnswers}
+          onAnswer={(key, answer) => {
+            if (!category) return;
+            setAnswers((all) => {
+              const next = { ...all[category.id] };
+              if (answer === undefined) delete next[key];
+              else next[key] = answer;
+              return { ...all, [category.id]: next };
+            });
+          }}
+          onBack={() => go("describe")}
+          onNext={() => go("where")}
+        />
+      );
+    default:
+      return null;
+  }
 }
 
 function ZipStep({
@@ -370,7 +573,7 @@ function ZipStep({
 }: {
   text: RequestFlowText;
   progress: string;
-  heading: RefObject<HTMLHeadingElement | null>;
+  heading: Heading;
   zip: string;
   onZip: (zip: string) => void;
   checkZip: RequestFlowProps["checkZip"];
@@ -480,7 +683,7 @@ function DescribeStep({
 }: {
   text: RequestFlowText;
   progress: string;
-  heading: RefObject<HTMLHeadingElement | null>;
+  heading: Heading;
   notice: string | null;
   description: string;
   onDescription: (text: string) => void;
@@ -510,12 +713,8 @@ function DescribeStep({
       progress={progress}
       title={text.describe.title}
       support={text.describe.support}
+      notice={notice}
     >
-      {notice ? (
-        <p role="status" className="rounded-lg bg-gray-50 px-4 py-3 font-semibold text-navy-900">
-          {notice}
-        </p>
-      ) : null}
       <form noValidate onSubmit={submit} className="flex flex-col gap-8">
         <ProblemBox
           title={text.check}
@@ -591,6 +790,7 @@ function QuestionsStep({
   locale,
   progress,
   heading,
+  notice,
   title,
   questions,
   answers,
@@ -601,7 +801,8 @@ function QuestionsStep({
   text: RequestFlowText;
   locale: Locale;
   progress: string;
-  heading: RefObject<HTMLHeadingElement | null>;
+  heading: Heading;
+  notice: string | null;
   title: string;
   questions: RequestCategory["questions"];
   answers: IntakeAnswers;
@@ -635,7 +836,13 @@ function QuestionsStep({
   }
 
   return (
-    <StepFrame heading={heading} progress={progress} title={title} support={text.questions.support}>
+    <StepFrame
+      heading={heading}
+      progress={progress}
+      title={title}
+      support={text.questions.support}
+      notice={notice}
+    >
       <form noValidate onSubmit={submit} className="flex flex-col gap-8">
         <ProblemBox title={text.check} attempt={attempt} problems={problems} />
         {questions.map((question) => (
@@ -678,7 +885,7 @@ function Waitlist({
 }: RequestFlowProps & {
   zip: string;
   categoryId: string | null;
-  heading: RefObject<HTMLHeadingElement | null>;
+  heading: Heading;
   onOtherZip: () => void;
   onServed: () => void;
 }) {

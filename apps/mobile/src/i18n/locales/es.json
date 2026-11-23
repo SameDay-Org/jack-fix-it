@@ -804,6 +804,7 @@
       "sent": "Enviada",
       "description": "Qué pasa",
       "redacted": "Los datos de contacto se ocultaron.",
+      "answers": "Sus respuestas",
       "sendQuote": "Enviar una cotización"
     },
     "media": {
