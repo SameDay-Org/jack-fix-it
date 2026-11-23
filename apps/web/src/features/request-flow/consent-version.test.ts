@@ -17,6 +17,8 @@ import { requestFlowText } from "./copy";
  */
 const RECORDED: Readonly<Record<string, string>> = {
   "request-contact-2026-11-19": "63807b7190299b088f56b5e60bcad81ee35b00712ec6610a3c711e614d28026b",
+  // #602: the brand in the consent line became John Got It.
+  "request-contact-2026-11-23": "35cce9371ec370e438d2e2c0e7f6f294b365fdc008c20f98816d72be8a470902",
 };
 
 async function shownWords(): Promise<string> {

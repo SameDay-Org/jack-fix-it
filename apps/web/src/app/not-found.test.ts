@@ -23,7 +23,7 @@ describe("the 404 page (#462)", () => {
     expect(html).toMatch(/<a lang="es"[^>]*href="\/es"[^>]*>Ir a la página de inicio<\/a>/);
     expect(html).not.toMatch(/ERROR|digest|404:/);
     expect((await generateMetadata()).title).toBe(
-      "Page not found | Jack Fix It · Página no encontrada | Jack Fix It",
+      "Page not found | John Got It · Página no encontrada | John Got It",
     );
   });
 

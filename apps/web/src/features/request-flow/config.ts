@@ -44,4 +44,4 @@ export function storeLinks(): StoreLinks | null {
  * Which consent text the visitor saw (`request.review.consent`), stored with the request. A
  * change of those words is a new version: legal approves the text before the flag goes on.
  */
-export const CONSENT_VERSION = "request-contact-2026-11-19";
+export const CONSENT_VERSION = "request-contact-2026-11-23";

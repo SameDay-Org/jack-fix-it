@@ -18,7 +18,7 @@ import { organizationJsonLd } from "./json-ld";
 import { LandingPage } from "./landing-page";
 import { landingMetadata } from "./metadata";
 
-const SITE = "https://jackfixit.test";
+const SITE = "https://johngotit.com";
 
 beforeEach(() => {
   vi.stubEnv("SITE_URL", "");
@@ -124,11 +124,11 @@ describe("robots.txt", () => {
 describe("the structured data", () => {
   it("is an Organization with its name, address and logo, and nothing that does not exist", () => {
     vi.stubEnv("SITE_URL", SITE);
-    const data = JSON.parse(organizationJsonLd("Jack Fix It") ?? "{}") as Record<string, unknown>;
+    const data = JSON.parse(organizationJsonLd("John Got It") ?? "{}") as Record<string, unknown>;
     expect(data).toEqual({
       "@context": "https://schema.org",
       "@type": "Organization",
-      name: "Jack Fix It",
+      name: "John Got It",
       url: `${SITE}/`,
       logo: `${SITE}/icon.svg`,
     });
@@ -138,7 +138,7 @@ describe("the structured data", () => {
     vi.stubEnv("SITE_URL", SITE);
     expect(organizationJsonLd("</script><script>alert(1)</script>")).not.toContain("<");
     vi.stubEnv("SITE_URL", "");
-    expect(organizationJsonLd("Jack Fix It")).toBeNull();
+    expect(organizationJsonLd("John Got It")).toBeNull();
   });
 
   it("is on the landing page only when the site's address is known", async () => {

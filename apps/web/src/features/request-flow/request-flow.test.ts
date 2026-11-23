@@ -268,7 +268,7 @@ describe("the waitlist, when the ZIP is not served", () => {
     await type(field(TEXT.waitlist.emailLabel), "ana@example.com");
     await click(button(TEXT.waitlist.submit));
     expect(heading().textContent).toBe(TEXT.describe.title);
-    expect(text()).toContain("Good news: Jack works in 99999 now.");
+    expect(text()).toContain("Good news: John works in 99999 now.");
   });
 
   it("words a refusal, and goes back to try another ZIP", async () => {
@@ -788,7 +788,7 @@ describe("the review and the send", () => {
     // The API made no request and put the contact on the list: no form to fill in again.
     expect(heading().textContent).toBe(TEXT.waitlist.joinedTitle);
     expect(document.activeElement).toBe(heading());
-    expect(text()).toContain("Jack isn't taking requests in 33301 right now");
+    expect(text()).toContain("John isn't taking requests in 33301 right now");
     expect(container.querySelector("form")).toBeNull();
     expect(text()).not.toContain("Your request number");
   });

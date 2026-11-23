@@ -26,8 +26,8 @@ async function subjectOf(slug: string, city?: string) {
 }
 
 /**
- * A service page's metadata in one language: "House Cleaning in South Florida | Jack Fix It",
- * or "Handyman in Fort Lauderdale, FL | Jack Fix It" for one city, a description of what the
+ * A service page's metadata in one language: "House Cleaning in South Florida | John Got It",
+ * or "Handyman in Fort Lauderdale, FL | John Got It" for one city, a description of what the
  * reader can do, the canonical and its `/es` twin (features/site).
  */
 export async function serviceMetadata(
