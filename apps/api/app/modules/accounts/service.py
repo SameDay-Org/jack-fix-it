@@ -7,7 +7,8 @@ and the audit log point at it), so the account is anonymised where it is:
   managed by script and refused.
 - Refused (409, a code per reason) while something is in flight: a payment still being made,
   a job not done (or, for a pro, its payout still owed), an open dispute, a refund not back on
-  the card, a pro's live quote, a transfer not made (accounts.errors). A customer's requests
+  the card, a pro's live quote, a transfer not made, a tip still being paid or still owed to
+  the pro (accounts.errors, tips.erasure). A customer's requests
   they can still leave (open, or accepted with nothing paid) are cancelled instead.
 - Then every module erases its part (accounts.eraser, each module's erasure.py): what the
   person typed is replaced (requests, support tickets, staff notes about them), the address
@@ -27,8 +28,10 @@ Locks, in the order a payment takes them: the customer's cancellable requests, t
 row FOR UPDATE, both to the commit. A second deletion waits, then finds the account deleted and
 answers the same; a row that references the user cannot be inserted meanwhile. The checks then
 read each stage before the next (a payment before its job, a quote before its job, a job before
-its dispute or refund): a payment or a quote that moves on between two checks is seen by one of
-them. Logs carry ids, the role and counts only.
+its dispute or refund, a job before its tip): a payment or a quote that moves on between two
+checks is seen by one of them. A pro's open dispute is read before their jobs: its job is
+disputed, which the job check refuses too, so a dispute opened between the two is seen either
+way. Logs carry ids, the role and counts only.
 """
 
 import asyncio
@@ -66,6 +69,7 @@ from app.modules.payments.erasure import (
 from app.modules.pros.service import ProService
 from app.modules.quotes.erasure import pro_has_live_quote
 from app.modules.requests.erasure import RequestErasure
+from app.modules.tips.erasure import customer_has_tip_being_paid, pro_has_tip_owed
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount, UserRole, UserStatus
 from app.queue import JobQueue
@@ -80,6 +84,9 @@ class AccountDeletionConfig:
     # How long a media copy that was running at the deletion may still upload: the files'
     # last pass waits for it (MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS).
     copy_settle_seconds: int
+    # How long an upload URL issued before the deletion may still store a file under the
+    # account's prefix: the files' last pass waits for it too (UPLOAD_URL_TTL_SECONDS).
+    upload_url_ttl_seconds: int
     # When the worker's second erasure runs: past any request sent before the deletion.
     erase_settle_seconds: int
     enqueue_timeout_seconds: float
@@ -88,6 +95,7 @@ class AccountDeletionConfig:
     def from_settings(cls, settings: Settings) -> "AccountDeletionConfig":
         return cls(
             copy_settle_seconds=settings.media_sanitize_job_timeout_seconds,
+            upload_url_ttl_seconds=settings.upload_url_ttl_seconds,
             erase_settle_seconds=settings.account_deletion_settle_seconds,
             enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
         )
@@ -139,10 +147,13 @@ class AccountDeletionService:
         now = datetime.now(UTC)
         files = sorted(set(erased.keys))
         copy_settle = self._config.copy_settle_seconds if erased.copy_in_flight else 0
+        # No pass over the files is the last before an upload URL issued before now has
+        # expired, nor before a copy still being made has ended (#590 round 1).
+        files_settle = max(copy_settle, self._config.upload_url_ttl_seconds)
         await AccountDeletionRepository(self._session).add(
             user.id,
             storage_keys=files,
-            storage_settled_after=now + timedelta(seconds=copy_settle),
+            storage_settled_after=now + timedelta(seconds=files_settle),
             erase_settled_after=now + timedelta(seconds=self._config.erase_settle_seconds),
             # Nothing to detach without a Stripe Customer (the second pass looks again).
             cards_detached_at=None if erased.has_stripe_customer else now,
@@ -175,6 +186,9 @@ class AccountDeletionService:
                 raise OpenDisputeError
             if await has_unsettled_refund(self._session, jobs):
                 raise RefundPendingError
+            # After the jobs: a tip is made on a confirmed job.
+            if await customer_has_tip_being_paid(self._session, user.id):
+                raise PaymentInProgressError
             return
         pro_id = await ProService(self._session).get_profile_id_for_user(user.id)
         if pro_id is None:
@@ -186,9 +200,13 @@ class AccountDeletionService:
             accepted_request_ids=RequestErasure.accepted_request_ids(),
         ):
             raise ActiveQuoteError
-        if await self._jobs.pro_has_job_in_flight(pro_id):
-            raise ActiveJobError
+        # Before the jobs, so the app can say a dispute is open (module doc).
         if await has_open_dispute(self._session, self._jobs.pro_job_ids(pro_id)):
             raise OpenDisputeError
+        if await self._jobs.pro_has_job_in_flight(pro_id):
+            raise ActiveJobError
         if await pro_has_unsettled_transfer(self._session, pro_id):
+            raise PayoutPendingError
+        # After the jobs and their transfers: a tip is made on a confirmed job.
+        if await pro_has_tip_owed(self._session, pro_id):
             raise PayoutPendingError

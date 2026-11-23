@@ -13,8 +13,9 @@ the rows kept by rule (a review's text), and no other point locates the home.
 import asyncio
 import json
 import logging
+import re
 import uuid
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -25,6 +26,7 @@ import pytest
 from fastapi import FastAPI
 from redis.exceptions import RedisError
 from sqlalchemy import select, text, update
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.integrations.storage import (
@@ -33,8 +35,10 @@ from app.integrations.storage import (
     StorageUnavailableError,
     StoredObject,
 )
-from app.integrations.stripe_errors import StripeUnavailableError
+from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
+from app.modules.accounts.eraser import AccountEraser
 from app.modules.accounts.models import AccountDeletion
+from app.modules.accounts.service import AccountDeletionService
 from app.modules.accounts.tasks import clean_up_deleted_account, retry_account_cleanups
 from app.modules.addresses.models import Address, SavedAddress
 from app.modules.audit.models import AuditLog
@@ -45,6 +49,7 @@ from app.modules.categories.models import Category
 from app.modules.chat.models import JobMessage
 from app.modules.devices.models import Device, DevicePlatform
 from app.modules.disputes.models import Dispute, DisputeReason, DisputeStatus
+from app.modules.interest.models import InterestSource, LaunchInterest
 from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.ops.models import RequestFollowup, RequestNote
 from app.modules.payments.models import (
@@ -60,6 +65,7 @@ from app.modules.pros.models import (
     ProDocument,
     ProDocumentType,
     ProProfile,
+    ProServiceArea,
     ProVerificationStatus,
 )
 from app.modules.quotes.models import Quote, QuoteStatus
@@ -74,8 +80,20 @@ from app.modules.requests.models import (
     ServiceRequest,
 )
 from app.modules.reviews.models import Review, ReviewAuthorRole
+from app.modules.service_areas.models import ServiceArea
 from app.modules.support.models import SupportTicket, TicketRole, TicketTopic
+from app.modules.tips.models import (
+    PAYOUTS_NOT_ENABLED,
+    PRO_NOT_APPROVED,
+    Tip,
+    TipChoice,
+    TipStatus,
+    TipTransferStatus,
+)
+from app.modules.tips.transfers import TIP_TRANSFER_NEEDS_REVIEW
+from app.modules.uploads.schemas import UploadPurpose
 from app.modules.users.models import User
+from app.modules.users.service import UserService
 from app.modules.users.types import DELETED_USER_NAME, ERASED_TEXT, UserRole, UserStatus
 from app.modules.waitlist.models import WaitlistEntry, WaitlistSource
 from app.queue import get_job_queue
@@ -258,6 +276,9 @@ async def purge(session: AsyncSession, users: list[uuid.UUID], categories: list[
         "DELETE FROM job_photos WHERE job_id = ANY(:jobs)",
         "DELETE FROM job_events WHERE job_id = ANY(:jobs)",
         "DELETE FROM support_tickets WHERE user_id = ANY(:users) OR job_id = ANY(:jobs)",
+        "DELETE FROM tip_requests WHERE customer_id = ANY(:users) OR job_id = ANY(:jobs)",
+        "DELETE FROM tips WHERE job_id = ANY(:jobs) OR customer_id = ANY(:users) "
+        "OR pro_id = ANY(:pros)",
         "DELETE FROM jobs WHERE id = ANY(:jobs)",
         "DELETE FROM payments WHERE customer_id = ANY(:users) OR request_id = ANY(:requests)",
         "DELETE FROM request_dispatches WHERE request_id = ANY(:requests) OR pro_id = ANY(:pros)",
@@ -708,6 +729,7 @@ async def test_a_customers_open_requests_are_cancelled(world: World) -> None:
             (await add_request(session, world, status)).id
             for status in (
                 RequestStatus.RECEIVED,
+                RequestStatus.REVIEWING,
                 RequestStatus.FINDING_PRO,
                 RequestStatus.QUOTE_READY,
             )
@@ -724,15 +746,19 @@ async def test_a_customers_open_requests_are_cancelled(world: World) -> None:
     assert world.audits[0][4]["requests_cancelled"] == len(open_ids)
 
 
-# What refuses a deletion: each case leaves the account exactly as it was.
+# What refuses a deletion: each case leaves the account exactly as it was. One case per status
+# each rule names (#590 round 1).
+
+Plant = Callable[[AsyncSession, World], Awaitable[None]]
 
 
-async def customer_scheduled_job(session: AsyncSession, world: World) -> None:
-    await add_job(session, world, JobStatus.SCHEDULED)
+def a_job(status: JobStatus) -> Plant:
+    """A job of the customer with the pro, in `status`."""
 
+    async def plant(session: AsyncSession, world: World) -> None:
+        await add_job(session, world, status)
 
-async def customer_completed_job(session: AsyncSession, world: World) -> None:
-    await add_job(session, world, JobStatus.COMPLETED)
+    return plant
 
 
 async def customer_open_dispute(session: AsyncSession, world: World) -> None:
@@ -762,43 +788,87 @@ async def customer_refund_pending(session: AsyncSession, world: World) -> None:
     )
 
 
-async def customer_payment_in_progress(session: AsyncSession, world: World) -> None:
-    request = await add_request(session, world)
-    quote = await add_quote(session, world, request)
+async def customer_late_refund(session: AsyncSession, world: World) -> None:
+    # Stripe says succeeded, but a late refund was seen on it: staff must reconcile.
+    paid = await add_job(session, world, JobStatus.CANCELLED)
     session.add(
-        Payment(
-            request_id=request.id,
-            quote_id=quote.id,
-            customer_id=world.customer.id,
-            amount_cents=PRICE,
-            tax_cents=TAX,
-            customer_total_cents=PRICE + TAX,
-            platform_fee_cents=FEE,
-            pro_payout_cents=PRICE - FEE,
-            take_rate_bps=1500,
-            currency="usd",
-            status=PaymentStatus.PROCESSING,
-        )
-    )
-
-
-async def pro_confirmed_job(session: AsyncSession, world: World) -> None:
-    await add_job(session, world, JobStatus.CONFIRMED)
-
-
-async def pro_transfer_pending(session: AsyncSession, world: World) -> None:
-    paid = await add_job(session, world)
-    session.add(
-        Transfer(
+        Refund(
             job_id=paid.job.id,
             payment_id=paid.payment.id,
-            pro_id=world.pro_profile_id,
-            amount_cents=PRICE - FEE,
+            amount_cents=PRICE,
             currency="usd",
-            status=TransferStatus.FAILED,
-            idempotency_key=f"transfer:{paid.job.id}",
+            status=RefundStatus.CREATED,
+            stripe_refund_id=f"re_{uuid.uuid4().hex}",
+            stripe_status="succeeded",
+            late_refund_seen_at=datetime.now(UTC),
+            idempotency_key=f"cancel:{paid.job.id}:refund",
         )
     )
+
+
+async def customer_abandoned_refund(session: AsyncSession, world: World) -> None:
+    # Staff gave it up: it can move no money any more.
+    paid = await add_job(session, world, JobStatus.CANCELLED)
+    session.add(
+        Refund(
+            job_id=paid.job.id,
+            payment_id=paid.payment.id,
+            amount_cents=PRICE,
+            currency="usd",
+            status=RefundStatus.ABANDONED,
+            idempotency_key=f"cancel:{paid.job.id}:refund",
+        )
+    )
+
+
+def a_payment(status: PaymentStatus) -> Plant:
+    """A payment of the customer's accepted request, in `status`."""
+
+    async def plant(session: AsyncSession, world: World) -> None:
+        request = await add_request(session, world)
+        quote = await add_quote(session, world, request)
+        session.add(
+            Payment(
+                request_id=request.id,
+                quote_id=quote.id,
+                customer_id=world.customer.id,
+                amount_cents=PRICE,
+                tax_cents=TAX,
+                customer_total_cents=PRICE + TAX,
+                platform_fee_cents=FEE,
+                pro_payout_cents=PRICE - FEE,
+                take_rate_bps=1500,
+                currency="usd",
+                status=status,
+            )
+        )
+
+    return plant
+
+
+def a_transfer(status: TransferStatus) -> Plant:
+    """The pro's transfer for a paid-out job, in `status`."""
+
+    async def plant(session: AsyncSession, world: World) -> None:
+        paid = await add_job(session, world)
+        session.add(
+            Transfer(
+                job_id=paid.job.id,
+                payment_id=paid.payment.id,
+                pro_id=world.pro_profile_id,
+                amount_cents=PRICE - FEE,
+                currency="usd",
+                status=status,
+                stripe_transfer_id=(
+                    f"tr_{uuid.uuid4().hex}"
+                    if status in (TransferStatus.CREATED, TransferStatus.REVERSED)
+                    else None
+                ),
+                idempotency_key=f"transfer:{paid.job.id}",
+            )
+        )
+
+    return plant
 
 
 async def pro_pending_quote(session: AsyncSession, world: World) -> None:
@@ -811,25 +881,116 @@ async def pro_accepted_quote_being_paid(session: AsyncSession, world: World) -> 
     await add_quote(session, world, request)
 
 
-@pytest.mark.parametrize(
-    ("who", "plant", "code"),
-    [
-        ("customer", customer_scheduled_job, "active_job"),
-        ("customer", customer_completed_job, "active_job"),
-        ("customer", customer_open_dispute, "open_dispute"),
-        ("customer", customer_refund_pending, "refund_pending"),
-        ("customer", customer_payment_in_progress, "payment_in_progress"),
-        ("pro", pro_confirmed_job, "active_job"),
-        ("pro", pro_transfer_pending, "payout_pending"),
-        ("pro", pro_pending_quote, "active_quote"),
-        ("pro", pro_accepted_quote_being_paid, "active_quote"),
+def a_tip(
+    status: TipStatus,
+    transfer: TipTransferStatus = TipTransferStatus.NONE,
+    code: str | None = None,
+) -> Plant:
+    """A paid-out job (its own transfer made) with the customer's tip for the pro in `status`,
+    its transfer in `transfer` (held: for `code`)."""
+
+    async def plant(session: AsyncSession, world: World) -> None:
+        paid = await add_job(session, world)
+        session.add(
+            Transfer(
+                job_id=paid.job.id,
+                payment_id=paid.payment.id,
+                pro_id=world.pro_profile_id,
+                amount_cents=PRICE - FEE,
+                currency="usd",
+                status=TransferStatus.CREATED,
+                stripe_transfer_id=f"tr_{uuid.uuid4().hex}",
+                idempotency_key=f"transfer:{paid.job.id}",
+            )
+        )
+        declined = status is TipStatus.DECLINED
+        made = transfer in (TipTransferStatus.CREATED, TipTransferStatus.REVERSED)
+        session.add(
+            Tip(
+                job_id=paid.job.id,
+                request_id=paid.request.id,
+                customer_id=world.customer.id,
+                pro_id=world.pro_profile_id,
+                choice=TipChoice.NONE if declined else TipChoice.PERCENT,
+                percent=None if declined else 15,
+                amount_cents=0 if declined else 1_500,
+                currency="usd",
+                status=status,
+                attempt=0 if declined else 1,
+                stripe_payment_intent_id=None if declined else f"pi_{uuid.uuid4().hex}",
+                payment_intent_requested_at=None if declined else datetime.now(UTC),
+                succeeded_at=datetime.now(UTC) if status is TipStatus.SUCCEEDED else None,
+                transfer_status=transfer,
+                transfer_last_error_code=code,
+                stripe_transfer_id=f"tr_{uuid.uuid4().hex}" if made else None,
+            )
+        )
+
+    return plant
+
+
+BEING_PAID = (TipStatus.REQUIRES_PAYMENT, TipStatus.PROCESSING, TipStatus.FAILED)
+SUCCEEDED = TipStatus.SUCCEEDED
+CUSTOMER_JOBS = (JobStatus.SCHEDULED, JobStatus.ON_THE_WAY, JobStatus.IN_PROGRESS)
+PRO_JOBS = (*CUSTOMER_JOBS, JobStatus.COMPLETED, JobStatus.CONFIRMED, JobStatus.DISPUTED)
+
+IN_FLIGHT = [
+    *[
+        ("customer", a_job(status), "active_job")
+        for status in (*CUSTOMER_JOBS, JobStatus.COMPLETED)
     ],
-)
+    ("customer", customer_open_dispute, "open_dispute"),
+    ("customer", customer_refund_pending, "refund_pending"),
+    ("customer", customer_late_refund, "refund_pending"),
+    *[
+        ("customer", a_payment(status), "payment_in_progress")
+        for status in (
+            PaymentStatus.REQUIRES_PAYMENT,
+            PaymentStatus.PROCESSING,
+            PaymentStatus.FAILED,
+        )
+    ],
+    *[("pro", a_job(status), "active_job") for status in PRO_JOBS],
+    # Read before the job (which is disputed too), so the app can say so.
+    ("pro", customer_open_dispute, "open_dispute"),
+    *[
+        ("pro", a_transfer(status), "payout_pending")
+        for status in (TransferStatus.PENDING, TransferStatus.FAILED)
+    ],
+    ("pro", pro_pending_quote, "active_quote"),
+    ("pro", pro_accepted_quote_being_paid, "active_quote"),
+    # Tips (the Vault's B1, the Gatekeeper's B5): their money moves on the tips row.
+    *[("customer", a_tip(status), "payment_in_progress") for status in BEING_PAID],
+    *[("pro", a_tip(status), "payout_pending") for status in BEING_PAID],
+    ("pro", a_tip(SUCCEEDED, TipTransferStatus.NONE), "payout_pending"),
+    ("pro", a_tip(SUCCEEDED, TipTransferStatus.PENDING), "payout_pending"),
+    ("pro", a_tip(SUCCEEDED, TipTransferStatus.FAILED, "api_error"), "payout_pending"),
+    ("pro", a_tip(SUCCEEDED, TipTransferStatus.HELD, PAYOUTS_NOT_ENABLED), "payout_pending"),
+]
+IN_FLIGHT_IDS = [
+    *[f"customer-job-{status}" for status in (*CUSTOMER_JOBS, JobStatus.COMPLETED)],
+    "customer-open-dispute",
+    "customer-refund-pending",
+    "customer-late-refund",
+    *[f"customer-payment-{status}" for status in ("requires_payment", "processing", "failed")],
+    *[f"pro-job-{status}" for status in PRO_JOBS],
+    "pro-open-dispute",
+    "pro-transfer-pending",
+    "pro-transfer-failed",
+    "pro-pending-quote",
+    "pro-accepted-quote-being-paid",
+    *[f"customer-tip-{status}" for status in BEING_PAID],
+    *[f"pro-tip-{status}" for status in BEING_PAID],
+    "pro-tip-transfer-not-started",
+    "pro-tip-transfer-under-way",
+    "pro-tip-transfer-failed",
+    "pro-tip-held-payouts-not-enabled",
+]
+
+
+@pytest.mark.parametrize(("who", "plant", "code"), IN_FLIGHT, ids=IN_FLIGHT_IDS)
 async def test_a_deletion_waits_while_something_is_in_flight(
-    world: World,
-    who: str,
-    plant: Callable[[AsyncSession, World], Any],
-    code: str,
+    world: World, who: str, plant: Plant, code: str
 ) -> None:
     account = world.customer if who == "customer" else world.pro
     async with world.sessions() as session:
@@ -849,6 +1010,71 @@ async def test_a_deletion_waits_while_something_is_in_flight(
         assert list(rows) == []
     assert world.audits == []
     assert (await world.client.get("/v1/auth/me", headers=account.headers)).status_code == 200
+
+
+SETTLED = [
+    ("customer", customer_abandoned_refund),
+    # The tip is the pro's money now, or none was ever taken.
+    ("customer", a_tip(SUCCEEDED)),
+    ("customer", a_tip(TipStatus.CANCELED)),
+    ("customer", a_tip(TipStatus.DECLINED)),
+    ("pro", a_tip(SUCCEEDED, TipTransferStatus.CREATED)),
+    ("pro", a_tip(TipStatus.CANCELED)),
+    ("pro", a_tip(TipStatus.DECLINED)),
+    # Staff's, as a job's reversed transfer: they never clear by themselves.
+    ("pro", a_tip(SUCCEEDED, TipTransferStatus.REVERSED)),
+    ("pro", a_tip(SUCCEEDED, TipTransferStatus.HELD, TIP_TRANSFER_NEEDS_REVIEW)),
+    ("pro", a_transfer(TransferStatus.REVERSED)),
+]
+SETTLED_IDS = [
+    "customer-abandoned-refund",
+    "customer-tip-succeeded",
+    "customer-tip-canceled",
+    "customer-tip-declined",
+    "pro-tip-transfer-created",
+    "pro-tip-canceled",
+    "pro-tip-declined",
+    "pro-tip-transfer-reversed",
+    "pro-tip-held-for-staff",
+    "pro-transfer-reversed",
+]
+
+
+@pytest.mark.parametrize(("who", "plant"), SETTLED, ids=SETTLED_IDS)
+async def test_a_deletion_goes_ahead_once_the_money_has_settled(
+    world: World, who: str, plant: Plant
+) -> None:
+    account = world.customer if who == "customer" else world.pro
+    async with world.sessions() as session:
+        await plant(session, world)
+        await session.commit()
+
+    response = await delete_account(world.client, account)
+
+    assert response.status_code == 204, response.text
+    async with world.sessions() as session:
+        assert (await row_values(session, User, account.id))["status"] is UserStatus.DELETED
+
+
+# TODO(Cesar, #590 round 1): does a tip held until the pro is approved again (pro_not_approved)
+# block the pro's deletion? A money rule, not decided yet. It blocks until he decides (a refused
+# deletion can be asked again; a deletion cannot be undone). To let it go, set False here and
+# remove PRO_NOT_APPROVED from tips.erasure.UNDECIDED_HOLD_CODES.
+PRO_NOT_APPROVED_BLOCKS = True
+
+
+async def test_todo_cesar_a_tip_held_until_the_pro_is_approved(world: World) -> None:
+    async with world.sessions() as session:
+        await a_tip(SUCCEEDED, TipTransferStatus.HELD, PRO_NOT_APPROVED)(session, world)
+        await session.commit()
+
+    response = await delete_account(world.client, world.pro)
+
+    if PRO_NOT_APPROVED_BLOCKS:
+        assert response.status_code == 409, response.text
+        assert response.json()["error"]["code"] == "payout_pending"
+    else:
+        assert response.status_code == 204, response.text
 
 
 async def test_a_wrong_password_is_refused_and_tries_are_limited(world: World) -> None:
@@ -932,8 +1158,6 @@ async def test_two_deletions_at_once_delete_once(
 ) -> None:
     # The first holds the user's row; the second, authenticated already, waits for it (Postgres
     # reports the wait), then finds the account deleted and answers the same.
-    from app.modules.users.service import UserService
-
     original = UserService.get_for_update
     entered: list[str] = []
     first_locked = asyncio.Event()
@@ -980,11 +1204,13 @@ async def test_two_deletions_at_once_delete_once(
 @dataclass
 class FakeStorage:
     """The storage port's listing and delete: `objects` are what it holds, each delete is
-    recorded; `failure` makes every call raise it."""
+    recorded; `failure` makes every call raise it; a key in `undeletable` is reported failed
+    and stays."""
 
     objects: set[str] = field(default_factory=set)
     deleted: list[list[str]] = field(default_factory=list)
     failure: Exception | None = None
+    undeletable: set[str] = field(default_factory=set)
 
     def list_older_than(self, prefix: str, before: datetime) -> Iterator[ObjectPage]:
         if self.failure is not None:
@@ -996,12 +1222,16 @@ class FakeStorage:
         if self.failure is not None:
             raise self.failure
         self.deleted.append(sorted(keys))
-        self.objects -= set(keys)
-        return DeleteResult(deleted=len(keys), failed=0)
+        failed = set(keys) & self.undeletable
+        self.objects -= set(keys) - failed
+        return DeleteResult(deleted=len(set(keys) - failed), failed=len(failed))
 
 
 def worker_ctx(
-    world: World, settings: Any, storage: FakeStorage, methods: FakeStripePaymentMethods
+    world: World,
+    settings: Any,
+    storage: FakeStorage | None,
+    methods: FakeStripePaymentMethods | None,
 ) -> dict[str, Any]:
     return {
         "session_factory": world.sessions,
@@ -1037,6 +1267,18 @@ async def with_card_and_photo(world: World, methods: FakeStripePaymentMethods) -
     return customer_id, photo_key
 
 
+async def past_the_upload_urls(world: World, user_id: uuid.UUID) -> None:
+    """As if the upload URLs issued before the deletion had expired (UPLOAD_URL_TTL_SECONDS):
+    the files' next pass is the last."""
+    async with world.sessions() as session:
+        await session.execute(
+            update(AccountDeletion)
+            .where(AccountDeletion.user_id == user_id)
+            .values(storage_settled_after=datetime.now(UTC) - timedelta(seconds=1))
+        )
+        await session.commit()
+
+
 async def make_due(world: World, user_id: uuid.UUID, settings: Any) -> None:
     """As if the retry wait had passed since the last attempt, and any copy had ended."""
     past = datetime.now(UTC) - timedelta(minutes=settings.account_deletion_retry_after_minutes + 1)
@@ -1057,6 +1299,7 @@ async def test_the_worker_detaches_the_cards_and_deletes_the_files(
     assert (await delete_account(world.client, world.customer)).status_code == 204
     pending = await cleanup_row(world, world.customer.id)
     assert (pending.cards_detached_at, pending.storage_deleted_at) == (None, None)
+    await past_the_upload_urls(world, world.customer.id)
 
     await clean_up_deleted_account(
         worker_ctx(world, settings, storage, methods), str(world.customer.id)
@@ -1069,8 +1312,9 @@ async def test_the_worker_detaches_the_cards_and_deletes_the_files(
     assert done.storage_deleted_at is not None
     assert done.storage_keys == []  # the keys name the user: not kept once the files are gone
     assert (done.attempts, done.last_error) == (1, None)
-    # Nothing left: another run does nothing.
+    # Nothing left: another run does nothing, even past the retry wait (never claimed).
     calls = len(methods.calls)
+    await make_due(world, world.customer.id, settings)
     await clean_up_deleted_account(
         worker_ctx(world, settings, storage, methods), str(world.customer.id)
     )
@@ -1122,6 +1366,7 @@ async def test_a_copy_still_being_made_keeps_the_files_last_pass_for_after_it(
         )
         session.add(pending)
         await session.commit()
+    started = datetime.now(UTC)
     assert (await delete_account(world.client, world.customer)).status_code == 204
     ctx = worker_ctx(world, settings, storage, methods)
 
@@ -1133,7 +1378,11 @@ async def test_a_copy_still_being_made_keeps_the_files_last_pass_for_after_it(
     expected = sorted(
         [pending.file_key, *(safe_key_for(pending.id, ext) for ext in SAFE_EXTENSIONS)]
     )
-    # The first pass deleted them, but the copy could still upload: it was not the last.
+    # The first pass deleted them, but the copy could still upload: it was not the last. It
+    # waits for the copy (MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS), longer than the upload URLs.
+    copy_settle = timedelta(seconds=settings.media_sanitize_job_timeout_seconds)
+    assert copy_settle > timedelta(seconds=settings.upload_url_ttl_seconds)
+    assert early.storage_settled_after >= started + copy_settle
     assert early.storage_deleted_at is None
     assert early.storage_keys == expected
     assert storage.deleted == [expected, expected]
@@ -1148,6 +1397,7 @@ async def test_a_lost_queue_leaves_the_cleanup_to_the_sweep(
 
     with caplog.at_level(logging.ERROR):
         response = await delete_account(world.client, world.customer)
+    await past_the_upload_urls(world, world.customer.id)
     await retry_account_cleanups(worker_ctx(world, settings, storage, methods))
 
     assert response.status_code == 204
@@ -1239,16 +1489,18 @@ async def test_every_upload_under_the_accounts_prefix_goes_but_job_and_dispute_p
     mine, theirs = world.customer.id, world.pro.id
     replaced = f"u/{mine}/profile_photo/{uuid.uuid4().hex}.jpg"  # an ID photo replaced since
     draft = f"u/{mine}/request_media/{uuid.uuid4().hex}.jpg"  # removed before the request
-    evidence = f"u/{mine}/dispute_photo/{uuid.uuid4().hex}.jpg"
+    evidence = f"u/{mine}/{UploadPurpose.DISPUTE_PHOTO.value}/{uuid.uuid4().hex}.jpg"
+    work = f"u/{mine}/{UploadPurpose.JOB_PHOTO.value}/{uuid.uuid4().hex}.jpg"  # a pro's, kept too
     other = f"u/{theirs}/profile_photo/{uuid.uuid4().hex}.jpg"
-    storage = FakeStorage(objects={replaced, draft, evidence, other})
+    storage = FakeStorage(objects={replaced, draft, evidence, work, other})
     assert (await delete_account(world.client, world.customer)).status_code == 204
+    await past_the_upload_urls(world, mine)
 
     await clean_up_deleted_account(
         worker_ctx(world, settings, storage, FakeStripePaymentMethods()), str(mine)
     )
 
-    assert storage.objects == {evidence, other}
+    assert storage.objects == {evidence, work, other}
     assert (await cleanup_row(world, mine)).storage_deleted_at is not None
 
 
@@ -1311,3 +1563,532 @@ async def test_a_deleted_pros_quote_is_never_hired(world: World) -> None:
 
     assert listed.status_code == 200, listed.text
     assert listed.json()["items"] == []
+
+
+# #590 round 1: one test per rule the reviewers' mutants showed untested.
+
+# The production settle (ACCOUNT_DELETION_SETTLE_SECONDS, 900): the second erasure waits.
+AT_THE_DEFAULT_SETTLE = pytest.mark.parametrize(
+    "settings", [make_settings(auth_rate_limit_requests=RATE_LIMIT)]
+)
+
+
+async def test_a_password_changed_since_the_check_refuses_the_deletion(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = AccountEraser.hold
+
+    async def reset_meanwhile(self: AccountEraser, account: Any) -> Any:
+        # A password reset commits after the check, before the user's row is locked.
+        async with world.sessions() as other:
+            await other.execute(
+                update(User)
+                .where(User.id == world.customer.id)
+                .values(password_hash="$argon2id$v=19$m=65536,t=3,p=4$cmVzZXQ$cmVzZXQ")
+            )
+            await other.commit()
+        return await original(self, account)
+
+    monkeypatch.setattr(AccountEraser, "hold", reset_meanwhile)
+
+    response = await delete_account(world.client, world.customer)
+
+    assert (response.status_code, response.json()["error"]["code"]) == (403, "invalid_password")
+    async with world.sessions() as session:
+        assert (await row_values(session, User, world.customer.id))["status"] is UserStatus.ACTIVE
+        rows = await session.scalars(
+            select(AccountDeletion).where(AccountDeletion.user_id == world.customer.id)
+        )
+        assert list(rows) == []
+    assert world.audits == []
+
+
+async def test_while_the_deletion_holds_the_account_no_row_can_point_at_it(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # FOR UPDATE, not FOR NO KEY UPDATE: an insert whose foreign key names the user waits.
+    original = AccountDeletionService._refuse_while_busy
+    probes: list[str] = []
+
+    async def probe(self: AccountDeletionService, user: Any) -> None:
+        async with world.sessions() as other:
+            await other.execute(text("SET LOCAL lock_timeout = '300ms'"))
+            other.add(
+                Device(
+                    user_id=user.id,
+                    expo_push_token=f"ExponentPushToken[{uuid.uuid4().hex}]",
+                    platform=DevicePlatform.IOS,
+                    last_seen_at=datetime.now(UTC),
+                )
+            )
+            try:
+                await other.flush()
+                probes.append("inserted")
+            except DBAPIError:
+                probes.append("waited")
+            await other.rollback()
+        await original(self, user)
+
+    monkeypatch.setattr(AccountDeletionService, "_refuse_while_busy", probe)
+
+    response = await delete_account(world.client, world.customer)
+
+    assert response.status_code == 204, response.text
+    assert probes == ["waited"]
+
+
+async def test_no_log_of_the_deletion_or_the_worker_names_the_person_or_a_file(
+    world: World, settings: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The Vault's probe V4: the message and every extra of every record.
+    methods, storage = FakeStripePaymentMethods(), FakeStorage()
+    async with world.sessions() as session:
+        await plant_everything(session, world)
+        await session.commit()
+    stripe_customer, photo_key = await with_card_and_photo(world, methods)
+    storage.objects |= {photo_key, f"u/{world.customer.id}/request_media/{uuid.uuid4().hex}.jpg"}
+
+    with caplog.at_level(logging.DEBUG):
+        refused = await delete_account(world.client, world.customer, "not the password")
+        deleted = await delete_account(world.client, world.customer)
+        ctx = worker_ctx(world, settings, storage, methods)
+        await clean_up_deleted_account(ctx, str(world.customer.id))
+        await make_due(world, world.customer.id, settings)
+        await retry_account_cleanups(ctx)
+
+    assert (refused.status_code, deleted.status_code) == (403, 204)
+    assert (await cleanup_row(world, world.customer.id)).storage_deleted_at is not None
+    logged = caplog.text + "\n".join(
+        json.dumps(record.__dict__, default=str) for record in caplog.records
+    )
+    messages = {record.getMessage() for record in caplog.records}
+    assert {
+        "account_delete_refused",
+        "account_deleted",
+        "account_erased_again",
+        "account_cleanup_ran",
+    } <= messages
+    leaks = [
+        world.sentinel,
+        world.customer.email,
+        world.phone,
+        photo_key,
+        f"u/{world.customer.id}/",
+        "request_media/",
+        "profile_photo/",
+        stripe_customer,
+        PASSWORD,
+        "not the password",
+    ]
+    assert [leak for leak in leaks if leak in logged] == []
+    assert re.search(r"\bm/[0-9a-f]{32}\.", logged) is None  # a safe copy's key
+
+
+# The worker's failures: nothing counts as done that is not.
+
+
+async def test_files_whose_delete_failed_keep_their_keys_for_the_next_pass(
+    world: World, settings: Any
+) -> None:
+    methods = FakeStripePaymentMethods()
+    _, photo_key = await with_card_and_photo(world, methods)
+    storage = FakeStorage(objects={photo_key}, undeletable={photo_key})
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+    await past_the_upload_urls(world, world.customer.id)
+    ctx = worker_ctx(world, settings, storage, methods)
+
+    await clean_up_deleted_account(ctx, str(world.customer.id))
+    failed = await cleanup_row(world, world.customer.id)
+    storage.undeletable.clear()
+    await make_due(world, world.customer.id, settings)
+    await retry_account_cleanups(ctx)
+
+    assert failed.storage_deleted_at is None
+    assert failed.storage_keys == [photo_key]  # still known: the next pass deletes it
+    assert failed.last_error == "storage_delete_failed"
+    assert photo_key not in storage.objects
+    assert (await cleanup_row(world, world.customer.id)).storage_deleted_at is not None
+
+
+@pytest.mark.parametrize("missing", ["storage", "stripe"])
+async def test_a_worker_without_storage_or_stripe_leaves_that_part_to_do(
+    world: World, settings: Any, missing: str
+) -> None:
+    methods = FakeStripePaymentMethods()
+    customer_id, photo_key = await with_card_and_photo(world, methods)
+    storage = FakeStorage(objects={photo_key})
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+    await past_the_upload_urls(world, world.customer.id)
+    ctx = worker_ctx(
+        world,
+        settings,
+        None if missing == "storage" else storage,
+        None if missing == "stripe" else methods,
+    )
+
+    await clean_up_deleted_account(ctx, str(world.customer.id))
+
+    row = await cleanup_row(world, world.customer.id)
+    if missing == "storage":
+        assert (row.storage_deleted_at, row.storage_keys) == (None, [photo_key])
+        assert row.cards_detached_at is not None
+        assert row.last_error == "storage_not_configured"
+    else:
+        assert row.cards_detached_at is None
+        assert methods.attached(customer_id) != []
+        assert row.storage_deleted_at is not None
+        assert row.last_error == "stripe_not_configured"
+
+
+async def test_a_card_stripe_refuses_to_detach_is_tried_again_and_the_files_still_go(
+    world: World, settings: Any
+) -> None:
+    methods = FakeStripePaymentMethods(
+        errors={"list_cards": StripeRejectedError(code="resource_missing")}
+    )
+    _, photo_key = await with_card_and_photo(world, methods)
+    storage = FakeStorage(objects={photo_key})
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+    await past_the_upload_urls(world, world.customer.id)
+
+    await clean_up_deleted_account(
+        worker_ctx(world, settings, storage, methods), str(world.customer.id)
+    )
+
+    row = await cleanup_row(world, world.customer.id)
+    assert (row.cards_detached_at, row.last_error) == (None, "StripeRejectedError")
+    assert row.storage_deleted_at is not None
+    assert storage.objects == set()
+
+
+# The second erasure and what it hands the worker.
+
+
+@AT_THE_DEFAULT_SETTLE
+async def test_the_second_erasure_waits_for_the_settle_time(world: World, settings: Any) -> None:
+    started = datetime.now(UTC)
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+    async with world.sessions() as session:
+        deleted_at = (await row_values(session, User, world.customer.id))["deleted_at"]
+        # A request sent before the deletion writes after its commit.
+        await session.execute(
+            update(User).where(User.id == world.customer.id).values(first_name=world.sentinel)
+        )
+        await session.commit()
+    pending = await cleanup_row(world, world.customer.id)
+    ctx = worker_ctx(world, settings, FakeStorage(), FakeStripePaymentMethods())
+
+    await clean_up_deleted_account(ctx, str(world.customer.id))
+    early = await cleanup_row(world, world.customer.id)
+    async with world.sessions() as session:
+        assert ("users", "first_name") in await sweep(session, world.sentinel)
+    await make_due(world, world.customer.id, settings)
+    await retry_account_cleanups(ctx)
+
+    settle = timedelta(seconds=settings.account_deletion_settle_seconds)
+    assert pending.erase_settled_after >= started + settle
+    assert early.erased_again_at is None
+    async with world.sessions() as session:
+        assert await sweep(session, world.sentinel) == set()
+        # The deletion time is the first one: the second pass does not move it.
+        assert (await row_values(session, User, world.customer.id))["deleted_at"] == deleted_at
+    assert (await cleanup_row(world, world.customer.id)).erased_again_at is not None
+
+
+@AT_THE_DEFAULT_SETTLE
+async def test_what_the_second_erasure_finds_reaches_the_worker(
+    world: World, settings: Any
+) -> None:
+    methods, storage = FakeStripePaymentMethods(), FakeStorage()
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+    await past_the_upload_urls(world, world.customer.id)
+    ctx = worker_ctx(world, settings, storage, methods)
+    await clean_up_deleted_account(ctx, str(world.customer.id))
+    first = await cleanup_row(world, world.customer.id)
+    assert (first.storage_deleted_at is not None, first.cards_detached_at is not None) == (
+        True,
+        True,
+    )
+    # Late writes: a request with a photo whose safe copy is made, an ID photo, a card.
+    late_customer, photo_key = await with_card_and_photo(world, methods)
+    async with world.sessions() as session:
+        request = await add_request(session, world, RequestStatus.RECEIVED)
+        media_id = uuid.uuid4()
+        original = f"u/{world.customer.id}/request_media/{uuid.uuid4().hex}.jpg"
+        safe_copy = safe_key_for(media_id, SAFE_EXTENSIONS[0])
+        session.add(
+            RequestMedia(
+                id=media_id,
+                request_id=request.id,
+                kind=RequestMediaKind.PHOTO,
+                file_key=original,
+                safe_key=safe_copy,
+                safe_status=MediaSafeStatus.READY,
+            )
+        )
+        await session.commit()
+    storage.objects |= {photo_key, original, safe_copy}
+
+    await make_due(world, world.customer.id, settings)
+    await retry_account_cleanups(ctx)
+
+    # The safe copy is under no account's prefix: only the second pass's keys name it.
+    assert storage.objects == set()
+    assert methods.attached(late_customer) == []
+    done = await cleanup_row(world, world.customer.id)
+    assert done.erased_again_at is not None
+    assert (done.storage_deleted_at is not None, done.cards_detached_at is not None) == (
+        True,
+        True,
+    )
+
+
+@AT_THE_DEFAULT_SETTLE
+async def test_an_upload_stored_after_the_files_pass_goes_after_the_second_erasure(
+    world: World, settings: Any
+) -> None:
+    # The Gatekeeper's B1, the Vault's N1: an upload URL issued before the deletion stores a
+    # file no row names, after the worker's pass over the files.
+    storage = FakeStorage()
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+    await past_the_upload_urls(world, world.customer.id)
+    ctx = worker_ctx(world, settings, storage, FakeStripePaymentMethods())
+    await clean_up_deleted_account(ctx, str(world.customer.id))
+    assert (await cleanup_row(world, world.customer.id)).storage_deleted_at is not None
+    late = f"u/{world.customer.id}/request_media/{uuid.uuid4().hex}.jpg"
+    storage.objects.add(late)
+
+    await make_due(world, world.customer.id, settings)
+    await retry_account_cleanups(ctx)
+
+    assert storage.objects == set()
+    done = await cleanup_row(world, world.customer.id)
+    assert (done.erased_again_at is not None, done.storage_deleted_at is not None) == (True, True)
+
+
+async def test_no_files_pass_is_the_last_before_the_upload_urls_expire(
+    world: World, settings: Any
+) -> None:
+    # Here the second erasure runs at once (settle 0): the URLs' lifetime alone holds the pass.
+    started = datetime.now(UTC)
+    storage = FakeStorage()
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+    pending = await cleanup_row(world, world.customer.id)
+    ctx = worker_ctx(world, settings, storage, FakeStripePaymentMethods())
+
+    await clean_up_deleted_account(ctx, str(world.customer.id))
+    early = await cleanup_row(world, world.customer.id)
+    late = f"u/{world.customer.id}/profile_photo/{uuid.uuid4().hex}.jpg"
+    storage.objects.add(late)  # inside the URL's lifetime
+    await make_due(world, world.customer.id, settings)
+    await retry_account_cleanups(ctx)
+
+    assert pending.storage_settled_after >= started + timedelta(
+        seconds=settings.upload_url_ttl_seconds
+    )
+    assert (early.erased_again_at is not None, early.storage_deleted_at) == (True, None)
+    assert storage.objects == set()
+    assert (await cleanup_row(world, world.customer.id)).storage_deleted_at is not None
+
+
+async def test_a_copy_the_second_erasure_finds_running_holds_the_files_last_pass(
+    world: World, settings: Any
+) -> None:
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+    async with world.sessions() as session:
+        # A request sent before the deletion adds a photo after it; its copy is being made.
+        request = await add_request(session, world, RequestStatus.RECEIVED)
+        session.add(
+            RequestMedia(
+                request_id=request.id,
+                kind=RequestMediaKind.PHOTO,
+                file_key=f"u/{world.customer.id}/request_media/{uuid.uuid4().hex}.jpg",
+            )
+        )
+        await session.commit()
+    await past_the_upload_urls(world, world.customer.id)
+    ctx = worker_ctx(world, settings, FakeStorage(), FakeStripePaymentMethods())
+    started = datetime.now(UTC)
+
+    await clean_up_deleted_account(ctx, str(world.customer.id))
+    early = await cleanup_row(world, world.customer.id)
+    await make_due(world, world.customer.id, settings)
+    await retry_account_cleanups(ctx)
+
+    copy_settle = timedelta(seconds=settings.media_sanitize_job_timeout_seconds)
+    assert early.erased_again_at is not None
+    assert early.storage_deleted_at is None
+    assert early.storage_settled_after >= started + copy_settle
+    assert (await cleanup_row(world, world.customer.id)).storage_deleted_at is not None
+
+
+async def test_the_second_pass_keeps_a_request_whose_payment_is_open(
+    world: World, settings: Any
+) -> None:
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+    async with world.sessions() as session:
+        # Written after the deletion by requests sent before it: one being paid, one not.
+        await a_payment(PaymentStatus.REQUIRES_PAYMENT)(session, world)
+        open_request = await add_request(session, world, RequestStatus.RECEIVED)
+        await session.commit()
+        being_paid = await session.scalar(
+            select(Payment.request_id).where(Payment.customer_id == world.customer.id)
+        )
+
+    await clean_up_deleted_account(
+        worker_ctx(world, settings, FakeStorage(), FakeStripePaymentMethods()),
+        str(world.customer.id),
+    )
+
+    async with world.sessions() as session:
+        statuses = dict(
+            (
+                await session.execute(
+                    select(ServiceRequest.id, ServiceRequest.status).where(
+                        ServiceRequest.id.in_([being_paid, open_request.id])
+                    )
+                )
+            ).all()
+        )
+    assert statuses == {
+        being_paid: RequestStatus.ACCEPTED,
+        open_request.id: RequestStatus.CANCELLED,
+    }
+
+
+# Each module's part, one rule each.
+
+
+async def test_the_media_rows_go_at_once(world: World) -> None:
+    async with world.sessions() as session:
+        request = await add_request(session, world, RequestStatus.RECEIVED)
+        session.add(
+            RequestMedia(
+                request_id=request.id,
+                kind=RequestMediaKind.PHOTO,
+                file_key=f"u/{world.customer.id}/request_media/{uuid.uuid4().hex}.jpg",
+                safe_status=MediaSafeStatus.FAILED,
+            )
+        )
+        await session.commit()
+
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+
+    async with world.sessions() as session:
+        rows = await session.scalars(
+            select(RequestMedia.id).where(RequestMedia.request_id == request.id)
+        )
+        assert list(rows) == []
+
+
+async def test_a_pros_service_areas_go(world: World) -> None:
+    async with world.sessions() as session:
+        area = ServiceArea(
+            region="Test", city="Orlando", state="FL", zip_code=f"0{uuid.uuid4().int % 10_000:04d}"
+        )
+        session.add(area)
+        await session.flush()
+        session.add(ProServiceArea(pro_id=world.pro_profile_id, service_area_id=area.id))
+        await session.commit()
+        area_id = area.id
+    try:
+        assert (await delete_account(world.client, world.pro)).status_code == 204
+
+        async with world.sessions() as session:
+            rows = await session.scalars(
+                select(ProServiceArea.id).where(ProServiceArea.pro_id == world.pro_profile_id)
+            )
+            assert list(rows) == []
+    finally:
+        async with world.sessions() as session:
+            await session.execute(
+                text("DELETE FROM pro_service_areas WHERE service_area_id = :id"), {"id": area_id}
+            )
+            await session.execute(text("DELETE FROM service_areas WHERE id = :id"), {"id": area_id})
+            await session.commit()
+
+
+async def test_a_signed_out_waitlist_entry_with_the_accounts_phone_goes(world: World) -> None:
+    zip_code = f"0{uuid.uuid4().int % 10_000:04d}"
+    async with world.sessions() as session:
+        await session.execute(
+            update(User).where(User.id == world.customer.id).values(phone=world.phone)
+        )
+        session.add(
+            WaitlistEntry(zip_code=zip_code, phone=world.phone, source=next(iter(WaitlistSource)))
+        )
+        await session.commit()
+
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+
+    async with world.sessions() as session:
+        rows = await session.scalars(
+            select(WaitlistEntry.id).where(WaitlistEntry.zip_code == zip_code)
+        )
+        assert list(rows) == []
+
+
+async def test_a_support_tickets_replay_key_and_fingerprint_go_with_its_text(
+    world: World,
+) -> None:
+    async with world.sessions() as session:
+        ticket = SupportTicket(
+            user_id=world.customer.id,
+            role=TicketRole.CUSTOMER,
+            topic=next(iter(TicketTopic)),
+            message=f"Call me, {world.sentinel}",
+            idempotency_key=uuid.uuid4(),
+            idempotency_fingerprint="a" * 64,
+        )
+        session.add(ticket)
+        await session.commit()
+
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+
+    async with world.sessions() as session:
+        erased = await row_values(session, SupportTicket, ticket.id)
+    assert (erased["message"], erased["idempotency_key"], erased["idempotency_fingerprint"]) == (
+        ERASED_TEXT,
+        None,
+        None,
+    )
+
+
+async def test_staff_see_a_deleted_pros_legal_name_as_deleted_user(world: World) -> None:
+    assert (await delete_account(world.client, world.pro)).status_code == 204
+
+    async with world.sessions() as session:
+        assert await UserService(session).legal_name(world.pro.id) == DELETED_USER_NAME
+
+
+# TODO(Cesar, #590 round 1, the Gatekeeper's B4): a launch_interest row (#409, "tell me when the
+# app is in the stores") with the account's email stays after the deletion, while a signed-out
+# waitlist entry with it goes. Whether the deletion must delete or anonymise it is Cesar's call.
+# Kept until he decides; to change it, add interest/erasure.py and set False here.
+LAUNCH_INTEREST_KEPT = True
+
+
+async def test_todo_cesar_a_launch_interest_row_with_the_accounts_email(world: World) -> None:
+    async with world.sessions() as session:
+        interest = LaunchInterest(
+            email=world.customer.email,
+            source=InterestSource.SHOWCASE,
+            consent_version="interest-2026-11-19",
+        )
+        session.add(interest)
+        await session.commit()
+        interest_id = interest.id
+    try:
+        assert (await delete_account(world.client, world.customer)).status_code == 204
+
+        async with world.sessions() as session:
+            kept = await session.scalar(
+                select(LaunchInterest.email).where(LaunchInterest.id == interest_id)
+            )
+        assert kept == (world.customer.email if LAUNCH_INTEREST_KEPT else None)
+    finally:
+        async with world.sessions() as session:
+            await session.execute(
+                text("DELETE FROM launch_interest WHERE id = :id"), {"id": interest_id}
+            )
+            await session.commit()

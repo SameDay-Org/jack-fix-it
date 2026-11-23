@@ -62,11 +62,18 @@ class AccountDeletionRepository:
         return (await self._session.scalars(statement)).one_or_none()
 
     async def record_second_pass(
-        self, user_id: uuid.UUID, *, keys: list[str], has_stripe_customer: bool
+        self,
+        user_id: uuid.UUID,
+        *,
+        keys: list[str],
+        has_stripe_customer: bool,
+        files_settled_after: datetime,
     ) -> AccountDeletion:
-        """The worker's second erasure is done: the files it found join the keys (and the
-        files' pass is open again), and a Stripe Customer it found has its cards detached
-        again. The row as it is now."""
+        """The worker's second erasure is done: the files it found join the keys, the files'
+        pass is open again whatever it found (a file stored since the last pass under the
+        account's prefix is named by no row), and not the last before `files_settled_after`
+        (a copy it found running); a Stripe Customer it found has its cards detached again.
+        The row as it is now."""
         row = (
             await self._session.scalars(
                 select(AccountDeletion)
@@ -76,10 +83,9 @@ class AccountDeletionRepository:
             )
         ).one()
         row.erased_again_at = datetime.now(UTC)
-        fresh = sorted(set(keys) - set(row.storage_keys))
-        if fresh:
-            row.storage_keys = sorted({*row.storage_keys, *fresh})
-            row.storage_deleted_at = None
+        row.storage_keys = sorted({*row.storage_keys, *keys})
+        row.storage_deleted_at = None
+        row.storage_settled_after = max(row.storage_settled_after, files_settled_after)
         if has_stripe_customer:
             row.cards_detached_at = None
         await self._session.flush()

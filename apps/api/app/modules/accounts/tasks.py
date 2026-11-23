@@ -102,4 +102,5 @@ def _cleanup(ctx: dict[str, Any]) -> AccountCleanup:
         ctx["storage"],
         methods,
         timedelta(minutes=settings.account_deletion_retry_after_minutes),
+        timedelta(seconds=settings.media_sanitize_job_timeout_seconds),
     )

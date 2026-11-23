@@ -232,10 +232,13 @@ them idempotent: they can run twice.
   reviews and the audit log point at it): status `deleted`, email `deleted-<hex>@deleted.invalid`
   (the real one is free for a new account), no password, phone, names, home or photo, a new card
   code, every session revoked. Refused with a 409 per reason while something is in flight
-  (accounts.errors); a customer's open requests are cancelled instead. Every module erases its
-  own part in its `erasure.py`, over its own tables (`accounts.eraser` runs them); a new table
-  that holds a person's data gets its part there and is caught by
-  `tests/test_account_deletion.py`'s sweep otherwise. Locks: the customer's cancellable
+  (accounts.errors), a tip included (`tips.erasure`: being paid, or still owed to the pro);
+  a customer's open requests are cancelled instead. Every module erases its own part in its
+  `erasure.py`, over its own tables (`accounts.eraser` runs them). A new table that holds a
+  person's data gets its part there, or is named as kept, and `plant_everything` in
+  `tests/test_account_deletion.py` plants a row of it: the sweep there finds only the values the
+  test planted, so a table no test plants is not checked. `launch_interest` keeps a row with
+  the account's email for now (Cesar decides, #590). Locks: the customer's cancellable
   requests, then the user's row FOR UPDATE (a payment's order); the checks read each stage
   before the next. A request the account sent before the deletion may still write after its
   commit: the worker erases the account again after `ACCOUNT_DELETION_SETTLE_SECONDS`. Kept
@@ -243,7 +246,8 @@ them idempotent: they can run twice.
   audit log. The shared name readers (`UserService.public_names`, `first_names`, `legal_name`)
   show "Deleted user", and a deleted pro is never hireable. The files' rows go at once; the
   worker deletes the files from storage (those rows named, and every other upload under
-  `u/<user id>/` but the job and dispute photos) and detaches the cards in Stripe
+  `u/<user id>/` but the job and dispute photos; the last pass comes after the upload URLs'
+  lifetime, any media copy and the second erasure) and detaches the cards in Stripe
   (`accounts.cleanup`: a task after the commit and the
   `retry_account_cleanups` sweep, through the `account_deletions` row), never through the orphan
   sweep. A request address keeps its city, state and ZIP and loses its street and point

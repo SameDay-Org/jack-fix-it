@@ -5,7 +5,8 @@ transaction, an attempt:
 - once ACCOUNT_DELETION_SETTLE_SECONDS have passed, erases the account once more in a
   transaction of its own (accounts.eraser): a request the account sent before the deletion may
   have written after its commit (a name, a phone, a device, a request). The files and the
-  Stripe Customer that pass finds join the work below;
+  Stripe Customer that pass finds join the work below, and the files' pass is always opened
+  again: an upload URL issued before the deletion may have stored a file that no row names;
 - detaches every card on the account's Stripe Customer (payment_methods.erasure), so none
   can be charged again;
 - deletes the account's files from storage: the keys the erasures collected (originals and
@@ -16,8 +17,10 @@ transaction, an attempt:
 An attempt is claimed first (AccountDeletionRepository.claim, committed before any call), so a
 task and a sweep never run one account at once. A part done stays done; a part that failed
 waits ACCOUNT_DELETION_RETRY_AFTER_MINUTES for the sweep (accounts.tasks). A pass over the
-files counts as the last one only after storage_settled_after: a media copy running at the
-deletion may still upload until then, and a pass before it is repeated.
+files counts as the last one only after storage_settled_after: an upload URL issued before the
+deletion (UPLOAD_URL_TTL_SECONDS) or a media copy running at it (or found running by the second
+erasure) may still upload until then, and a pass before it is repeated. So the last pass comes
+after all three: the URL's lifetime, any copy, and the second erasure.
 
 Never raises to the task but what the second erasure's transaction raises (the task logs it
 by class): returns an outcome. Logs carry the user id, counts and an error class only, never a
@@ -65,11 +68,15 @@ class AccountCleanup:
         storage: Storage | None,
         methods: StripePaymentMethods | None,
         retry_after: timedelta,
+        copy_settle: timedelta,
     ) -> None:
         self._sessions = sessions
         self._storage = storage
         self._methods = methods
         self._retry_after = retry_after
+        # How long a media copy the second erasure finds running may still upload
+        # (MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS, as at the deletion).
+        self._copy_settle = copy_settle
 
     async def due(self, limit: int) -> list[uuid.UUID]:
         async with self._sessions() as session:
@@ -117,7 +124,8 @@ class AccountCleanup:
 
     async def _erase_again(self, user_id: uuid.UUID) -> AccountDeletion:
         """The second erasure, in a transaction of its own, under the same locks as the
-        deletion's (the requests, then the user's row)."""
+        deletion's (the requests, then the user's row). It erases the row as read under the
+        lock: its photo, email and phone are what a late write left."""
         async with self._sessions() as session:
             users = UserService(session)
             account = await users.get_by_id(user_id)
@@ -125,10 +133,16 @@ class AccountCleanup:
                 raise LookupError("deleted account not found")
             eraser = AccountEraser(session, users)
             held = await eraser.hold(account)
-            await users.get_for_update(user_id)
-            erased = await eraser.erase(account, held)
+            locked = await users.get_for_update(user_id)
+            if locked is None:  # pragma: no cover - a deleted account's row never goes
+                raise LookupError("deleted account not found")
+            erased = await eraser.erase(locked.account, held)
+            now = datetime.now(UTC)
             row = await AccountDeletionRepository(session).record_second_pass(
-                user_id, keys=erased.keys, has_stripe_customer=erased.has_stripe_customer
+                user_id,
+                keys=erased.keys,
+                has_stripe_customer=erased.has_stripe_customer,
+                files_settled_after=now + self._copy_settle if erased.copy_in_flight else now,
             )
             await session.commit()
         logger.info(
