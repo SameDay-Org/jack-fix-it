@@ -40,7 +40,7 @@ from app.modules.payments.transfer_reader import TransferReader
 from app.modules.pros.service import ProService
 from app.modules.requests.service import CustomerRequestReader
 from app.modules.users.service import UserService
-from app.modules.users.types import UserAccount
+from app.modules.users.types import PartyNames, UserAccount
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +169,7 @@ def _summary(
     job: JobDisputeFacts,
     codes: Mapping[uuid.UUID, str],
     payment: PaymentFacts | None,
-    names: Mapping[uuid.UUID, str | None],
+    names: PartyNames,
     *,
     refund_failed: bool,
     refund_needs_reconciliation: bool,
@@ -184,6 +184,8 @@ def _summary(
         job_status=job.status,
         customer_first_name=names.get(job.customer_id),
         pro_first_name=names.get(job.pro_user_id),
+        customer_deleted=names.is_deleted(job.customer_id),
+        pro_deleted=names.is_deleted(job.pro_user_id),
         customer_total_cents=None if payment is None else payment.customer_total_cents,
         pro_payout_cents=job.pro_payout_cents,
         pro_release_cents=dispute.pro_release_cents,

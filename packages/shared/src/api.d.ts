@@ -2316,6 +2316,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/me/terms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The legal documents I must accept
+         * @description The versions in force of the documents the caller's role accepts (terms and privacy;
+         *     pros also the pro agreement), and whether the caller accepted each. The texts are the
+         *     apps'; the API names each by its version id.
+         */
+        get: operations["get_my_terms_v1_me_terms_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/terms-acceptance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept a legal document
+         * @description Records that the caller accepted this version. Idempotent: accepting the same version
+         *     again answers the same, with the time of the first acceptance.
+         */
+        post: operations["accept_terms_v1_me_terms_acceptance_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete my account
+         * @description Deletes the caller's account, confirmed with its current password, as the stores
+         *     require. The account is anonymised: the name, email, phone, addresses, photos, documents,
+         *     devices and saved cards go; jobs, payments and reviews stay for the other side and for tax,
+         *     shown as "Deleted user". A customer's requests still open are cancelled. Every session ends
+         *     at once. Refused while a job, a dispute, a refund, a payment, a payout or a quote is still in
+         *     flight (409, the code says which).
+         */
+        post: operations["delete_my_account_v1_me_delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/requests/{request_id}/job/tip": {
         parameters: {
             query?: never;
@@ -2414,6 +2482,14 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AccountDeletionIn */
+        AccountDeletionIn: {
+            /**
+             * Password
+             * @description The account's current password: the confirmation that the holder asks.
+             */
+            password: string;
+        };
         /**
          * AddressIn
          * @description A US service address as the customer types it. Geocoding (lat/lng) comes later.
@@ -2758,6 +2834,11 @@ export interface components {
              * @description The pro's first name and last initial ("María P.").
              */
             pro_name: string | null;
+            /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
             /**
              * Amount Cents
              * @description The quote's price in USD cents.
@@ -4902,6 +4983,11 @@ export interface components {
              */
             customer_first_name: string | null;
             /**
+             * Customer Deleted
+             * @description True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            customer_deleted?: boolean;
+            /**
              * Eta At
              * @description The ETA the pro gave at On my way.
              */
@@ -5094,6 +5180,11 @@ export interface components {
              */
             name: string | null;
             /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
+            /**
              * Rating Avg
              * @description The average of the overall ratings of the pro's published reviews, to one decimal, rounded half up, as a string; null before the first one (never 0.0).
              * @example 4.7
@@ -5183,6 +5274,11 @@ export interface components {
              */
             name: string | null;
             /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
+            /**
              * Rating Avg
              * @description The average of the overall ratings of the pro's published reviews, to one decimal, rounded half up, as a string; null before the first one (never 0.0).
              * @example 4.7
@@ -5261,6 +5357,11 @@ export interface components {
              */
             reviewer: string | null;
             /**
+             * Reviewer Deleted
+             * @description True when the reviewer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            reviewer_deleted?: boolean;
+            /**
              * Created On
              * Format: date
              * @description The day the review was written (UTC).
@@ -5320,6 +5421,11 @@ export interface components {
              * @description First name and last initial ("Ana P."); null when a name is missing or shows a contact detail.
              */
             customer_name: string | null;
+            /**
+             * Customer Deleted
+             * @description True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            customer_deleted?: boolean;
             /** @description Null until the request is classified. */
             category: components["schemas"]["CategorySummary"] | null;
             /**
@@ -5502,6 +5608,11 @@ export interface components {
              */
             name: string | null;
             /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
+            /**
              * Rating Avg
              * @description The average of the overall ratings of the pro's published reviews, to one decimal, rounded half up, as a string; null before the first one (never 0.0).
              * @example 4.7
@@ -5669,6 +5780,11 @@ export interface components {
              * @example Dan R.
              */
             pro_name: string | null;
+            /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
             /**
              * Scheduled Start At
              * Format: date-time
@@ -5854,6 +5970,11 @@ export interface components {
              * @description First name and last initial ("Ana P."); null when a name is missing or shows a contact detail.
              */
             customer_name: string | null;
+            /**
+             * Customer Deleted
+             * @description True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            customer_deleted?: boolean;
             /** @description Null until the request is classified. */
             category: components["schemas"]["CategorySummary"] | null;
             /**
@@ -6581,6 +6702,16 @@ export interface components {
             /** Pro First Name */
             pro_first_name: string | null;
             /**
+             * Customer Deleted
+             * @description True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            customer_deleted?: boolean;
+            /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
+            /**
              * Customer Total Cents
              * @description What the customer paid, tax included; null when the job's payment is missing (a dispute that needs review).
              */
@@ -6678,6 +6809,16 @@ export interface components {
             customer_first_name: string | null;
             /** Pro First Name */
             pro_first_name: string | null;
+            /**
+             * Customer Deleted
+             * @description True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            customer_deleted?: boolean;
+            /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
             /**
              * Customer Total Cents
              * @description What the customer paid, tax included; null when the job's payment is missing (a dispute that needs review).
@@ -6852,6 +6993,11 @@ export interface components {
              * @description First name and last initial ("María P."); null when a name is missing or shows a contact detail.
              */
             name: string | null;
+            /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
             verification_status: components["schemas"]["ProVerificationStatus"];
             /** Payouts Enabled */
             payouts_enabled: boolean;
@@ -6901,6 +7047,11 @@ export interface components {
              * @description First and last name as on the account, to match the ID document; null when the account has neither. Only this detail carries it, never the list.
              */
             legal_name: string | null;
+            /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
             /** Payouts Enabled */
             payouts_enabled: boolean;
             /**
@@ -6987,6 +7138,11 @@ export interface components {
              * @description The writer's first name alone; null when they have none or it shows a contact detail.
              */
             user_first_name: string | null;
+            /**
+             * User Deleted
+             * @description True when the writer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            user_deleted?: boolean;
             /** @description The writer's role when they wrote the ticket. */
             role: components["schemas"]["TicketRole"];
             topic: components["schemas"]["TicketTopic"];
@@ -7030,6 +7186,11 @@ export interface components {
              * @description The writer's first name alone; null when they have none or it shows a contact detail.
              */
             user_first_name: string | null;
+            /**
+             * User Deleted
+             * @description True when the writer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            user_deleted?: boolean;
             /** @description The writer's role when they wrote the ticket. */
             role: components["schemas"]["TicketRole"];
             topic: components["schemas"]["TicketTopic"];
@@ -7147,6 +7308,53 @@ export interface components {
         SupportTicketStatusIn: {
             /** @description The ticket's new status. Any status may follow any other (a closed ticket can be reopened); the same status again changes nothing. */
             status: components["schemas"]["TicketStatus"];
+        };
+        /** TermsAcceptanceIn */
+        TermsAcceptanceIn: {
+            kind: components["schemas"]["TermsKind"];
+            /**
+             * Version
+             * @description The version the app showed, as GET /v1/me/terms gave it.
+             */
+            version: string;
+        };
+        /** TermsDocumentOut */
+        TermsDocumentOut: {
+            /** @description terms, privacy or pro_agreement (pros only). */
+            kind: components["schemas"]["TermsKind"];
+            /**
+             * Version
+             * @description The version in force: the id of the text the app shows.
+             */
+            version: string;
+            /**
+             * Accepted
+             * @description Whether the caller accepted this version.
+             */
+            accepted: boolean;
+            /**
+             * Accepted At
+             * @description When the caller first accepted this version; null until then.
+             */
+            accepted_at: string | null;
+        };
+        /**
+         * TermsKind
+         * @enum {string}
+         */
+        TermsKind: "terms" | "privacy" | "pro_agreement";
+        /** TermsOut */
+        TermsOut: {
+            /**
+             * Terms Required
+             * @description True while a document below is not accepted: the app asks for it before anything else. False when nothing is in force yet.
+             */
+            terms_required: boolean;
+            /**
+             * Documents
+             * @description The documents in force for the caller's role, with a version published.
+             */
+            documents: components["schemas"]["TermsDocumentOut"][];
         };
         /** TextQuestion */
         TextQuestion: {
@@ -7481,6 +7689,11 @@ export interface components {
              * @description The day (UTC) the account was created.
              */
             member_since: string;
+            /**
+             * Terms Required
+             * @description True while a legal document in force for the account is not accepted in its version (GET /v1/me/terms): the app asks for it before anything else (#97). Absent from an API older than #97: read it as false.
+             */
+            terms_required?: boolean;
         };
         /**
          * UserRole
@@ -7491,7 +7704,7 @@ export interface components {
          * UserStatus
          * @enum {string}
          */
-        UserStatus: "active" | "suspended" | "guest";
+        UserStatus: "active" | "suspended" | "guest" | "deleted";
         /**
          * UtmIn
          * @description Campaign attribution. Only these five keys; anything else is a 422.
@@ -14640,6 +14853,162 @@ export interface operations {
             };
             /** @description The request is invalid. */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_my_terms_v1_me_terms_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TermsOut"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    accept_terms_v1_me_terms_acceptance_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TermsAcceptanceIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TermsDocumentOut"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description terms_not_current: not the version in force, a document the caller's role does not accept, or one with no version published. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: an unknown kind, a version that is not an id, an extra field. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_my_account_v1_me_delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountDeletionIn"];
+            };
+        };
+        responses: {
+            /** @description Deleted: every session ends now, and the email may sign up again as a new account. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description invalid_password: not the account's password. staff_account: agents and admins are removed by an administrator. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Something must settle first, one code per reason: active_job (a job in progress, waiting for confirmation, or, for a pro, for its payout), open_dispute, refund_pending, payment_in_progress, payout_pending, active_quote (a pro's quote still open or being paid). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: no password, or an extra field. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description rate_limited: too many tries; Retry-After says when to try again. */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

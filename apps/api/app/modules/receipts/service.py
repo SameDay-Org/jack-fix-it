@@ -161,6 +161,7 @@ class ReceiptService:
             if category is None
             else ReceiptCategory(slug=category.slug, names=dict(category.names)),
             pro_name=None if card is None else card.name,
+            pro_deleted=card is not None and card.deleted,
             scheduled_start_at=starts[job.quote_id],
             completed_at=job.completed_at,
             address=ReceiptAddress(line1=address.line1, city=address.city, state=address.state),

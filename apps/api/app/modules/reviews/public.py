@@ -114,6 +114,7 @@ class PublicPros:
                     rating=row.overall,
                     comment=row.comment,
                     reviewer=names.get(row.author_id),
+                    reviewer_deleted=names.is_deleted(row.author_id),
                     created_on=row.created_at.astimezone(UTC).date(),
                 )
                 for row in page

@@ -155,6 +155,8 @@ def check_public_api_url(value: str) -> str:
     return value.rstrip("/")
 
 
+# A legal document's version id (#97): letters, digits, ".", "-" and "_", up to 64 characters.
+TERMS_VERSION_PATTERN: Final = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 # The most tool runs one file's safe copy makes (#182): an HEVC video's ffprobe of the original,
 # its ffmpeg remux, then ffprobe of the copy, of its decoder configuration and of its hidden
 # frames. With the download and the upload, each bounded by MEDIA_SANITIZE_TIMEOUT_SECONDS, they
@@ -536,6 +538,26 @@ class Settings(BaseSettings):
     cancel_refund_sweep_minutes: int = Field(default=5, ge=1, le=60)
     cancel_refund_sweep_timeout_seconds: int = Field(default=270, gt=0)
     cancel_refund_batch_size: int = Field(default=50, gt=0)
+    # The versions of the legal documents in force (#97): an id each (letters, digits, ".", "-"
+    # and "_"), never the text, which the apps show. Unset, nothing of that kind is required
+    # yet (Cesar's texts are pending). A new version makes every account it applies to accept
+    # it again: terms and privacy for customers and pros, the pro agreement for pros.
+    terms_version: str | None = Field(default=None, pattern=TERMS_VERSION_PATTERN)
+    privacy_version: str | None = Field(default=None, pattern=TERMS_VERSION_PATTERN)
+    pro_agreement_version: str | None = Field(default=None, pattern=TERMS_VERSION_PATTERN)
+    # An account deletion (#97) commits at once; the worker then detaches the saved cards in
+    # Stripe and deletes the account's files from storage: a task queued after the commit, and
+    # a sweep for whatever is left (Stripe or the storage unavailable, a task never queued). How
+    # often the sweep runs (a cron, in minutes of the hour), the longest one run may take, the
+    # most deletions one run tries, and how long a tried one waits before the sweep tries it
+    # again.
+    account_deletion_sweep_minutes: int = Field(default=10, ge=1, le=60)
+    account_deletion_sweep_timeout_seconds: int = Field(default=540, gt=0)
+    account_deletion_batch_size: int = Field(default=50, gt=0)
+    account_deletion_retry_after_minutes: int = Field(default=10, gt=0)
+    # When the worker erases a deleted account once more: past the longest a request the
+    # account sent before the deletion may still run (it may write after the deletion's commit).
+    account_deletion_settle_seconds: int = Field(default=900, ge=0)
     # How many cancel previews, and how many cancels (a retry with the same Idempotency-Key
     # counts too), one customer may ask for per window (#489 round 1).
     cancel_preview_limit: int = Field(default=60, gt=0)

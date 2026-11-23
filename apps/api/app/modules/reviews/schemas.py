@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from app.modules.addresses.schemas import NO_NUL
 from app.modules.quotes.schemas import ProPublicProfile
 from app.modules.reviews.models import COMMENT_MAX_LENGTH, RATING_MAX, RATING_MIN
+from app.modules.users.schemas import deleted_party
 
 # A JSON integer only: no "5", no 5.0, no true.
 Rating = Annotated[int, Field(ge=RATING_MIN, le=RATING_MAX, strict=True)]
@@ -114,6 +115,7 @@ class PublicReviewOut(_Out):
         description='The reviewer\'s first name and last initial, e.g. "María P."; null when a '
         "name is missing or shows a contact detail."
     )
+    reviewer_deleted: bool = deleted_party("reviewer")
     created_on: date = Field(description="The day the review was written (UTC).")
 
 

@@ -8,6 +8,7 @@ from app.modules.addresses.schemas import NO_NUL
 from app.modules.categories.schemas import CategorySummary
 from app.modules.quotes.models import QuoteStatus
 from app.modules.settings.service import INT4_MAX
+from app.modules.users.schemas import deleted_party
 
 SCOPE_MAX_LENGTH: Final = 2000  # what's included; the request description has the same bound
 APPROACH_MAX_LENGTH: Final = 2000  # "How I'll do the job" (#246), as long as the scope
@@ -118,6 +119,7 @@ class QuotePro(BaseModel):
         "the pro has not set both names, or when the name shows a contact detail (an email, a "
         "phone, a domain...): withheld before payment, never partly masked."
     )
+    pro_deleted: bool = deleted_party("pro")
     rating_avg: str | None = Field(
         examples=["4.7"],
         description="The average of the overall ratings of the pro's published reviews, to one "
