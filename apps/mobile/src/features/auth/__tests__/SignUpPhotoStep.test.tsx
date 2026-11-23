@@ -9,7 +9,13 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { impactAsync } from "expo-haptics";
 import { launchImageLibraryAsync } from "expo-image-picker";
 import { useLocalSearchParams } from "expo-router";
-import { AccessibilityInfo, AppState, Linking, type AppStateStatus } from "react-native";
+import {
+  AccessibilityInfo,
+  AppState,
+  Linking,
+  ScrollView,
+  type AppStateStatus,
+} from "react-native";
 
 import {
   ApiError,
@@ -290,6 +296,19 @@ describe("SignUpScreen: the selfie step, the camera", () => {
     expect(card()).toBe("Ana Cruz|");
     await waitFor(() => expect(button("Take photo")).toBeEnabled());
     expect(preview()).toBeTruthy();
+  });
+
+  it("brings Use photo into view once the photo is in the frame (#502)", async () => {
+    const scrollToEnd = jest.spyOn(ScrollView.prototype, "scrollToEnd");
+    onFlow();
+    await renderStep();
+    scrollToEnd.mockClear();
+
+    await takePhoto();
+
+    await waitFor(() => expect(scrollToEnd).toHaveBeenCalledWith({ animated: true }));
+    expect(button("Use photo")).toBeTruthy();
+    scrollToEnd.mockRestore();
   });
 
   it("a camera that would not start offers the photo library instead", async () => {
