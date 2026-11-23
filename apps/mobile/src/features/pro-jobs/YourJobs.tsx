@@ -32,12 +32,28 @@ type RowText = {
   label: string;
 };
 
+/**
+ * The moment a row shows: when the work started once it has (#566: a started job is not read
+ * against its scheduled day), the scheduled start before that.
+ */
+function shownAt(job: ProJob): { at: number; started: boolean } {
+  return job.started_at !== null
+    ? { at: Date.parse(job.started_at), started: true }
+    : { at: Date.parse(job.scheduled_start_at), started: false };
+}
+
 function rowText(t: TFunction, job: ProJob, now: number): RowText {
   const locale = formatLocale();
-  const at = Date.parse(job.scheduled_start_at);
+  const { at, started } = shownAt(job);
   const status = t(`proJobs.status.${jobChip(job).label}`);
-  const time = formatTimeOfDay(at, locale);
-  const when = t("proJobs.when", { day: dayLabel(t, at, now, locale), time });
+  const clock = formatTimeOfDay(at, locale);
+  const time = started ? t("proJobs.yourJobs.startedTime", { time: clock }) : clock;
+  const when = started
+    ? t("proJobs.yourJobs.startedWhen", {
+        day: dayLabel(t, at, now, locale, "inline"),
+        time: clock,
+      })
+    : t("proJobs.when", { day: dayLabel(t, at, now, locale), time: clock });
   const category = categoryLabel(t, job.category);
   const name = customerName(job);
   const city = job.address?.city ?? null;
@@ -79,7 +95,8 @@ type JobRowProps = {
 
 /**
  * One job as a white bubble that opens it: a calendar leaf with its day, then the start time and
- * the step's pill, the category, and the customer's first name with the city.
+ * the step's pill, the category, and the customer's first name with the city. A started job shows
+ * when the work started instead ("Started 10:47 PM").
  */
 export function JobRow({ job, now, onPress }: JobRowProps) {
   const { t } = useTranslation();
@@ -89,7 +106,7 @@ export function JobRow({ job, now, onPress }: JobRowProps) {
   return (
     <Card onPress={() => onPress(job)} accessibilityLabel={text.label} testID={testID}>
       <View {...VISUAL_ONLY} className="flex-row items-center gap-3">
-        <DateTile at={Date.parse(job.scheduled_start_at)} />
+        <DateTile at={shownAt(job).at} />
         <View className="flex-1 gap-1">
           <View className="flex-row flex-wrap items-center gap-x-2 gap-y-1">
             <Text className="text-headline text-navy-900" testID={`${testID}-time`}>
