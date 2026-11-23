@@ -47,6 +47,7 @@ class QueuedRequest:
     language: str
     status: RequestStatus
     origin: RequestOrigin
+    utm: dict[str, str] | None
     assigned_agent_id: uuid.UUID | None
     next_action: str | None
     first_contact_at: datetime | None
@@ -192,6 +193,7 @@ def _queued(row: QueueRow) -> QueuedRequest:
         language=request.language,
         status=request.status,
         origin=request.origin,
+        utm=request.utm,
         assigned_agent_id=request.assigned_agent_id,
         next_action=request.next_action,
         first_contact_at=request.first_contact_at,

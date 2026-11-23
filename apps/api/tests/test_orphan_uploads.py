@@ -90,6 +90,8 @@ NOT_UPLOAD_KEYS = {
     "tips.transfer_idempotency_key",
     # A tip choice's Idempotency-Key (#510 round 1): the customer's.
     "tip_requests.idempotency_key",
+    # A web request (#86): the web service's Idempotency-Key.
+    "web_request_contacts.idempotency_key",
 }
 
 

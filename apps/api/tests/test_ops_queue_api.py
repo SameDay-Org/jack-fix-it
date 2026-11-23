@@ -75,6 +75,7 @@ ITEM_KEYS = {
     "id",
     "public_code",
     "customer_name",
+    "customer_deleted",
     "category",
     "zip_code",
     "status",
@@ -612,7 +613,9 @@ async def test_the_card_shows_who_to_call_and_audits_the_read(
         "phone": CUSTOMER_PHONE,
         "email": CUSTOMER_EMAIL,
         "language": "en",
+        "has_account": True,
     }
+    assert card["utm"] is None
     assert card["address"] == {
         "line1": LINE1,
         "line2": LINE2,

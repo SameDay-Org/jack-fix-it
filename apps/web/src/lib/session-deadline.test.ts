@@ -30,7 +30,6 @@ import { apiGet } from "./api";
 import {
   ACCESS_COOKIE,
   endSession,
-  LOGIN_PATH,
   REFRESH_COOKIE,
   refreshStaffSession,
   requireStaff,
@@ -99,7 +98,7 @@ describe.each(["silent", "headers-only"] as const)("an API that is %s", (mode) =
     expect(state).toEqual({ error: "unavailable", email: "staff@example.com" });
   });
 
-  it("a refresh gives up within the deadline", async () => {
+  it("a refresh gives up within the deadline, and keeps the session (#530)", async () => {
     cookies.reset({ [REFRESH_COOKIE]: bound("rt-1"), [SESSION_COOKIE]: MARKER });
     let next: unknown;
 
@@ -108,7 +107,9 @@ describe.each(["silent", "headers-only"] as const)("an API that is %s", (mode) =
     });
 
     expect(elapsed).toBeLessThan(BOUND_MS);
-    expect(next).toBe(LOGIN_PATH);
+    // No answer in time is the API's moment, not the session's end: the busy page, signed in.
+    expect(next).toEqual({ busy: true, retryAfterSeconds: null });
+    expect(cookies.deletes).toEqual([]);
   });
 
   it("the /me check gives up within the deadline", async () => {

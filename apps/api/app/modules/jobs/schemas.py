@@ -17,6 +17,7 @@ from app.modules.jobs.models import JobPhotoKind, JobStatus
 from app.modules.payments.payout_status import PayoutStatus
 from app.modules.quotes.schemas import QuotePro
 from app.modules.tips.views import TipOut
+from app.modules.users.schemas import deleted_party
 
 # "On my way" asks how far the pro is: from 5 minutes to 4 hours (#63).
 ETA_MIN_MINUTES: Final = 5
@@ -188,6 +189,7 @@ class ProJob(_Out):
         description="The customer's first name only; null when it is not set or shows a "
         "contact detail."
     )
+    customer_deleted: bool = deleted_party("customer")
     eta_at: datetime | None = Field(description="The ETA the pro gave at On my way.")
     checked_in_at: datetime | None = Field(
         description="When the pro checked in with the customer's arrival code (Arrived)."

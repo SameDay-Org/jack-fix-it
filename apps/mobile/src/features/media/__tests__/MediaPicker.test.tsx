@@ -210,6 +210,16 @@ describe("MediaPicker", () => {
     expect(router.back).toHaveBeenCalledTimes(1);
   });
 
+  it("the sheet's two choices wrap their labels rather than cut them at a large font (#441)", async () => {
+    await renderPicker(makeUpload());
+    await fireEvent.press(screen.getByRole("button", { name: "Add photos or videos" }));
+
+    const sheet = await render(<MediaSourceSheet />);
+    for (const label of ["Choose from library", "Take a photo"]) {
+      expect(sheet.getByText(label).props.numberOfLines).toBeUndefined();
+    }
+  });
+
   it("a sheet closed without a choice adds nothing and closes nothing more", async () => {
     const upload = makeUpload();
     await renderPicker(upload);

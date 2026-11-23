@@ -19,10 +19,12 @@ export const configMock = {
  */
 export const REFRESH_TOKEN_KEY = "jackfixit.session.refreshToken";
 export const ONBOARDING_MARKER_KEY = "jackfixit.session.onboardingUserId";
+export const LANGUAGE_HINT_KEY = "jackfixit.session.languageHint";
 const stored = new Map<string, string>();
 export const secureStoreMock = {
   AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: "afterFirstUnlockThisDeviceOnly",
   getItemAsync: jest.fn(async (key: string) => stored.get(key) ?? null),
+  getItem: jest.fn((key: string) => stored.get(key) ?? null),
   setItemAsync: jest.fn(async (key: string, value: string) => {
     stored.set(key, value);
   }),
@@ -34,6 +36,7 @@ export const secureStoreMock = {
 export function resetSecureStore(): void {
   stored.clear();
   secureStoreMock.getItemAsync.mockClear();
+  secureStoreMock.getItem.mockClear();
   secureStoreMock.setItemAsync.mockClear();
   secureStoreMock.deleteItemAsync.mockClear();
 }

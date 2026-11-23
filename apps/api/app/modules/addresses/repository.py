@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Collection
 from decimal import Decimal
 
-from sqlalchemy import Subquery, func, or_, select, text, update
+from sqlalchemy import Subquery, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.addresses.models import Address, SavedAddress
@@ -92,6 +92,20 @@ class AddressRepository:
         )
         return bool(result.rowcount)  # type: ignore[attr-defined]  # CursorResult of an UPDATE
 
+    async def erase_for_user(self, user_id: uuid.UUID, line: str) -> int:
+        """Overwrites the street of every request address of the user with `line` and clears
+        its point, in one UPDATE (an account deletion, #97): the request and its job stay, so
+        the row cannot go; the city, state and ZIP stay (tax and the region's counts). A late
+        geocode cannot put a point back: set_point writes only while the text still matches.
+        How many rows. The only write of an address's street (tests/test_address_geocode_guard)."""
+        result = await self._session.execute(
+            update(Address)
+            .where(Address.user_id == user_id)
+            .values(line1=line, line2=None, lat=None, lng=None)
+            .execution_options(synchronize_session=False)
+        )
+        return int(result.rowcount)  # type: ignore[attr-defined]  # CursorResult of a write
+
     async def count_without_point(self) -> int:
         statement = select(func.count()).select_from(Address).where(_WITHOUT_POINT)
         return int(await self._session.scalar(statement) or 0)
@@ -110,6 +124,16 @@ class SavedAddressRepository:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def delete_saved_for_user(self, user_id: uuid.UUID) -> int:
+        """Deletes every saved address of the user (an account deletion, #97); the caller holds
+        lock_user. How many rows."""
+        result = await self._session.execute(
+            delete(SavedAddress)
+            .where(SavedAddress.user_id == user_id)
+            .execution_options(synchronize_session=False)
+        )
+        return int(result.rowcount)  # type: ignore[attr-defined]  # CursorResult of a write
 
     async def lock_user(self, user_id: uuid.UUID) -> None:
         """Transaction-scoped lock serializing every change to one user's saved addresses, so

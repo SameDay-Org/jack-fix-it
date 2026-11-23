@@ -165,6 +165,7 @@ async def test_a_pro_s_profile_counts_published_reviews_and_confirmed_jobs_only(
         "jobs_count": 5,
         "years_of_experience": 7,
         "verified": True,
+        "pro_deleted": False,
         "bio": body["bio"],
         "member_since": "2025-03-01",
     }
@@ -302,14 +303,27 @@ async def test_the_reviews_are_the_published_ones_newest_first_paged(
             "rating": 5,
             "comment": "Fixed it fast.",
             "reviewer": "Ana S.",
+            "reviewer_deleted": False,
             "created_on": "2030-01-03",
         },
         # A name that shows a contact is withheld, never partly masked.
-        {"rating": 4, "comment": "Fixed it fast.", "reviewer": None, "created_on": "2030-01-02"},
+        {
+            "rating": 4,
+            "comment": "Fixed it fast.",
+            "reviewer": None,
+            "reviewer_deleted": False,
+            "created_on": "2030-01-02",
+        },
     ]
     assert second.json() == {
         "items": [
-            {"rating": 3, "comment": "Fixed it fast.", "reviewer": None, "created_on": "2030-01-01"}
+            {
+                "rating": 3,
+                "comment": "Fixed it fast.",
+                "reviewer": None,
+                "reviewer_deleted": False,
+                "created_on": "2030-01-01",
+            }
         ],
         "next_cursor": None,
     }

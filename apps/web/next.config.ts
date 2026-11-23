@@ -25,6 +25,9 @@ export const SECURITY_HEADERS = [
   { key: "Strict-Transport-Security", value: "max-age=31536000" },
 ];
 
+/** Where /favicon.ico is served from: the icon Next makes of src/app/icon.svg. */
+export const FAVICON = "/icon.svg";
+
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   // The mascot (#404) is a workspace package shipped as TypeScript source.
@@ -54,6 +57,12 @@ const nextConfig: NextConfig = {
       { source: "/request", headers: neverStored },
       { source: "/es/request", headers: neverStored },
     ];
+  },
+  // The site's icon is /icon.svg (src/app/icon.svg, linked from every page). A browser still
+  // asks for /favicon.ico when it shows something that is not a page (a document image opened
+  // from the panel), and crawlers ask too: they get the icon, not a 404 (#546).
+  async rewrites() {
+    return [{ source: "/favicon.ico", destination: FAVICON }];
   },
 };
 

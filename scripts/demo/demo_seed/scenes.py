@@ -50,6 +50,11 @@ _DAN: Final = 0
 # A job "scheduled today" starts this long from now, never past the day's end.
 _TODAY_LEAD: Final = timedelta(hours=3)
 _BEFORE_MIDNIGHT: Final = timedelta(minutes=20)
+# A visit the seed proposes days ahead starts in the day (Relay's N9): between these hours in
+# the business time zone, else at the morning hour of that day.
+_DAY_FIRST_HOUR: Final = 9
+_DAY_LAST_HOUR: Final = 18
+_MORNING_HOUR: Final = 10
 # The BDC's work, each piece after its request was made: the agent's first note this long
 # before the second; the admin's overdue follow-up set this long ago, due this long after; the
 # one due today never due sooner than this (in the day's last minutes).
@@ -386,7 +391,9 @@ async def _queue(
         contact_after=timedelta(minutes=3),
         quote_after=timedelta(hours=8),
     )
-    await runner.run(waiting, now - timedelta(minutes=40), now + timedelta(days=2))
+    await runner.run(
+        waiting, now - timedelta(minutes=40), await _in_the_day(world, now + timedelta(days=2))
+    )
     # Waiting on its customer: unclassified, the BDC asked for more.
     asked = Case(
         name="queue-waiting-customer",
@@ -398,7 +405,9 @@ async def _queue(
         ending=Ending.NO_QUOTE,
         contact_after=timedelta(minutes=4),
     )
-    waiting_customer = await runner.run(asked, now - timedelta(hours=5), now + timedelta(days=3))
+    waiting_customer = await runner.run(
+        asked, now - timedelta(hours=5), await _in_the_day(world, now + timedelta(days=3))
+    )
     # Urgent: past the first-contact time and never contacted. The agent holds one.
     late = now - timedelta(minutes=world.settings.ops_first_contact_sla_minutes * 9)
     unsorted = Case(
@@ -410,7 +419,9 @@ async def _queue(
         amount_cents=0,
         ending=Ending.NO_QUOTE,
     )
-    held = await runner.run(unsorted, late - timedelta(hours=2), now + timedelta(days=2))
+    held = await runner.run(
+        unsorted, late - timedelta(hours=2), await _in_the_day(world, now + timedelta(days=2))
+    )
     await flows.claim(world, agent, held.request)
     overdue = Case(
         name="queue-urgent",
@@ -421,7 +432,7 @@ async def _queue(
         amount_cents=0,
         ending=Ending.NO_QUOTE,
     )
-    await runner.run(overdue, late, now + timedelta(days=2))
+    await runner.run(overdue, late, await _in_the_day(world, now + timedelta(days=2)))
     # Jamie's request with two quotes to compare (Dan's and Sam's).
     compare = Case(
         name="jamie-quotes",
@@ -436,7 +447,7 @@ async def _queue(
         second_quote_after=timedelta(minutes=30),
     )
     quotes = await CaseRun(world, jamies, catalog, stripe.stand_in_checkout).run(
-        compare, now - timedelta(hours=3), now + timedelta(days=2)
+        compare, now - timedelta(hours=3), await _in_the_day(world, now + timedelta(days=2))
     )
     summary.quotes_code = quotes.request.public_code
     # New: just in, nobody holds them. Only Maria offers the category, so they wait for her.
@@ -495,7 +506,8 @@ async def fresh_request(
     )
     runner = CaseRun(world, people, catalog, _NoCheckout())
     now = datetime.now(UTC)
-    return (await runner.run(fresh, now, now + timedelta(days=2))).request.public_code
+    start = await _in_the_day(world, now + timedelta(days=2))
+    return (await runner.run(fresh, now, start)).request.public_code
 
 
 class _NoCheckout:
@@ -503,6 +515,29 @@ class _NoCheckout:
 
     async def charge(self, payment_intent_id: str) -> PaymentIntentFacts:
         raise SeedError("this run does not pay")
+
+
+async def _in_the_day(world: World, at: datetime) -> datetime:
+    """`at` when it falls between _DAY_FIRST_HOUR and _DAY_LAST_HOUR in the business time
+    zone, else _MORNING_HOUR of that day there (Relay's N9: seeded in the evening, a quote must
+    not propose a visit at night). For starts days ahead: the morning stays in the future."""
+    statement = text(
+        "SELECT CASE WHEN extract(hour FROM timezone(:zone, CAST(:at AS timestamptz))) "
+        "BETWEEN CAST(:first AS integer) AND CAST(:last AS integer) - 1 "
+        "THEN CAST(:at AS timestamptz) "
+        "ELSE timezone(:zone, date_trunc('day', timezone(:zone, CAST(:at AS timestamptz))) "
+        "+ make_interval(hours => CAST(:morning AS integer))) END"
+    )
+    parameters = {
+        "zone": world.settings.business_time_zone,
+        "at": at,
+        "first": _DAY_FIRST_HOUR,
+        "last": _DAY_LAST_HOUR,
+        "morning": _MORNING_HOUR,
+    }
+    async with world.session() as session:
+        moved: datetime = (await session.execute(statement, parameters)).scalar_one()
+    return moved
 
 
 async def _later_today(world: World, now: datetime) -> datetime:

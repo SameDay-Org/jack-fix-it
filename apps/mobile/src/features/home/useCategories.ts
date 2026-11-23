@@ -13,12 +13,13 @@ export const CATEGORIES_QUERY_KEY = ["categories"] as const;
  * shows it at once with no refetch (sign-out clears the cache). A failure is shown with a retry
  * instead of retried behind a skeleton: the endpoint is rate limited per IP.
  */
-export const useCategories = () =>
+export const useCategories = ({ enabled = true }: { enabled?: boolean } = {}) =>
   useQuery({
     queryKey: CATEGORIES_QUERY_KEY,
     queryFn: ({ signal }) => apiGet("/v1/categories", { signal }),
     staleTime: Infinity,
     retry: false,
+    enabled,
   });
 
 /**

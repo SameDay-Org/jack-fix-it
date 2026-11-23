@@ -36,8 +36,8 @@ from tests.test_dispatch import sessions_of
 from tests.test_media_copies import Media, MemoryStorage, gps_jpeg, make_media, row
 from tests.test_schema_requests_jobs import add
 
-# Steps of 0.1 s and a job of 2 s: one file's budget is 6 x 0.1 + 0.2 (its write) = 0.8 s, and
-# the job needs 0.2 (the query) + 0.8 + 0.5 (the settle reserve) = 1.5 s at least.
+# Steps of 0.1 s and a job of 2 s: one file's budget is 7 x 0.1 + 0.2 (its write) = 0.9 s, and
+# the job needs 0.2 (the query) + 0.9 + 0.5 (the settle reserve) = 1.6 s at least.
 FAST: dict[str, object] = {
     "media_sanitize_timeout_seconds": 0.1,
     "media_sanitize_overhead_seconds": 0.2,
@@ -51,14 +51,15 @@ FAST: dict[str, object] = {
 # far from its own bound: a database step has 2 s (on CI a write slower than FAST's 0.2 s was cut
 # mid-query, and its session failed every later try: 3 retries, not 1), and the upload stage's
 # download and image transform 1 s each. The job is the shortest the settings accept,
-# 2 + (6 x 1 + 2) + 4 = 14 s. A stall its step did not cut would hold its try until then, and
-# the test would fail on run_job's 15 s bound; a passing run takes about 3 s.
+# 2 + (7 x 1 + 2) + 4 = 15 s (#182: seven tool runs per file). A stall its step did not cut would
+# hold its try until then, and the test would fail on run_job's 20 s bound; a passing run takes
+# about 3 s.
 STALL_ONLY: dict[str, object] = {
     **FAST,
     "media_sanitize_timeout_seconds": 1.0,
     "media_sanitize_overhead_seconds": 2.0,
     "media_sanitize_settle_seconds": 4.0,
-    "media_sanitize_job_timeout_seconds": 14,
+    "media_sanitize_job_timeout_seconds": 15,
 }
 # For the tests on the real clock, FAST three times over (#448): under load a database step can
 # take most of a 0.1 s step, and a retry found no time left to start its file (one upload seen,
@@ -196,7 +197,7 @@ async def run_job(
     await redis.enqueue_job(
         "sanitize_request_media", str(request_id), _job_id=job_id, _job_try=job_try
     )
-    async with asyncio.timeout(15):
+    async with asyncio.timeout(20):
         await worker.async_run()
     return await redis.zscore(redis.default_queue_name, job_id) is not None
 
@@ -356,9 +357,9 @@ async def test_the_accepted_minimum_budget_copies_a_file(db_session: AsyncSessio
         media_sanitize_timeout_seconds=120,
         media_sanitize_overhead_seconds=30,
         media_sanitize_settle_seconds=60,
-        media_sanitize_job_timeout_seconds=840,
+        media_sanitize_job_timeout_seconds=960,
     )
-    assert settings.media_sanitize_min_job_seconds == 840
+    assert settings.media_sanitize_min_job_seconds == 960
 
     outcome = await fast_copier(db_session, storage, settings).copy_pending(
         media.request_id, attempt=1, clock=JumpClock(reads=1, before=0.0, after=0.001)
@@ -379,7 +380,7 @@ async def test_a_file_starts_on_the_terms_the_settings_check(db_session: AsyncSe
         media_sanitize_timeout_seconds=120,
         media_sanitize_overhead_seconds=30,
         media_sanitize_settle_seconds=60,
-        media_sanitize_job_timeout_seconds=840,
+        media_sanitize_job_timeout_seconds=960,
     )
 
     outcome = await fast_copier(db_session, storage, settings).copy_pending(
@@ -400,7 +401,7 @@ async def test_the_first_file_starts_even_when_the_query_ran_long(
         media_sanitize_timeout_seconds=120,
         media_sanitize_overhead_seconds=30,
         media_sanitize_settle_seconds=60,
-        media_sanitize_job_timeout_seconds=840,
+        media_sanitize_job_timeout_seconds=960,
     )
 
     outcome = await fast_copier(db_session, storage, settings).copy_pending(
@@ -416,9 +417,9 @@ def test_the_job_timeout_must_cover_the_query_one_file_and_the_reserve() -> None
         "media_sanitize_overhead_seconds": 30,
         "media_sanitize_settle_seconds": 60,
     }
-    make_settings(**lowest, media_sanitize_job_timeout_seconds=840)
+    make_settings(**lowest, media_sanitize_job_timeout_seconds=960)
     with pytest.raises(ValueError, match="MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS"):
-        make_settings(**lowest, media_sanitize_job_timeout_seconds=839)
+        make_settings(**lowest, media_sanitize_job_timeout_seconds=959)
 
 
 def test_the_settle_reserve_must_cover_two_database_steps() -> None:

@@ -72,6 +72,7 @@ PRO_KEYS = {
     "description",
     "address",
     "customer_first_name",
+    "customer_deleted",
     "eta_at",
     "checked_in_at",
     "arrival_code_locked",
@@ -135,6 +136,7 @@ async def test_customer_sees_own_job(
         "jobs_count": 0,
         "years_of_experience": 7,
         "verified": True,
+        "pro_deleted": False,
     }
     assert body["eta_at"] is None
     assert body["arrival_code"] is None

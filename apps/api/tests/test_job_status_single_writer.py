@@ -61,6 +61,10 @@ ALLOW_LIST: dict[tuple[str, str, str], str] = {
         "sets the entry timestamp named in _ENTRY_TIMESTAMPS (started_at, completed_at, "
         "confirmed_at) on the job it locked; never status"
     ),
+    ("app/modules/requests/erasure.py", "erase", "update_construction"): (
+        "an account deletion (#97) replaces the customer's description and intake answers on "
+        "their requests; never status (cancelling goes through RequestStateMachine)"
+    ),
 }
 
 

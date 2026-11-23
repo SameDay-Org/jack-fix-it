@@ -4,7 +4,14 @@ import { redirect } from "next/navigation";
 
 import { ApiError, apiPost } from "@/lib/api";
 import { RETURN_PARAM, safeReturnPath } from "@/lib/return-path";
-import { type AuthResponse, isStaff, PANEL_PATH, revoke, startSession } from "@/lib/session";
+import {
+  type AuthResponse,
+  isStaff,
+  PANEL_PATH,
+  revoke,
+  startSession,
+  visitorForwarding,
+} from "@/lib/session";
 
 /** The login outcomes the form shows, each with its own i18n message. */
 export type LoginError =
@@ -27,7 +34,9 @@ function errorOf(failure: unknown): LoginError {
  * (its refresh token revoked) and gets no cookie. Never logs the email, the password or a
  * token. Next.js checks that a server action's Origin matches the host, so another site
  * cannot post this form. A signed-in staff member goes to the page they asked for (`next`,
- * validated here: only a panel path, else the panel's home; #464).
+ * validated here: only a panel path, else the panel's home; #464). The call carries the web
+ * service's key and the visitor's address, so the API's per-address limit counts this visitor,
+ * not every visitor of the panel together (#530).
  */
 export async function login(_previous: LoginState, form: FormData): Promise<LoginState> {
   const email = String(form.get("email") ?? "").trim();
@@ -36,7 +45,7 @@ export async function login(_previous: LoginState, form: FormData): Promise<Logi
 
   let tokens: AuthResponse;
   try {
-    tokens = await apiPost("/v1/auth/login", { email, password });
+    tokens = await apiPost("/v1/auth/login", { email, password }, await visitorForwarding());
   } catch (failure) {
     return { error: errorOf(failure), email };
   }

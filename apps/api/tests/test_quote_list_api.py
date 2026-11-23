@@ -67,6 +67,7 @@ PRO_KEYS = {
     "jobs_count",
     "years_of_experience",
     "verified",
+    "pro_deleted",
 }
 
 
@@ -617,6 +618,7 @@ async def test_pro_fields(
             "jobs_count": 5,
             "years_of_experience": 9,
             "verified": True,
+            "pro_deleted": False,
         },
         {
             "id": str(new.profile_id),
@@ -626,6 +628,7 @@ async def test_pro_fields(
             "jobs_count": 0,
             "years_of_experience": None,
             "verified": True,
+            "pro_deleted": False,
         },
         {
             "id": str(unnamed.profile_id),
@@ -635,6 +638,7 @@ async def test_pro_fields(
             "jobs_count": 0,
             "years_of_experience": None,
             "verified": True,
+            "pro_deleted": False,
         },
     ]
 
@@ -827,6 +831,7 @@ def test_response_models_forbid_extra_fields() -> None:
         "jobs_count": 0,
         "years_of_experience": None,
         "verified": True,
+        "pro_deleted": False,
     }
     item = {
         "id": str(uuid.uuid4()),
