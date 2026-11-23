@@ -501,6 +501,7 @@
   },
   "admin": {
     "title": "Operations panel",
+    "deletedUser": "Deleted user",
     "login": {
       "title": "Sign in to the panel",
       "subtitle": "For the Jack Fix It team.",

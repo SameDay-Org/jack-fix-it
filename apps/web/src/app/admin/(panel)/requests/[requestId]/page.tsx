@@ -139,9 +139,11 @@ export default async function RequestPage({ params }: { params: Promise<{ reques
   }
 
   const links = contactLinks(card.customer);
-  const name =
-    [card.customer.first_name, card.customer.last_name].filter(Boolean).join(" ") ||
-    t("admin.queue.noName");
+  // A deleted account (#97) has no name any more: the API flags it and the card says so.
+  const name = card.customer_deleted
+    ? t("admin.deletedUser")
+    : [card.customer.first_name, card.customer.last_name].filter(Boolean).join(" ") ||
+      t("admin.queue.noName");
   const holder = card.assigned_agent;
   const mine = holder?.id === user.id;
   const mayRelease = holder !== null && (mine || user.role === "admin");
@@ -419,7 +421,9 @@ export default async function RequestPage({ params }: { params: Promise<{ reques
               >
                 <span className="flex min-w-0 flex-col">
                   <span className="font-semibold break-words">
-                    {quote.pro_name ?? t("admin.queue.noName")}
+                    {quote.pro_deleted
+                      ? t("admin.deletedUser")
+                      : (quote.pro_name ?? t("admin.queue.noName"))}
                   </span>
                   <span className="text-gray-500">
                     {t("admin.requests.quotes.starts")}{" "}

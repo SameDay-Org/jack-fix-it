@@ -501,6 +501,7 @@
   },
   "admin": {
     "title": "Panel de operaciones",
+    "deletedUser": "Usuario eliminado",
     "login": {
       "title": "Ingresa al panel",
       "subtitle": "Para el equipo de Jack Fix It.",

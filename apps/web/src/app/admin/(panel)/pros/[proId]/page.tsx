@@ -209,7 +209,9 @@ export default async function ProPage({ params }: { params: Promise<{ proId: str
                 tabIndex={-1}
                 className="rounded-sm text-2xl font-bold break-words outline-none focus-visible:ring-2 focus-visible:ring-green-700"
               >
-                {pro.legal_name ?? pro.name ?? t("admin.pros.noName")}
+                {pro.pro_deleted
+                  ? t("admin.deletedUser")
+                  : (pro.legal_name ?? pro.name ?? t("admin.pros.noName"))}
               </h1>
               <StatusBadge status={pro.verification_status}>
                 {t(`admin.pros.status.${pro.verification_status}`)}

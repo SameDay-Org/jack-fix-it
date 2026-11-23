@@ -159,6 +159,21 @@ describe("disputes page", () => {
     expect(page).toContain("No name");
   });
 
+  it("says Deleted user for a deleted customer or pro (#97)", async () => {
+    api(() =>
+      Response.json({ disputes: [summary({ customer_first_name: null, customer_deleted: true })] }),
+    );
+    const page = await render();
+    expect(page).toContain("Deleted user");
+    expect(page).toContain("Dan");
+    expect(page).not.toContain("No name");
+
+    api(() => Response.json({ disputes: [summary({ pro_first_name: null, pro_deleted: true })] }));
+    const other = await render();
+    expect(other).toContain("Deleted user");
+    expect(other).toContain("Jamie");
+  });
+
   it("shows how a resolved dispute was settled, and when", async () => {
     api(() =>
       Response.json({
