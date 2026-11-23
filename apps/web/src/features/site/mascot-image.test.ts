@@ -44,7 +44,7 @@ describe("the still mascot images", () => {
       '<img src="/mascot/tools.svg" alt="" width="112" height="112" loading="lazy" decoding="async" data-pose="tools" class="rounded-3xl"/>',
     );
     expect(
-      renderToStaticMarkup(createElement(MascotImage, { pose: "wave", title: "Jack waves" })),
-    ).toContain('alt="Jack waves"');
+      renderToStaticMarkup(createElement(MascotImage, { pose: "wave", title: "John waves" })),
+    ).toContain('alt="John waves"');
   });
 });

@@ -15,7 +15,7 @@ import { FOCUS_ON_LIGHT } from "@/features/site/ui";
 const MAIN_ID = "content";
 
 /**
- * The product showcase page (#403) in one language: what the Jack Fix It app is and how a job
+ * The product showcase page (#403) in one language: what the John Got It app is and how a job
  * goes in it, told with real screens of the app. Every section is rendered on the server and
  * reads without JavaScript. It claims only what the app does today (root AGENTS.md: real
  * features, legal copy): no download button, no reviews or numbers, no fees, no promise the

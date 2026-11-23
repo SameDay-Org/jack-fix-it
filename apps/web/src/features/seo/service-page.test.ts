@@ -71,7 +71,7 @@ describe("a service's page", () => {
     expect(html).toContain("How many bedrooms?");
     expect(html).toContain("How often do you need cleaning?");
     expect(html).toMatch(/One time.*Recurring.*Weekly or every other week/s);
-    // Where Jack works: the served cities, as stored.
+    // Where John works: the served cities, as stored.
     expect(html).toContain("Fort Lauderdale, FL");
     expect(html).toContain("Hollywood, FL");
     // The other services, and the way to the app (the web request flow is #86).
@@ -100,7 +100,7 @@ describe("a service's page", () => {
     for (const [language, href] of switches) {
       expect(href, language).toBe(language === "en" ? "/painting" : "/es/painting");
     }
-    for (const english of ["How it works", "Where Jack works", "Get the app", "Skip to"]) {
+    for (const english of ["How it works", "Where John works", "Get the app", "Skip to"]) {
       expect(html, english).not.toContain(english);
     }
   });
@@ -118,12 +118,12 @@ describe("a service's page", () => {
     const html = await page("en", "pool-care");
 
     expect(html).toMatch(/<h1[^>]*>Pool Care in South Florida<\/h1>/);
-    expect(html).toContain("Tell Jack what you need.");
-    expect(html).toContain("Tell Jack what you need, in your own words.");
+    expect(html).toContain("Tell John what you need.");
+    expect(html).toContain("Tell John what you need, in your own words.");
     expect(html).not.toContain('<ol class="mt-10 grid');
   });
 
-  it("names every region, and no single place in the headline, when Jack serves several", async () => {
+  it("names every region, and no single place in the headline, when John serves several", async () => {
     serve([CLEANING], [SOUTH_FLORIDA, TREASURE_COAST]);
     const html = await page("en", "house-cleaning");
 
@@ -131,7 +131,7 @@ describe("a service's page", () => {
     expect(html).toMatch(/<h3[^>]*>South Florida<\/h3>/);
     expect(html).toMatch(/<h3[^>]*>Treasure Coast<\/h3>/);
     expect(html).toContain("Stuart, FL");
-    expect(html).not.toContain("More from Jack"); // no other service to offer
+    expect(html).not.toContain("More from John"); // no other service to offer
   });
 
   it.each([
@@ -206,9 +206,9 @@ describe("a service's metadata", () => {
     const en = await serviceMetadata("en", "house-cleaning");
     const es = await serviceMetadata("es", "house-cleaning");
 
-    expect(en.title).toBe("House Cleaning in South Florida | Jack Fix It");
+    expect(en.title).toBe("House Cleaning in South Florida | John Got It");
     expect(en.description).toBe(
-      "House Cleaning in South Florida: tell Jack about the job, compare fixed-price quotes from pros near you and follow it in the app.",
+      "House Cleaning in South Florida: tell John about the job, compare fixed-price quotes from pros near you and follow it in the app.",
     );
     expect(en.alternates).toEqual({
       canonical: "/house-cleaning",
@@ -219,17 +219,17 @@ describe("a service's metadata", () => {
       },
     });
     expect(en.openGraph).toMatchObject({ url: "/house-cleaning", locale: "en_US" });
-    expect(es.title).toBe("Limpieza del hogar en South Florida | Jack Fix It");
+    expect(es.title).toBe("Limpieza del hogar en South Florida | John Got It");
     expect(es.alternates?.canonical).toBe("/es/house-cleaning");
     expect(es.openGraph).toMatchObject({ url: "/es/house-cleaning", locale: "es_US" });
     expect(String(en.description).length).toBeLessThanOrEqual(155);
   });
 
-  it("names no place when Jack serves several regions", async () => {
+  it("names no place when John serves several regions", async () => {
     serve([CLEANING], [SOUTH_FLORIDA, TREASURE_COAST]);
 
     expect((await serviceMetadata("en", "house-cleaning")).title).toBe(
-      "House Cleaning | Jack Fix It",
+      "House Cleaning | John Got It",
     );
   });
 
@@ -252,7 +252,7 @@ describe("the service routes", () => {
     expect((await enRoute.default({ params })).props).toEqual({ locale: "en", slug: "painting" });
     expect((await esRoute.default({ params })).props).toEqual({ locale: "es", slug: "painting" });
     expect((await esRoute.generateMetadata({ params })).title).toBe(
-      "Pintura en South Florida | Jack Fix It",
+      "Pintura en South Florida | John Got It",
     );
   });
 });
