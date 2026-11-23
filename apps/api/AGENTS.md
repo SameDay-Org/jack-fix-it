@@ -237,8 +237,8 @@ them idempotent: they can run twice.
   `erasure.py`, over its own tables (`accounts.eraser` runs them). A new table that holds a
   person's data gets its part there, or is named as kept, and `plant_everything` in
   `tests/test_account_deletion.py` plants a row of it: the sweep there finds only the values the
-  test planted, so a table no test plants is not checked. `launch_interest` keeps a row with
-  the account's email for now (Cesar decides, #590). Locks: the customer's cancellable
+  test planted, so a table no test plants is not checked. A `launch_interest` row with the
+  account's email goes too (`interest/erasure.py`, #590). Locks: the customer's cancellable
   requests, then the user's row FOR UPDATE (a payment's order); the checks read each stage
   before the next. A request the account sent before the deletion may still write after its
   commit: the worker erases the account again after `ACCOUNT_DELETION_SETTLE_SECONDS`. Kept

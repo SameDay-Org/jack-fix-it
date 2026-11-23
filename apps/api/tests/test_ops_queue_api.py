@@ -75,6 +75,7 @@ ITEM_KEYS = {
     "id",
     "public_code",
     "customer_name",
+    "customer_deleted",
     "category",
     "zip_code",
     "status",

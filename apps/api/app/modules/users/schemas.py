@@ -14,6 +14,20 @@ def _without_default(schema: dict[str, Any]) -> None:
     schema.pop("default", None)
 
 
+def deleted_party(party: str) -> Any:
+    """The `<party>_deleted` flag of a view that names another account (#590, Cesar's 3B):
+    True when that account was deleted (#97). Its name in the view is then null, and the apps
+    show their own words for it. Always sent; optional in the published schema, so the apps
+    built before #590 still type-check (read it absent as false), as UserOut.terms_required."""
+    return Field(
+        default=False,
+        description=f"True when the {party}'s account was deleted (#97): the name is then null "
+        'and the app shows its own words for it ("Deleted user", "Usuario eliminado"). '
+        "Absent from an API older than #590: read it as false.",
+        json_schema_extra=_without_default,
+    )
+
+
 class UserOut(BaseModel):
     """The user as the API shows it. Never carries the password hash; the ID photo comes as
     a signed URL (#250)."""

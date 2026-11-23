@@ -23,6 +23,7 @@ from app.modules.disputes.models import (
 from app.modules.disputes.schemas import DisputePhotoOut
 from app.modules.jobs.service import JobStatus
 from app.modules.payments.schemas import PaymentSummaryOut, RefundOut, TransferOut
+from app.modules.users.schemas import deleted_party
 
 Note = Annotated[
     str,
@@ -99,6 +100,8 @@ class StaffDisputeSummary(_Out):
     job_status: JobStatus
     customer_first_name: str | None
     pro_first_name: str | None
+    customer_deleted: bool = deleted_party("customer")
+    pro_deleted: bool = deleted_party("pro")
     customer_total_cents: int | None = Field(
         description="What the customer paid, tax included; null when the job's payment is "
         "missing (a dispute that needs review)."

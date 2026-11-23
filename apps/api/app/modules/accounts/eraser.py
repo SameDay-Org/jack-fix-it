@@ -16,6 +16,7 @@ from app.modules.addresses.erasure import AddressErasure
 from app.modules.auth.service import revoke_all_sessions
 from app.modules.chat.erasure import forget_originals
 from app.modules.devices.erasure import forget_devices
+from app.modules.interest.erasure import forget_interest
 from app.modules.jobs.erasure import JobErasure
 from app.modules.ops.erasure import erase_notes
 from app.modules.payments.erasure import request_ids_with_an_open_payment
@@ -90,6 +91,7 @@ class AccountEraser:
         counts["waitlist_entries"] = await forget_entries(
             self._session, account.id, account.email, account.phone
         )
+        counts["launch_interest"] = await forget_interest(self._session, account.email)
         counts["support_messages"] = await erase_messages(self._session, account.id)
         counts["chat_originals"] = await forget_originals(self._session, account.id)
         erased.has_stripe_customer = await self._users.stripe_customer_id(account.id) is not None

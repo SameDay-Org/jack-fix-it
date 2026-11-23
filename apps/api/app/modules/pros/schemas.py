@@ -22,6 +22,7 @@ from app.modules.pros.models import (
 )
 from app.modules.service_areas.schemas import ServiceAreaOut
 from app.modules.uploads.schemas import PhotoOut
+from app.modules.users.schemas import deleted_party
 from app.redaction import redact_contacts
 
 MAX_YEARS_OF_EXPERIENCE = 80  # the pro_profiles CHECK
@@ -189,6 +190,7 @@ class StaffProItem(BaseModel):
         description='First name and last initial ("María P."); null when a name is missing or '
         "shows a contact detail."
     )
+    pro_deleted: bool = deleted_party("pro")
     verification_status: ProVerificationStatus
     payouts_enabled: bool
     categories: list[CategorySummary]
@@ -244,6 +246,7 @@ class StaffProOut(StaffProDecisionOut):
         description="First and last name as on the account, to match the ID document; null "
         "when the account has neither. Only this detail carries it, never the list."
     )
+    pro_deleted: bool = deleted_party("pro")
     payouts_enabled: bool
     bio: str | None = Field(description="As the pro wrote it: it may hold contact details.")
     years_of_experience: int | None

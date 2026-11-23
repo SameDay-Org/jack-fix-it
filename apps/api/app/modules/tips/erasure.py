@@ -19,9 +19,8 @@ from sqlalchemy import ColumnElement, and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.tips.models import (
-    PAYOUTS_NOT_ENABLED,
-    PRO_NOT_APPROVED,
     UNPAID_STATUSES,
+    WAITING_CODES,
     Tip,
     TipStatus,
     TipTransferStatus,
@@ -34,17 +33,10 @@ from app.modules.tips.transfers import blocked_jobs
 OWED_TRANSFERS: Final = frozenset(
     {TipTransferStatus.NONE, TipTransferStatus.PENDING, TipTransferStatus.FAILED}
 )
-# The hold codes of a held tip that waits for the pro's own payout setup: the sweep releases it
-# once they can be paid (tips.models.WAITING_CODES), which needs a sign-in a deleted pro no
-# longer has. Every other hold code is staff's, never released by itself: it does not block.
-#
-# PRO_NOT_APPROVED is NOT DECIDED (#590 round 1, the Vault's question, for Cesar): blocking it
-# means a pro who is never approved again can never delete while such a tip waits. Until he
-# decides it blocks, because a refused deletion can be asked again later and a deletion cannot
-# be undone. To let it go, remove it here and flip
-# tests/test_account_deletion.py::PRO_NOT_APPROVED_BLOCKS.
-UNDECIDED_HOLD_CODES: Final = frozenset({PRO_NOT_APPROVED})
-WAITING_FOR_THE_PRO: Final = frozenset({PAYOUTS_NOT_ENABLED}) | UNDECIDED_HOLD_CODES
+# A held tip blocks while it waits for the pro's own payout setup (tips.models.WAITING_CODES:
+# payouts_not_enabled and pro_not_approved, Cesar's decision on #590): the sweep releases it
+# once they can be paid, which needs a sign-in a deleted pro no longer has. Every other hold
+# code is staff's, never released by itself: it does not block.
 
 
 def _being_paid() -> ColumnElement[bool]:
@@ -73,7 +65,7 @@ def _owed_to_the_pro() -> ColumnElement[bool]:
             Tip.transfer_status.in_(OWED_TRANSFERS),
             and_(
                 Tip.transfer_status == TipTransferStatus.HELD,
-                Tip.transfer_last_error_code.in_(WAITING_FOR_THE_PRO),
+                Tip.transfer_last_error_code.in_(WAITING_CODES),
             ),
         ),
     )

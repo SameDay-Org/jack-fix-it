@@ -334,6 +334,7 @@ class OpsQueueService:
                 customer_name=contacts[row.id].first_name
                 if row.id in contacts
                 else names.get(row.customer_id),
+                customer_deleted=names.is_deleted(row.customer_id),
                 category=categories.get(row.category_id) if row.category_id else None,
                 agent=agents.get(row.assigned_agent_id) if row.assigned_agent_id else None,
                 media_count=media.get(row.id, 0),
@@ -346,6 +347,7 @@ class OpsQueueService:
         row: QueuedRequest,
         *,
         customer_name: str | None,
+        customer_deleted: bool,
         category: CategorySummary | None,
         agent: QueueAgent | None,
         media_count: int,
@@ -355,6 +357,7 @@ class OpsQueueService:
             id=request.id,
             public_code=request.public_code,
             customer_name=customer_name,
+            customer_deleted=customer_deleted,
             category=category,
             zip_code=zip5(row.zip_code),
             status=request.status,
@@ -403,8 +406,10 @@ class OpsQueueService:
             **item.model_dump(),
             customer=CardCustomer(
                 id=customer.id,
-                first_name=customer.first_name,
-                last_name=customer.last_name,
+                # A deleted account's name is never shown, even one a late write left before
+                # the second erasure: the card's customer_deleted says so (#590, 3B).
+                first_name=None if item.customer_deleted else customer.first_name,
+                last_name=None if item.customer_deleted else customer.last_name,
                 phone=customer.phone,
                 email=customer.email,
                 language=request.language,
@@ -434,6 +439,7 @@ class OpsQueueService:
                 CardQuote(
                     id=quote.id,
                     pro_name=pros[quote.pro_id].name if quote.pro_id in pros else None,
+                    pro_deleted=quote.pro_id in pros and pros[quote.pro_id].deleted,
                     amount_cents=quote.amount_cents,
                     status=quote.status,
                     proposed_start_at=quote.proposed_start_at,

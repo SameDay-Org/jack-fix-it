@@ -34,6 +34,7 @@ from app.integrations.storage import (
     ObjectPage,
     StorageUnavailableError,
     StoredObject,
+    get_storage,
 )
 from app.integrations.stripe_errors import StripeRejectedError, StripeUnavailableError
 from app.modules.accounts.eraser import AccountEraser
@@ -99,7 +100,7 @@ from app.modules.tips.transfers import TIP_TRANSFER_NEEDS_REVIEW
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.users.models import User
 from app.modules.users.service import UserService
-from app.modules.users.types import DELETED_USER_NAME, ERASED_TEXT, UserRole, UserStatus
+from app.modules.users.types import ERASED_TEXT, UserRole, UserStatus
 from app.modules.waitlist.models import WaitlistEntry, WaitlistSource
 from app.queue import get_job_queue
 from app.rate_limit import get_rate_limiter
@@ -243,13 +244,19 @@ async def world(
         )
     finally:
         async with committed.sessions() as session:
-            await purge(session, users, categories)
+            await purge(session, users, categories, [customer.email, pro.email])
             await session.commit()
 
 
-async def purge(session: AsyncSession, users: list[uuid.UUID], categories: list[uuid.UUID]) -> None:
-    """Deletes every row these users and categories have anywhere, in dependency order."""
-    ids = {"users": users}
+async def purge(
+    session: AsyncSession,
+    users: list[uuid.UUID],
+    categories: list[uuid.UUID],
+    emails: list[str] | None = None,
+) -> None:
+    """Deletes every row these users and categories have anywhere, in dependency order, and
+    the launch interest rows with these emails (a row holds an email only)."""
+    ids: dict[str, Any] = {"users": users, "emails": emails or []}
     ids["pros"] = list(
         await session.scalars(text("SELECT id FROM pro_profiles WHERE user_id = ANY(:users)"), ids)
     )
@@ -306,6 +313,7 @@ async def purge(session: AsyncSession, users: list[uuid.UUID], categories: list[
         "DELETE FROM account_deletions WHERE user_id = ANY(:users)",
         "DELETE FROM users WHERE id = ANY(:users)",
         "DELETE FROM categories WHERE id = ANY(:categories)",
+        "DELETE FROM launch_interest WHERE email = ANY(:emails)",
     ):
         await session.execute(text(statement), ids)
 
@@ -564,6 +572,12 @@ async def plant_everything(session: AsyncSession, world: World) -> Paid:
                 overall=5,
                 comment=f"Great work, thanks from {world.sentinel}",
             ),
+            # A launch interest row with the account's email (#409): it goes too (#590).
+            LaunchInterest(
+                email=world.customer.email,
+                source=InterestSource.SHOWCASE,
+                consent_version="interest-2026-11-19",
+            ),
         ]
     )
     await session.flush()
@@ -686,7 +700,9 @@ async def test_a_customers_personal_data_is_gone_and_the_money_records_stay(worl
     # The pro of that past job still sees it, with the customer shown as deleted.
     pro_view = await world.client.get(f"/v1/pros/me/jobs/{paid.job.id}", headers=world.pro.headers)
     assert pro_view.status_code == 200, pro_view.text
-    assert pro_view.json()["customer_first_name"] == DELETED_USER_NAME
+    # No name, and the flag the app shows its own words for (#590, Cesar's 3B).
+    assert pro_view.json()["customer_first_name"] is None
+    assert pro_view.json()["customer_deleted"] is True
     assert pro_view.json()["address"]["line1"] == ERASED_TEXT
     assert world.sentinel not in pro_view.text
 
@@ -725,7 +741,8 @@ async def test_a_pros_profile_and_documents_go_and_the_customer_still_sees_the_j
         f"/v1/requests/{paid.request.id}/job", headers=world.customer.headers
     )
     assert customer_view.status_code == 200, customer_view.text
-    assert customer_view.json()["pro"]["name"] == DELETED_USER_NAME
+    assert customer_view.json()["pro"]["name"] is None
+    assert customer_view.json()["pro"]["pro_deleted"] is True
 
 
 async def test_a_customers_open_requests_are_cancelled(world: World) -> None:
@@ -1007,6 +1024,8 @@ IN_FLIGHT = [
     ("pro", a_tip(SUCCEEDED, TipTransferStatus.PENDING), "payout_pending"),
     ("pro", a_tip(SUCCEEDED, TipTransferStatus.FAILED, "api_error"), "payout_pending"),
     ("pro", a_tip(SUCCEEDED, TipTransferStatus.HELD, PAYOUTS_NOT_ENABLED), "payout_pending"),
+    # Cesar's decision (#590): held until the pro is approved again blocks too.
+    ("pro", a_tip(SUCCEEDED, TipTransferStatus.HELD, PRO_NOT_APPROVED), "payout_pending"),
 ]
 IN_FLIGHT_IDS = [
     *[f"customer-job-{status}" for status in (*CUSTOMER_JOBS, JobStatus.COMPLETED)],
@@ -1026,6 +1045,7 @@ IN_FLIGHT_IDS = [
     "pro-tip-transfer-under-way",
     "pro-tip-transfer-failed",
     "pro-tip-held-payouts-not-enabled",
+    "pro-tip-held-pro-not-approved",
 ]
 
 
@@ -1118,27 +1138,6 @@ async def test_a_deletion_goes_ahead_once_the_money_has_settled(
     assert response.status_code == 204, response.text
     async with world.sessions() as session:
         assert (await row_values(session, User, account.id))["status"] is UserStatus.DELETED
-
-
-# TODO(Cesar, #590 round 1): does a tip held until the pro is approved again (pro_not_approved)
-# block the pro's deletion? A money rule, not decided yet. It blocks until he decides (a refused
-# deletion can be asked again; a deletion cannot be undone). To let it go, set False here and
-# remove PRO_NOT_APPROVED from tips.erasure.UNDECIDED_HOLD_CODES.
-PRO_NOT_APPROVED_BLOCKS = True
-
-
-async def test_todo_cesar_a_tip_held_until_the_pro_is_approved(world: World) -> None:
-    async with world.sessions() as session:
-        await a_tip(SUCCEEDED, TipTransferStatus.HELD, PRO_NOT_APPROVED)(session, world)
-        await session.commit()
-
-    response = await delete_account(world.client, world.pro)
-
-    if PRO_NOT_APPROVED_BLOCKS:
-        assert response.status_code == 409, response.text
-        assert response.json()["error"]["code"] == "payout_pending"
-    else:
-        assert response.status_code == 204, response.text
 
 
 async def test_a_wrong_password_is_refused_and_tries_are_limited(world: World) -> None:
@@ -1281,6 +1280,9 @@ class FakeStorage:
             raise self.failure
         listed = [StoredObject(key, datetime.now(UTC)) for key in sorted(self.objects)]
         yield ObjectPage(objects=[o for o in listed if o.key.startswith(prefix)], newer=0)
+
+    def presign_get(self, key: str, expires_in: int) -> str:
+        return f"https://storage.example.invalid/get/{key}?sig=fake"
 
     def delete_many(self, keys: Any) -> DeleteResult:
         if self.failure is not None:
@@ -2118,42 +2120,43 @@ async def test_a_support_tickets_replay_key_and_fingerprint_go_with_its_text(
     )
 
 
-async def test_staff_see_a_deleted_pros_legal_name_as_deleted_user(world: World) -> None:
+async def test_a_deleted_pros_legal_name_is_none(world: World) -> None:
     assert (await delete_account(world.client, world.pro)).status_code == 204
+    await a_late_name(world, world.pro.id)
 
     async with world.sessions() as session:
-        assert await UserService(session).legal_name(world.pro.id) == DELETED_USER_NAME
+        assert await UserService(session).legal_name(world.pro.id) is None
 
 
-# TODO(Cesar, #590 round 1, the Gatekeeper's B4): a launch_interest row (#409, "tell me when the
-# app is in the stores") with the account's email stays after the deletion, while a signed-out
-# waitlist entry with it goes. Whether the deletion must delete or anonymise it is Cesar's call.
-# Kept until he decides; to change it, add interest/erasure.py and set False here.
-LAUNCH_INTEREST_KEPT = True
-
-
-async def test_todo_cesar_a_launch_interest_row_with_the_accounts_email(world: World) -> None:
+async def test_a_launch_interest_row_with_the_accounts_email_goes(world: World) -> None:
+    # Cesar's decision (#590, the Gatekeeper's B4): deleted with the account. Another email's
+    # row stays.
+    other_email = f"neighbour-{uuid.uuid4().hex[:10]}@example.com"
     async with world.sessions() as session:
-        interest = LaunchInterest(
-            email=world.customer.email,
-            source=InterestSource.SHOWCASE,
-            consent_version="interest-2026-11-19",
-        )
-        session.add(interest)
+        rows = [
+            LaunchInterest(
+                email=email, source=InterestSource.SHOWCASE, consent_version="interest-2026-11-19"
+            )
+            for email in (world.customer.email, other_email)
+        ]
+        session.add_all(rows)
         await session.commit()
-        interest_id = interest.id
+        ids = [row.id for row in rows]
     try:
         assert (await delete_account(world.client, world.customer)).status_code == 204
 
         async with world.sessions() as session:
-            kept = await session.scalar(
-                select(LaunchInterest.email).where(LaunchInterest.id == interest_id)
+            left = list(
+                await session.scalars(
+                    select(LaunchInterest.email).where(LaunchInterest.id.in_(ids))
+                )
             )
-        assert kept == (world.customer.email if LAUNCH_INTEREST_KEPT else None)
+        assert left == [other_email]
+        assert world.audits[0][4]["launch_interest"] == 1
     finally:
         async with world.sessions() as session:
             await session.execute(
-                text("DELETE FROM launch_interest WHERE id = :id"), {"id": interest_id}
+                text("DELETE FROM launch_interest WHERE id = ANY(:ids)"), {"ids": ids}
             )
             await session.commit()
 
@@ -2214,3 +2217,152 @@ async def test_the_second_erasure_reads_the_account_under_its_lock(
     assert late_photo in row.storage_keys
     async with world.sessions() as session:
         assert (await row_values(session, User, world.customer.id))["photo_key"] is None
+
+
+# #590, Cesar's 3B: each view that names a deleted account sends no name and its flag; the
+# apps show their own words for it. The pro's job and the customer's job: the two tests above.
+
+
+async def an_admin(world: World, app: FastAPI, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """An admin's headers for the staff views; their reads are recorded in memory, and the
+    views sign file URLs with the fake storage."""
+
+    async def read(self: AuditService, *args: Any) -> None:
+        return None
+
+    monkeypatch.setattr(AuditService, "record_read", read)
+    app.dependency_overrides[get_storage] = lambda: FakeStorage()
+    async with world.sessions() as session:
+        admin = User(
+            email=f"admin-{uuid.uuid4().hex[:10]}@example.com",
+            password_hash="x",
+            role=UserRole.ADMIN,
+        )
+        session.add(admin)
+        await session.commit()
+    world.users.append(admin.id)
+    return headers_for(admin.id, UserRole.ADMIN)
+
+
+async def a_late_name(world: World, user_id: uuid.UUID) -> None:
+    """A name written after the deletion by a request sent before it (the second erasure
+    clears it later): no reader shows a deleted account's name meanwhile."""
+    async with world.sessions() as session:
+        await session.execute(
+            update(User).where(User.id == user_id).values(first_name="Late", last_name="Write")
+        )
+        await session.commit()
+
+
+async def a_resolved_dispute(session: AsyncSession, world: World, job_id: uuid.UUID) -> Dispute:
+    dispute = Dispute(
+        job_id=job_id,
+        opened_by=world.customer.id,
+        reason_code=next(iter(DisputeReason)),
+        description="Not fixed",
+        status=DisputeStatus.RESOLVED,
+        resolution=DisputeResolution.RELEASED,
+        resolved_by=world.agent_id,
+        resolved_at=datetime.now(UTC),
+    )
+    session.add(dispute)
+    await session.flush()
+    return dispute
+
+
+async def test_the_staff_and_public_views_flag_a_deleted_customer(
+    world: World, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with world.sessions() as session:
+        paid = await add_job(session, world)
+        dispute = await a_resolved_dispute(session, world, paid.job.id)
+        ticket = SupportTicket(
+            user_id=world.customer.id,
+            role=TicketRole.CUSTOMER,
+            topic=next(iter(TicketTopic)),
+            message="Where is my receipt?",
+        )
+        session.add_all(
+            [
+                ticket,
+                Review(
+                    job_id=paid.job.id,
+                    author_id=world.customer.id,
+                    target_id=world.pro.id,
+                    author_role=ReviewAuthorRole.CUSTOMER,
+                    overall=5,
+                    comment="Great work",
+                ),
+            ]
+        )
+        # Published: the job was confirmed longer ago than the publication window.
+        await session.execute(
+            update(Job)
+            .where(Job.id == paid.job.id)
+            .values(confirmed_at=datetime.now(UTC) - timedelta(days=60))
+        )
+        await session.commit()
+    staff = await an_admin(world, app, monkeypatch)
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+    await a_late_name(world, world.customer.id)
+
+    card = await world.client.get(f"/v1/admin/requests/{paid.request.id}", headers=staff)
+    disputes = await world.client.get("/v1/admin/disputes", headers=staff)
+    one_dispute = await world.client.get(f"/v1/admin/disputes/{dispute.id}", headers=staff)
+    tickets = await world.client.get("/v1/admin/support/tickets", headers=staff)
+    one_ticket = await world.client.get(f"/v1/admin/support/tickets/{ticket.id}", headers=staff)
+    reviews = await world.client.get(
+        f"/v1/pros/{world.pro_profile_id}/reviews", headers=world.pro.headers
+    )
+
+    for response in (card, disputes, one_dispute, tickets, one_ticket, reviews):
+        assert response.status_code == 200, (response.request.url, response.text)
+    body = card.json()
+    assert (body["customer_name"], body["customer_deleted"]) == (None, True)
+    assert (body["customer"]["first_name"], body["customer"]["last_name"]) == (None, None)
+    assert [quote["pro_deleted"] for quote in body["quotes"]] == [False]
+    [summary] = [item for item in disputes.json()["disputes"] if item["id"] == str(dispute.id)]
+    for view in (summary, one_dispute.json()):
+        assert (view["customer_first_name"], view["customer_deleted"]) == (None, True)
+        assert view["pro_deleted"] is False
+    [item] = [row for row in tickets.json()["items"] if row["id"] == str(ticket.id)]
+    for view in (item, one_ticket.json()):
+        assert (view["user_first_name"], view["user_deleted"]) == (None, True)
+    [review] = reviews.json()["items"]
+    assert (review["reviewer"], review["reviewer_deleted"]) == (None, True)
+
+
+async def test_the_views_flag_a_deleted_pro(
+    world: World, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with world.sessions() as session:
+        paid = await add_job(session, world)
+        dispute = await a_resolved_dispute(session, world, paid.job.id)
+        await session.commit()
+    staff = await an_admin(world, app, monkeypatch)
+    assert (await delete_account(world.client, world.pro)).status_code == 204
+    await a_late_name(world, world.pro.id)
+
+    pros = await world.client.get("/v1/admin/pros?status=approved", headers=staff)
+    one_pro = await world.client.get(f"/v1/admin/pros/{world.pro_profile_id}", headers=staff)
+    card = await world.client.get(f"/v1/admin/requests/{paid.request.id}", headers=staff)
+    one_dispute = await world.client.get(f"/v1/admin/disputes/{dispute.id}", headers=staff)
+    receipt = await world.client.get(
+        f"/v1/requests/{paid.request.id}/receipt", headers=world.customer.headers
+    )
+
+    for response in (pros, one_pro, card, one_dispute, receipt):
+        assert response.status_code == 200, (response.request.url, response.text)
+    [listed] = [item for item in pros.json()["items"] if item["id"] == str(world.pro_profile_id)]
+    assert (listed["name"], listed["pro_deleted"]) == (None, True)
+    detail = one_pro.json()
+    assert (detail["name"], detail["legal_name"], detail["pro_deleted"]) == (None, None, True)
+    assert [(q["pro_name"], q["pro_deleted"]) for q in card.json()["quotes"]] == [(None, True)]
+    assert card.json()["customer_deleted"] is False
+    view = one_dispute.json()
+    assert (view["pro_first_name"], view["pro_deleted"], view["customer_deleted"]) == (
+        None,
+        True,
+        False,
+    )
+    assert (receipt.json()["pro_name"], receipt.json()["pro_deleted"]) == (None, True)

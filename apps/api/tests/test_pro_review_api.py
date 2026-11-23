@@ -93,6 +93,7 @@ NOT_PENDING = {
 ITEM_KEYS = {
     "id",
     "name",
+    "pro_deleted",
     "verification_status",
     "payouts_enabled",
     "categories",

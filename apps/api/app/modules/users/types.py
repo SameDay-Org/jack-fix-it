@@ -1,6 +1,7 @@
 """What other modules see of a user: enums and frozen values, never the ORM model (ADR 0003)."""
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, StrEnum
@@ -33,8 +34,6 @@ class UserStatus(StrEnum):
 # .invalid TLD, RFC 2606) and unique per guest, and a hash no password verifies (not a hash).
 GUEST_EMAIL_DOMAIN: Final = "guest.invalid"
 GUEST_PASSWORD_HASH: Final = "!guest"  # noqa: S105 - no secret: a marker no password verifies
-# What every other party sees for a deleted account's name (#97), whatever reader they use.
-DELETED_USER_NAME: Final = "Deleted user"
 # What replaces free text a deleted account wrote, or that staff wrote about it (#97), where
 # the row itself stays: a request's description and address line, a support ticket, a note.
 ERASED_TEXT: Final = "Removed when the account was deleted."
@@ -87,3 +86,20 @@ class UserCredentials:
 
     account: UserAccount
     password_hash: str
+
+
+@dataclass(frozen=True)
+class PartyNames:
+    """Names as another party sees them, from one read (UserService.public_names,
+    first_names). A deleted account (#97) has none: `get` answers None and its id is in
+    `deleted`, so a view sends `<who>_deleted` and the apps show their own words for it (#590,
+    Cesar's 3B). Never "Deleted user" as data."""
+
+    names: Mapping[uuid.UUID, str | None]
+    deleted: frozenset[uuid.UUID]
+
+    def get(self, user_id: uuid.UUID) -> str | None:
+        return self.names.get(user_id)
+
+    def is_deleted(self, user_id: uuid.UUID) -> bool:
+        return user_id in self.deleted

@@ -11344,6 +11344,11 @@
             "title": "Pro Name",
             "description": "The pro's first name and last initial (\"Mar\u00eda P.\")."
           },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "amount_cents": {
             "type": "integer",
             "title": "Amount Cents",
@@ -15635,6 +15640,11 @@
             "title": "Customer First Name",
             "description": "The customer's first name only; null when it is not set or shows a contact detail."
           },
+          "customer_deleted": {
+            "type": "boolean",
+            "title": "Customer Deleted",
+            "description": "True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "eta_at": {
             "anyOf": [
               {
@@ -16103,6 +16113,11 @@
             "title": "Name",
             "description": "The first name and the last name's initial, e.g. \"Mar\u00eda P.\"; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked."
           },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "rating_avg": {
             "anyOf": [
               {
@@ -16275,6 +16290,11 @@
             "title": "Name",
             "description": "The first name and the last name's initial, e.g. \"Mar\u00eda P.\"; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked."
           },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "rating_avg": {
             "anyOf": [
               {
@@ -16433,6 +16453,11 @@
             "title": "Reviewer",
             "description": "The reviewer's first name and last initial, e.g. \"Mar\u00eda P.\"; null when a name is missing or shows a contact detail."
           },
+          "reviewer_deleted": {
+            "type": "boolean",
+            "title": "Reviewer Deleted",
+            "description": "True when the reviewer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "created_on": {
             "type": "string",
             "format": "date",
@@ -16547,6 +16572,11 @@
             ],
             "title": "Customer Name",
             "description": "First name and last initial (\"Ana P.\"); null when a name is missing or shows a contact detail."
+          },
+          "customer_deleted": {
+            "type": "boolean",
+            "title": "Customer Deleted",
+            "description": "True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
           },
           "category": {
             "anyOf": [
@@ -16891,6 +16921,11 @@
             ],
             "title": "Name",
             "description": "The first name and the last name's initial, e.g. \"Mar\u00eda P.\"; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked."
+          },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
           },
           "rating_avg": {
             "anyOf": [
@@ -17241,6 +17276,11 @@
             "examples": [
               "Dan R."
             ]
+          },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
           },
           "scheduled_start_at": {
             "type": "string",
@@ -17659,6 +17699,11 @@
             ],
             "title": "Customer Name",
             "description": "First name and last initial (\"Ana P.\"); null when a name is missing or shows a contact detail."
+          },
+          "customer_deleted": {
+            "type": "boolean",
+            "title": "Customer Deleted",
+            "description": "True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
           },
           "category": {
             "anyOf": [
@@ -19367,6 +19412,16 @@
             ],
             "title": "Pro First Name"
           },
+          "customer_deleted": {
+            "type": "boolean",
+            "title": "Customer Deleted",
+            "description": "True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "customer_total_cents": {
             "anyOf": [
               {
@@ -19645,6 +19700,16 @@
               }
             ],
             "title": "Pro First Name"
+          },
+          "customer_deleted": {
+            "type": "boolean",
+            "title": "Customer Deleted",
+            "description": "True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
           },
           "customer_total_cents": {
             "anyOf": [
@@ -20080,6 +20145,11 @@
             "title": "Name",
             "description": "First name and last initial (\"Mar\u00eda P.\"); null when a name is missing or shows a contact detail."
           },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "verification_status": {
             "$ref": "#/components/schemas/ProVerificationStatus"
           },
@@ -20197,6 +20267,11 @@
             ],
             "title": "Legal Name",
             "description": "First and last name as on the account, to match the ID document; null when the account has neither. Only this detail carries it, never the list."
+          },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
           },
           "payouts_enabled": {
             "type": "boolean",
@@ -20401,6 +20476,11 @@
             "title": "User First Name",
             "description": "The writer's first name alone; null when they have none or it shows a contact detail."
           },
+          "user_deleted": {
+            "type": "boolean",
+            "title": "User Deleted",
+            "description": "True when the writer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "role": {
             "$ref": "#/components/schemas/TicketRole",
             "description": "The writer's role when they wrote the ticket."
@@ -20495,6 +20575,11 @@
             ],
             "title": "User First Name",
             "description": "The writer's first name alone; null when they have none or it shows a contact detail."
+          },
+          "user_deleted": {
+            "type": "boolean",
+            "title": "User Deleted",
+            "description": "True when the writer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
           },
           "role": {
             "$ref": "#/components/schemas/TicketRole",

@@ -28,13 +28,13 @@ from app.modules.users.models import User
 from app.modules.users.names import safe_first_name, safe_public_name
 from app.modules.users.repository import UserRepository
 from app.modules.users.types import (
-    DELETED_USER_NAME,
     GUEST_EMAIL_DOMAIN,
     GUEST_PASSWORD_HASH,
     KEEP,
     ContactPoints,
     Keep,
     Locale,
+    PartyNames,
     UserAccount,
     UserCredentials,
     UserRole,
@@ -128,38 +128,35 @@ class UserService:
             for user_id, email, phone in await self._users.contact_points(user_ids)
         }
 
-    async def public_names(self, user_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str | None]:
+    async def public_names(self, user_ids: Collection[uuid.UUID]) -> PartyNames:
         """Each user's public name ("María P.", names.safe_public_name), read in one query;
         None when a name is missing or shows a contact detail, the user's own email and phone
-        included. The contacts never leave this module, and the full name only through
-        `legal_name` (staff's review of a pro)."""
-        names, _ = await self.public_names_and_deleted(user_ids)
-        return names
-
-    async def public_names_and_deleted(
-        self, user_ids: Collection[uuid.UUID]
-    ) -> tuple[dict[uuid.UUID, str | None], set[uuid.UUID]]:
-        """`public_names`, and the ids of the deleted accounts among them (#97), from the
-        same one query."""
+        included, and for a deleted account (#97), whose id is in `deleted` (PartyNames). The
+        contacts never leave this module, and the full name only through `legal_name` (staff's
+        review of a pro)."""
         rows = await self._users.names(user_ids)
-        names = {
-            user_id: DELETED_USER_NAME
-            if status is UserStatus.DELETED
-            else safe_public_name(
-                first, last, KnownValues(emails=(email,), phones=(phone,) if phone else ())
-            )
-            for user_id, first, last, email, phone, status in rows
-        }
-        deleted = {user_id for user_id, *_, status in rows if status is UserStatus.DELETED}
-        return names, deleted
+        return PartyNames(
+            names={
+                user_id: None
+                if status is UserStatus.DELETED
+                else safe_public_name(
+                    first, last, KnownValues(emails=(email,), phones=(phone,) if phone else ())
+                )
+                for user_id, first, last, email, phone, status in rows
+            },
+            deleted=frozenset(
+                user_id for user_id, *_, status in rows if status is UserStatus.DELETED
+            ),
+        )
 
     async def legal_name(self, user_id: uuid.UUID) -> str | None:
         """The account's first and last name as stored, for the staff member who matches a
         pro's ID document to the account (#41): the audited staff detail of one pro only,
-        never a list and never another user's view. None when the account has neither name."""
+        never a list and never another user's view. None when the account has neither name,
+        and for a deleted account (#97: the view's pro_deleted says so)."""
         rows = await self._users.names({user_id})
         if any(status is UserStatus.DELETED for *_, status in rows):
-            return DELETED_USER_NAME
+            return None
         parts = [name for _, first, last, _, _, _ in rows for name in (first, last) if name]
         return " ".join(parts) or None
 
@@ -177,18 +174,25 @@ class UserService:
             for user_id, first, role, email, phone in await self._users.active_staff()
         ]
 
-    async def first_names(self, user_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, str | None]:
+    async def first_names(self, user_ids: Collection[uuid.UUID]) -> PartyNames:
         """Each user's first name alone, read in one query: what the pro of a paid job sees of
         the customer (#63). None when it is missing or shows a contact detail, the user's own
-        email and phone included (names.safe_first_name). Never the last name or a contact."""
-        return {
-            user_id: DELETED_USER_NAME
-            if status is UserStatus.DELETED
-            else safe_first_name(
-                first, KnownValues(emails=(email,), phones=(phone,) if phone else ())
-            )
-            for user_id, first, _, email, phone, status in await self._users.names(user_ids)
-        }
+        email and phone included (names.safe_first_name), and for a deleted account (#97),
+        whose id is in `deleted`. Never the last name or a contact."""
+        rows = await self._users.names(user_ids)
+        return PartyNames(
+            names={
+                user_id: None
+                if status is UserStatus.DELETED
+                else safe_first_name(
+                    first, KnownValues(emails=(email,), phones=(phone,) if phone else ())
+                )
+                for user_id, first, _, email, phone, status in rows
+            },
+            deleted=frozenset(
+                user_id for user_id, *_, status in rows if status is UserStatus.DELETED
+            ),
+        )
 
     async def get_by_id(self, user_id: uuid.UUID) -> UserAccount | None:
         user = await self._users.get_by_id(user_id)

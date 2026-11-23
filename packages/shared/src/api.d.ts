@@ -2835,6 +2835,11 @@ export interface components {
              */
             pro_name: string | null;
             /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
+            /**
              * Amount Cents
              * @description The quote's price in USD cents.
              */
@@ -4978,6 +4983,11 @@ export interface components {
              */
             customer_first_name: string | null;
             /**
+             * Customer Deleted
+             * @description True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            customer_deleted?: boolean;
+            /**
              * Eta At
              * @description The ETA the pro gave at On my way.
              */
@@ -5170,6 +5180,11 @@ export interface components {
              */
             name: string | null;
             /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
+            /**
              * Rating Avg
              * @description The average of the overall ratings of the pro's published reviews, to one decimal, rounded half up, as a string; null before the first one (never 0.0).
              * @example 4.7
@@ -5259,6 +5274,11 @@ export interface components {
              */
             name: string | null;
             /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
+            /**
              * Rating Avg
              * @description The average of the overall ratings of the pro's published reviews, to one decimal, rounded half up, as a string; null before the first one (never 0.0).
              * @example 4.7
@@ -5337,6 +5357,11 @@ export interface components {
              */
             reviewer: string | null;
             /**
+             * Reviewer Deleted
+             * @description True when the reviewer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            reviewer_deleted?: boolean;
+            /**
              * Created On
              * Format: date
              * @description The day the review was written (UTC).
@@ -5396,6 +5421,11 @@ export interface components {
              * @description First name and last initial ("Ana P."); null when a name is missing or shows a contact detail.
              */
             customer_name: string | null;
+            /**
+             * Customer Deleted
+             * @description True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            customer_deleted?: boolean;
             /** @description Null until the request is classified. */
             category: components["schemas"]["CategorySummary"] | null;
             /**
@@ -5578,6 +5608,11 @@ export interface components {
              */
             name: string | null;
             /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
+            /**
              * Rating Avg
              * @description The average of the overall ratings of the pro's published reviews, to one decimal, rounded half up, as a string; null before the first one (never 0.0).
              * @example 4.7
@@ -5745,6 +5780,11 @@ export interface components {
              * @example Dan R.
              */
             pro_name: string | null;
+            /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
             /**
              * Scheduled Start At
              * Format: date-time
@@ -5930,6 +5970,11 @@ export interface components {
              * @description First name and last initial ("Ana P."); null when a name is missing or shows a contact detail.
              */
             customer_name: string | null;
+            /**
+             * Customer Deleted
+             * @description True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            customer_deleted?: boolean;
             /** @description Null until the request is classified. */
             category: components["schemas"]["CategorySummary"] | null;
             /**
@@ -6657,6 +6702,16 @@ export interface components {
             /** Pro First Name */
             pro_first_name: string | null;
             /**
+             * Customer Deleted
+             * @description True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            customer_deleted?: boolean;
+            /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
+            /**
              * Customer Total Cents
              * @description What the customer paid, tax included; null when the job's payment is missing (a dispute that needs review).
              */
@@ -6754,6 +6809,16 @@ export interface components {
             customer_first_name: string | null;
             /** Pro First Name */
             pro_first_name: string | null;
+            /**
+             * Customer Deleted
+             * @description True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            customer_deleted?: boolean;
+            /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
             /**
              * Customer Total Cents
              * @description What the customer paid, tax included; null when the job's payment is missing (a dispute that needs review).
@@ -6928,6 +6993,11 @@ export interface components {
              * @description First name and last initial ("María P."); null when a name is missing or shows a contact detail.
              */
             name: string | null;
+            /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
             verification_status: components["schemas"]["ProVerificationStatus"];
             /** Payouts Enabled */
             payouts_enabled: boolean;
@@ -6977,6 +7047,11 @@ export interface components {
              * @description First and last name as on the account, to match the ID document; null when the account has neither. Only this detail carries it, never the list.
              */
             legal_name: string | null;
+            /**
+             * Pro Deleted
+             * @description True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            pro_deleted?: boolean;
             /** Payouts Enabled */
             payouts_enabled: boolean;
             /**
@@ -7063,6 +7138,11 @@ export interface components {
              * @description The writer's first name alone; null when they have none or it shows a contact detail.
              */
             user_first_name: string | null;
+            /**
+             * User Deleted
+             * @description True when the writer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            user_deleted?: boolean;
             /** @description The writer's role when they wrote the ticket. */
             role: components["schemas"]["TicketRole"];
             topic: components["schemas"]["TicketTopic"];
@@ -7106,6 +7186,11 @@ export interface components {
              * @description The writer's first name alone; null when they have none or it shows a contact detail.
              */
             user_first_name: string | null;
+            /**
+             * User Deleted
+             * @description True when the writer's account was deleted (#97): the name is then null and the app shows its own words for it ("Deleted user", "Usuario eliminado"). Absent from an API older than #590: read it as false.
+             */
+            user_deleted?: boolean;
             /** @description The writer's role when they wrote the ticket. */
             role: components["schemas"]["TicketRole"];
             topic: components["schemas"]["TicketTopic"];
