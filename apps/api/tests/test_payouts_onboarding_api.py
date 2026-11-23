@@ -28,9 +28,9 @@ from app.integrations.stripe_connect import (
 )
 from app.modules.auth.permissions import PUBLIC_ROUTES
 from app.modules.payouts.errors import PaymentsUnavailableError, PayoutsNeedsReviewError
-from app.modules.payouts.service import PayoutsConfig, PayoutsService
+from app.modules.payouts.service import PayoutsConfig, PayoutsService, store_payouts_enabled
 from app.modules.pros.models import ProProfile
-from app.modules.pros.repository import ProProfileRepository
+from app.modules.pros.repository import PayoutsStored, ProProfileRepository
 from app.modules.pros.service import ProService
 from app.modules.users.models import User
 from app.modules.users.types import UserAccount, UserRole
@@ -365,21 +365,17 @@ async def test_payouts_status_persists_payouts_enabled(
     account_id = f"acct_persist{uuid.uuid4().hex[:8]}"
     ana = await pro(db_session, account_id=account_id)
     writes: list[bool] = []
-    set_payouts_enabled = ProProfileRepository.set_payouts_enabled
+    record_payouts_read = ProProfileRepository.record_payouts_read
 
     async def recording(
-        self: ProProfileRepository,
-        pro_id: uuid.UUID,
-        enabled: bool,
-        *,
-        unchanged_since: datetime | None = None,
-    ) -> bool:
-        changed = await set_payouts_enabled(self, pro_id, enabled, unchanged_since=unchanged_since)
-        if changed:  # the row was written
+        self: ProProfileRepository, pro_id: uuid.UUID, enabled: bool, read: int
+    ) -> PayoutsStored | None:
+        stored = await record_payouts_read(self, pro_id, enabled, read)
+        if stored is not None and stored.changed:  # the value was written
             writes.append(enabled)
-        return changed
+        return stored
 
-    monkeypatch.setattr(ProProfileRepository, "set_payouts_enabled", recording)
+    monkeypatch.setattr(ProProfileRepository, "record_payouts_read", recording)
 
     async def status_then_stored(state: AccountState) -> bool:
         stripe.states[account_id] = state
@@ -400,15 +396,29 @@ async def test_payouts_status_persists_payouts_enabled(
     assert writes == [True, False]
 
 
-async def test_set_payouts_enabled_writes_only_a_change(db_session: AsyncSession) -> None:
+async def test_record_payouts_read_keeps_the_last_read(db_session: AsyncSession) -> None:
+    """#524: an answer is stored unless a later read's is, and an older read changes nothing
+    even when its answer differs."""
     ana = await pro(db_session, account_id=f"acct_write{uuid.uuid4().hex[:8]}")
     profile = await profile_of(db_session, ana)
     assert profile is not None
     repository = ProProfileRepository(db_session)
+    first, second, third, fourth = [await repository.next_payouts_read() for _ in range(4)]
+    assert first < second < third < fourth
 
-    assert await repository.set_payouts_enabled(profile.id, False) is False
-    assert await repository.set_payouts_enabled(profile.id, True) is True
-    assert await repository.set_payouts_enabled(profile.id, True) is False
+    async def record(enabled: bool, read: int) -> tuple[bool, bool, int | None]:
+        stored = await repository.record_payouts_read(profile.id, enabled, read)
+        assert stored is not None
+        row = await profile_of(db_session, ana)
+        assert row is not None
+        assert row.payouts_enabled is stored.payouts_enabled
+        return stored.payouts_enabled, stored.changed, row.payouts_read_seq
+
+    assert await record(False, first) == (False, False, first)  # unchanged: the read only
+    assert await record(True, third) == (True, True, third)
+    assert await record(False, second) == (True, False, third)  # older: nothing stored
+    assert await record(True, fourth) == (True, False, fourth)
+    assert await repository.record_payouts_read(uuid.uuid4(), True, fourth + 1) is None
 
 
 @pytest.mark.parametrize("role", [UserRole.CUSTOMER, UserRole.AGENT, UserRole.ADMIN])
@@ -1050,14 +1060,7 @@ async def test_payouts_status_holds_no_lock_or_transaction_over_the_stripe_read(
     no lock on the profile row: overlapping calls of one pro never queue on each other's
     connections."""
     sessions = committed_pro.sessions
-    account_id = f"acct_nolock{uuid.uuid4().hex[:8]}"
-    async with sessions() as session:
-        await session.execute(
-            update(ProProfile)
-            .where(ProProfile.id == committed_pro.profile_id)
-            .values(stripe_account_id=account_id)
-        )
-        await session.commit()
+    account_id = await _with_account(committed_pro, "nolock")
     held = HeldRead(states={account_id: ENABLED})
 
     async with sessions() as one:
@@ -1082,54 +1085,100 @@ async def test_payouts_status_holds_no_lock_or_transaction_over_the_stripe_read(
     assert response.payouts_enabled is True
 
 
-async def test_payouts_status_overlapping_reads_never_store_an_overtaken_answer(
-    committed_pro: CommittedPro,
-) -> None:
-    """Two status calls for one pro overlap: the first is inside its Stripe read (payouts not
-    enabled) when the second runs from start to end (enabled), without waiting on the first.
-    The first read's answer lands after the second stored its own: it is not stored over it,
-    and the first call answers what is stored. A write lands only while the row is unchanged
-    since the call read it (#524), so an older Stripe answer is never stored over a newer one,
-    the account.updated webhook's included."""
-    sessions = committed_pro.sessions
-    account_id = f"acct_overlap{uuid.uuid4().hex[:8]}"
-    async with sessions() as session:
+async def _with_account(committed_pro: CommittedPro, prefix: str) -> str:
+    account_id = f"acct_{prefix}{uuid.uuid4().hex[:8]}"
+    async with committed_pro.sessions() as session:
         await session.execute(
             update(ProProfile)
             .where(ProProfile.id == committed_pro.profile_id)
             .values(stripe_account_id=account_id)
         )
         await session.commit()
-    held = HeldRead(states={account_id: DUE})
-    finished: list[str] = []
+    return account_id
 
-    async def status(name: str, session: AsyncSession, stripe: FakeStripe) -> bool:
-        service = PayoutsService(session, ProService(session), stripe, CONFIG)
-        response = await service.status(committed_pro.user)
-        finished.append(name)
-        return response.payouts_enabled
 
-    async with sessions() as one, sessions() as two:
-        pids = [await _backend_pid(one), await _backend_pid(two)]
-        first = asyncio.create_task(status("first", one, held))
-        async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
-            await held.reading.wait()
-        second = asyncio.create_task(
-            status("second", two, FakeStripe(states={account_id: ENABLED}))
-        )
-        async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
-            second_answer = await second
-        held.release.set()
-        first_answer = await first
-    async with sessions() as session:
-        stored = await session.scalar(
+async def _stored(committed_pro: CommittedPro) -> bool | None:
+    async with committed_pro.sessions() as session:
+        return await session.scalar(
             select(ProProfile.payouts_enabled).where(ProProfile.id == committed_pro.profile_id)
         )
 
-    assert pids[0] != pids[1]
-    assert finished == ["second", "first"]  # the second never waited on the first
-    assert (first_answer, second_answer) == (True, True)
-    assert stored is True
+
+@pytest.mark.parametrize("later_lands", ["first", "last"])
+async def test_payouts_status_overlapping_reads_store_the_later_read(
+    committed_pro: CommittedPro, later_lands: str
+) -> None:
+    """#524: two status calls of one pro overlap, the older read says enabled and the later one
+    says not (payouts_enabled starts false). Whichever answer lands last, the later read's is
+    stored: an older answer landing last is not stored over it (with a write gated on the row
+    being unchanged, it was, as the later answer changed nothing), and a later answer landing
+    last is (gated that way, the older one's write would have refused it). Each call answers
+    what is stored once it is done. Neither call waits on the other."""
+    account_id = await _with_account(committed_pro, "overlap")
+    older = HeldRead(states={account_id: ENABLED})
+    later = HeldRead(states={account_id: DUE})
+    finished: list[str] = []
+
+    async def status(name: str, stripe: FakeStripe) -> bool:
+        async with committed_pro.sessions() as session:
+            service = PayoutsService(session, ProService(session), stripe, CONFIG)
+            response = await service.status(committed_pro.user)
+        finished.append(name)
+        return response.payouts_enabled
+
+    async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+        first = asyncio.create_task(status("older", older))
+        await older.reading.wait()  # its number is drawn, its Stripe read under way
+        second = asyncio.create_task(status("later", later))
+        await later.reading.wait()
+        if later_lands == "first":
+            later.release.set()
+            later_answer = await second
+            older.release.set()
+            older_answer = await first
+        else:
+            older.release.set()
+            older_answer = await first
+            later.release.set()
+            later_answer = await second
+
+    assert await _stored(committed_pro) is False  # the later read's answer
+    if later_lands == "first":
+        assert finished == ["later", "older"]
+        assert (older_answer, later_answer) == (False, False)
+    else:
+        assert finished == ["older", "later"]
+        assert (older_answer, later_answer) == (True, False)
+
+
+async def test_payouts_status_overtaken_by_the_webhook_is_not_stored(
+    committed_pro: CommittedPro,
+) -> None:
+    """#524: a status read is under way when the account.updated webhook reads the account
+    later and finds nothing changed. The status's older answer (enabled) lands after it and is
+    not stored over the webhook's read."""
+    account_id = await _with_account(committed_pro, "webhook")
+    held = HeldRead(states={account_id: ENABLED})
+
+    async with committed_pro.sessions() as one:
+        service = PayoutsService(one, ProService(one), held, CONFIG)
+        call = asyncio.create_task(service.status(committed_pro.user))
+        async with asyncio.timeout(LOCK_WAIT_DEADLINE_SECONDS):
+            await held.reading.wait()
+        async with committed_pro.sessions() as worker:
+            pros = ProService(worker)
+            connected = await pros.lock_connected_pro(account_id)
+            assert connected is not None
+            state, changed = await store_payouts_enabled(
+                pros, FakeStripe(states={account_id: DUE}), connected.account, account_id
+            )
+            await worker.commit()
+        held.release.set()
+        response = await call
+
+    assert (state.payouts_enabled, changed) == (False, False)
+    assert response.payouts_enabled is False
+    assert await _stored(committed_pro) is False
 
 
 async def _backend_pid(session: AsyncSession) -> int:

@@ -4,10 +4,12 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import Select, Subquery, delete, exists, func, select, tuple_, update
+from sqlalchemy import Sequence as DbSequence
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.pros.models import (
+    PAYOUTS_READ_SEQUENCE,
     ProCategory,
     ProDocument,
     ProDocumentStatus,
@@ -25,6 +27,15 @@ _RECEIVES_REQUESTS = (
 
 # Where a page of the staff list starts: strictly before this (created_at, id).
 Before = tuple[datetime, uuid.UUID]
+
+
+@dataclass(frozen=True)
+class PayoutsStored:
+    """payouts_enabled as stored after a Stripe read's answer was recorded, and whether that
+    answer changed it (an older read's answer changes nothing)."""
+
+    payouts_enabled: bool
+    changed: bool
 
 
 @dataclass(frozen=True)
@@ -270,17 +281,12 @@ class ProProfileRepository:
         )
         return bool(result.rowcount)  # type: ignore[attr-defined]  # CursorResult of an UPDATE
 
-    async def get_by_user_id(
-        self, user_id: uuid.UUID, *, lock: bool = False, fresh: bool = False
-    ) -> ProProfile | None:
+    async def get_by_user_id(self, user_id: uuid.UUID, *, lock: bool = False) -> ProProfile | None:
         """`lock`: FOR UPDATE until the transaction ends, so two edits of one profile run one
-        after the other (their set replacements would otherwise collide). `fresh`: the row as
-        committed now, unlocked, over any copy the session already holds."""
+        after the other (their set replacements would otherwise collide)."""
         statement = select(ProProfile).where(ProProfile.user_id == user_id)
         if lock:
             statement = statement.with_for_update().execution_options(populate_existing=True)
-        elif fresh:
-            statement = statement.execution_options(populate_existing=True)
         return await self._session.scalar(statement)
 
     async def get_by_id(self, pro_id: uuid.UUID, *, lock: bool = False) -> ProProfile | None:
@@ -321,26 +327,39 @@ class ProProfileRepository:
             .values(stripe_account_requested_at=None, updated_at=func.now())
         )
 
-    async def set_payouts_enabled(
-        self, pro_id: uuid.UUID, enabled: bool, *, unchanged_since: datetime | None = None
-    ) -> bool:
-        """True when the stored value changed; a profile that already matches is not written.
-        `unchanged_since`: written only while the row's updated_at is still that value, so an
-        answer read before another write landed is not stored over it (#524)."""
-        conditions = [ProProfile.id == pro_id, ProProfile.payouts_enabled.is_distinct_from(enabled)]
-        if unchanged_since is not None:
-            conditions.append(ProProfile.updated_at == unchanged_since)
-        result = await self._session.execute(
-            update(ProProfile)
-            .where(*conditions)
-            .values(payouts_enabled=enabled, updated_at=func.now())
-        )
-        return bool(result.rowcount)  # type: ignore[attr-defined]  # CursorResult of an UPDATE
+    async def next_payouts_read(self) -> int:
+        """The number of a Stripe account read about to start (#524): a read that starts later
+        draws a higher one. Not transactional: a rolled-back read leaves a gap, nothing else."""
+        statement = select(DbSequence(PAYOUTS_READ_SEQUENCE).next_value())
+        return (await self._session.execute(statement)).scalar_one()
 
-    async def payouts_enabled_of(self, pro_id: uuid.UUID) -> bool | None:
-        """The stored value as committed now (a column read, not the identity map's copy)."""
-        statement = select(ProProfile.payouts_enabled).where(ProProfile.id == pro_id)
-        return await self._session.scalar(statement)
+    async def record_payouts_read(
+        self, pro_id: uuid.UUID, enabled: bool, read: int
+    ) -> PayoutsStored | None:
+        """Stores what Stripe read number `read` said of the account's payouts, unless a later
+        read's answer is already stored: the last read wins, whichever answer lands last. The
+        row is locked for this write only, never over a Stripe call. Only a change of the value
+        touches updated_at. None when no profile has this id; the caller commits."""
+        row = (
+            await self._session.execute(
+                select(ProProfile.payouts_enabled, ProProfile.payouts_read_seq)
+                .where(ProProfile.id == pro_id)
+                .with_for_update()
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        stored, stored_read = row
+        if stored_read is not None and stored_read > read:
+            return PayoutsStored(payouts_enabled=stored, changed=False)
+        changed = stored != enabled
+        values: dict[str, object] = {"payouts_read_seq": read}
+        if changed:
+            values |= {"payouts_enabled": enabled, "updated_at": func.now()}
+        await self._session.execute(
+            update(ProProfile).where(ProProfile.id == pro_id).values(values)
+        )
+        return PayoutsStored(payouts_enabled=enabled, changed=changed)
 
     async def receives_requests(self, pro_id: uuid.UUID) -> bool:
         statement = select(exists().where(ProProfile.id == pro_id, *_RECEIVES_REQUESTS))

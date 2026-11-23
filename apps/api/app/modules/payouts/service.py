@@ -13,11 +13,11 @@ make the account while recovering from an incident), so the attempt stays unreso
 staff store its account or allow a new one with scripts/resolve_payout_account.py, which goes
 through adopt_account and allow_new_account here. The status reads the account from Stripe and
 keeps pro_profiles.payouts_enabled current: dispatch and quote acceptance read that column
-(context doc section 5). It holds no lock and no transaction over the Stripe read (#524): it
-reads the row, ends the transaction, asks Stripe, then stores the answer only while the row is
-unchanged since its read, so an answer another write overtook is never stored. Stripe's
-account.updated event (#280, webhook_handlers.py) reads and stores under the row lock
-(`store_payouts_enabled`), so the column follows the account without the pro opening the app.
+(context doc section 5). It holds no lock and no transaction over the Stripe read (#524): each
+read draws a number before it starts, and its answer is stored only when no later read's answer
+is, so the last read wins in whatever order the answers land. Stripe's account.updated event
+(#280, webhook_handlers.py) reads and records the same way (`store_payouts_enabled`), so the
+column follows the account without the pro opening the app.
 
 Logs carry the profile id and Stripe's request id and error code: never the email, an account
 id, a link or a Stripe response.
@@ -115,14 +115,25 @@ class PayoutsConfig:
 async def store_payouts_enabled(
     pros: ProService, stripe: AccountReader, account: PayoutAccount, stripe_account_id: str
 ) -> tuple[AccountState, bool]:
-    """The account read from Stripe now, and its payouts_enabled stored on the profile;
-    (state, changed). Stored against the row, not a value read before the call: the UPDATE
-    writes only a change. The caller holds the profile row's lock over this call and owns the
-    transaction: nothing here commits or rolls back, and Stripe's errors (StripeCallError)
+    """The account read from Stripe now, and its payouts_enabled recorded on the profile in
+    read order (#524); (state, changed), the state's payouts_enabled as stored. The caller (the
+    account.updated webhook, in the worker) holds the profile row's lock over this call and owns
+    the transaction: nothing here commits or rolls back, and Stripe's errors (StripeCallError)
     propagate before anything is written."""
+    read = await pros.next_payouts_read()
     state = await stripe.retrieve_account(stripe_account_id)
-    changed = await pros.set_payouts_enabled(account.profile_id, state.payouts_enabled)
-    return state, changed
+    return await _record_read(pros, account.profile_id, state, read)
+
+
+async def _record_read(
+    pros: ProService, pro_id: uuid.UUID, state: AccountState, read: int
+) -> tuple[AccountState, bool]:
+    """Records read `read`'s answer; (state, changed), with payouts_enabled as stored: a later
+    read's when it overtook this one."""
+    stored = await pros.record_payouts_read(pro_id, state.payouts_enabled, read)
+    if stored is None:  # the profile is gone: nothing stored, the answer as read
+        return state, False
+    return replace(state, payouts_enabled=stored.payouts_enabled), stored.changed
 
 
 class PayoutsService:
@@ -327,27 +338,22 @@ class PayoutsService:
         """Where the caller's onboarding stands, read from Stripe; a changed payouts_enabled is
         stored, true to false too.
 
-        No lock and no transaction is held over the Stripe read (#524): the row and its version
-        are read, the transaction ends (its connection goes back to the pool), Stripe answers,
-        and the answer is stored only while the row is still that version. An answer that
-        another write overtook (a newer status call, the account.updated webhook) is not
-        stored, and the response shows the stored value: each response is what is stored."""
+        No lock and no transaction is held over the Stripe read (#524), so overlapping calls
+        never queue on each other's pooled connections: the profile is read and the read's
+        number drawn, the transaction ends, Stripe answers, and a short second transaction
+        records the answer unless a later read's is stored. The last read wins, and each
+        response's payouts_enabled is what is stored."""
         stripe = self._require_stripe()
-        seen = await self._pros.versioned_payout_account(user.id)
-        await self._session.commit()
-        account = None if seen is None else seen.account
-        if seen is None or account is None or account.stripe_account_id is None:
+        account = await self._pros.payout_account(user.id)
+        if account is None or account.stripe_account_id is None:
+            await self._session.commit()
             enabled = account is not None and account.payouts_enabled
             return PayoutsOut(status=PayoutsStatus.NOT_STARTED, payouts_enabled=enabled)
+        read = await self._pros.next_payouts_read()
+        await self._session.commit()  # the connection goes back to the pool over the call
         async with self._stripe_call(account.profile_id, "retrieve_account"):
             state = await stripe.retrieve_account(account.stripe_account_id)
-        changed = await self._pros.set_payouts_enabled(
-            account.profile_id, state.payouts_enabled, unchanged_since=seen.version
-        )
-        if not changed:
-            stored = await self._pros.payouts_enabled_of(account.profile_id)
-            if stored is not None and stored is not state.payouts_enabled:
-                state = replace(state, payouts_enabled=stored)  # overtaken: what is stored
+        state, changed = await _record_read(self._pros, account.profile_id, state, read)
         await self._session.commit()
         if changed:
             logger.info(

@@ -5,6 +5,7 @@ from enum import StrEnum
 from typing import Final
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     Date,
     DateTime,
@@ -22,6 +23,9 @@ from app.db import Base, IdTimestampsMixin, str_enum
 
 # The longest reason staff give for rejecting a document or a profile (#41); the pro reads it.
 REVIEW_REASON_MAX_LENGTH: Final = 500
+# Numbers the Stripe reads of a pro's account in the order they start (#524): a read's answer
+# is stored only over an older read's, so the last read wins without a lock held over it.
+PAYOUTS_READ_SEQUENCE: Final = "pro_payouts_read_seq"
 
 
 class ProVerificationStatus(StrEnum):
@@ -60,6 +64,9 @@ class ProProfile(IdTimestampsMixin, Base):
     # answer was lost long ago is looked up in Stripe before another one.
     stripe_account_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     payouts_enabled: Mapped[bool] = mapped_column(server_default=false())
+    # The PAYOUTS_READ_SEQUENCE number of the Stripe read that last set or confirmed
+    # payouts_enabled (#524); NULL until the first read.
+    payouts_read_seq: Mapped[int | None] = mapped_column(BigInteger)
     # A rating, not money; NULL until the first review.
     rating_avg: Mapped[Decimal | None] = mapped_column(Numeric(3, 2))
     jobs_count: Mapped[int] = mapped_column(server_default="0")
