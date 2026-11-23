@@ -16,7 +16,7 @@ import logging
 import re
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -48,7 +48,12 @@ from app.modules.auth.models import RefreshToken
 from app.modules.categories.models import Category
 from app.modules.chat.models import JobMessage
 from app.modules.devices.models import Device, DevicePlatform
-from app.modules.disputes.models import Dispute, DisputeReason, DisputeStatus
+from app.modules.disputes.models import (
+    Dispute,
+    DisputeReason,
+    DisputeResolution,
+    DisputeStatus,
+)
 from app.modules.interest.models import InterestSource, LaunchInterest
 from app.modules.jobs.models import Job, JobEvent, JobStatus
 from app.modules.ops.models import RequestFollowup, RequestNote
@@ -885,12 +890,44 @@ def a_tip(
     status: TipStatus,
     transfer: TipTransferStatus = TipTransferStatus.NONE,
     code: str | None = None,
+    *,
+    intent: str = "stored",
+    flagged: bool = False,
+    job_had: str | None = None,
 ) -> Plant:
     """A paid-out job (its own transfer made) with the customer's tip for the pro in `status`,
-    its transfer in `transfer` (held: for `code`)."""
+    its transfer in `transfer` (held: for `code`). `intent`: its PaymentIntent "stored", or none
+    stored because Stripe "refused" the create or its answer was "lost". `flagged`: for staff
+    (late_success_at). `job_had`: a resolved "dispute" or a "refund" on the job."""
 
     async def plant(session: AsyncSession, world: World) -> None:
         paid = await add_job(session, world)
+        if job_had == "dispute":
+            session.add(
+                Dispute(
+                    job_id=paid.job.id,
+                    opened_by=world.customer.id,
+                    reason_code=next(iter(DisputeReason)),
+                    description="Not fixed",
+                    status=DisputeStatus.RESOLVED,
+                    resolution=DisputeResolution.RELEASED,
+                    resolved_by=world.agent_id,
+                    resolved_at=datetime.now(UTC),
+                )
+            )
+        elif job_had == "refund":
+            session.add(
+                Refund(
+                    job_id=paid.job.id,
+                    payment_id=paid.payment.id,
+                    amount_cents=PRICE,
+                    currency="usd",
+                    status=RefundStatus.CREATED,
+                    stripe_refund_id=f"re_{uuid.uuid4().hex}",
+                    stripe_status="succeeded",
+                    idempotency_key=f"dispute:{paid.job.id}:refund",
+                )
+            )
         session.add(
             Transfer(
                 job_id=paid.job.id,
@@ -917,9 +954,13 @@ def a_tip(
                 currency="usd",
                 status=status,
                 attempt=0 if declined else 1,
-                stripe_payment_intent_id=None if declined else f"pi_{uuid.uuid4().hex}",
+                stripe_payment_intent_id=(
+                    f"pi_{uuid.uuid4().hex}" if intent == "stored" and not declined else None
+                ),
                 payment_intent_requested_at=None if declined else datetime.now(UTC),
+                create_refused_at=datetime.now(UTC) if intent == "refused" else None,
                 succeeded_at=datetime.now(UTC) if status is TipStatus.SUCCEEDED else None,
+                late_success_at=datetime.now(UTC) if flagged else None,
                 transfer_status=transfer,
                 transfer_last_error_code=code,
                 stripe_transfer_id=f"tr_{uuid.uuid4().hex}" if made else None,
@@ -1025,6 +1066,20 @@ SETTLED = [
     ("pro", a_tip(SUCCEEDED, TipTransferStatus.REVERSED)),
     ("pro", a_tip(SUCCEEDED, TipTransferStatus.HELD, TIP_TRANSFER_NEEDS_REVIEW)),
     ("pro", a_transfer(TransferStatus.REVERSED)),
+    # #590 round 2: what nothing ever moves on by itself never blocks. A tip waiting with no
+    # stored PaymentIntent (the unpaid sweep never reads it, and past the tip window the
+    # customer cannot choose again), for either side.
+    *[
+        (who, a_tip(status, intent=intent))
+        for who in ("customer", "pro")
+        for status in (TipStatus.REQUIRES_PAYMENT, TipStatus.FAILED)
+        for intent in ("refused", "lost")
+    ],
+    # A paid tip the transfer sweep never sends by itself (staff's): flagged, or on a job with a
+    # dispute or a refund, whatever its task did.
+    ("pro", a_tip(SUCCEEDED, flagged=True)),
+    ("pro", a_tip(SUCCEEDED, job_had="dispute")),
+    ("pro", a_tip(SUCCEEDED, job_had="refund")),
 ]
 SETTLED_IDS = [
     "customer-abandoned-refund",
@@ -1037,6 +1092,15 @@ SETTLED_IDS = [
     "pro-tip-transfer-reversed",
     "pro-tip-held-for-staff",
     "pro-transfer-reversed",
+    *[
+        f"{who}-tip-{status}-intent-{intent}"
+        for who in ("customer", "pro")
+        for status in ("requires_payment", "failed")
+        for intent in ("refused", "lost")
+    ],
+    "pro-tip-flagged-for-staff",
+    "pro-tip-on-a-disputed-job",
+    "pro-tip-on-a-refunded-job",
 ]
 
 
@@ -2092,3 +2156,61 @@ async def test_todo_cesar_a_launch_interest_row_with_the_accounts_email(world: W
                 text("DELETE FROM launch_interest WHERE id = :id"), {"id": interest_id}
             )
             await session.commit()
+
+
+# #590 round 2 (the Gatekeeper's non-blocking notes on round 1's fix).
+
+
+@pytest.mark.parametrize("who", ["customer", "pro"])
+async def test_another_accounts_tip_being_paid_never_blocks(world: World, who: str) -> None:
+    other = await sign_up(world.client, who, f"other-{uuid.uuid4().hex[:10]}@example.com")
+    world.users.append(other.id)
+    async with world.sessions() as session:
+        if who == "customer":
+            theirs = replace(world, customer=other)
+        else:
+            profile = ProProfile(
+                user_id=other.id,
+                verification_status=ProVerificationStatus.APPROVED,
+                payouts_enabled=True,
+                years_of_experience=3,
+            )
+            session.add(profile)
+            await session.flush()
+            theirs = replace(world, pro=other, pro_profile_id=profile.id)
+        await a_tip(TipStatus.PROCESSING)(session, theirs)
+        await session.commit()
+
+    response = await delete_account(world.client, getattr(world, who))
+
+    assert response.status_code == 204, response.text
+
+
+async def test_the_second_erasure_reads_the_account_under_its_lock(
+    world: World, settings: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert (await delete_account(world.client, world.customer)).status_code == 204
+    late_photo = f"u/{world.customer.id}/profile_photo/{uuid.uuid4().hex}.jpg"
+    original = AccountEraser.hold
+
+    async def write_meanwhile(self: AccountEraser, account: Any) -> Any:
+        # A late write lands between the second erasure's first read and its lock.
+        async with world.sessions() as other:
+            await other.execute(
+                update(User).where(User.id == world.customer.id).values(photo_key=late_photo)
+            )
+            await other.commit()
+        return await original(self, account)
+
+    monkeypatch.setattr(AccountEraser, "hold", write_meanwhile)
+
+    # No storage: the keys the second erasure found stay on the row, to be read here.
+    await clean_up_deleted_account(
+        worker_ctx(world, settings, None, FakeStripePaymentMethods()), str(world.customer.id)
+    )
+
+    row = await cleanup_row(world, world.customer.id)
+    assert row.erased_again_at is not None
+    assert late_photo in row.storage_keys
+    async with world.sessions() as session:
+        assert (await row_values(session, User, world.customer.id))["photo_key"] is None
