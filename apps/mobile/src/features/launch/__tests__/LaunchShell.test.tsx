@@ -114,7 +114,7 @@ describe("LaunchShell: the intro over the gate", () => {
       "no-hide-descendants",
     );
     expect(screen.getByRole("button", { name: "Skip intro" })).toBeTruthy();
-    expect(screen.getByText("Jack Fix It")).toBeTruthy();
+    expect(screen.getByText("John Got It")).toBeTruthy();
     // Skip floats over the frame: the hero under the intro has none, and the sentence must not
     // move when the intro lifts.
     const skipRow = screen.getByTestId("launch-hero-skip-row");
@@ -215,7 +215,7 @@ describe("LaunchShell: the intro over the gate", () => {
     await finishIntro();
 
     expect(screen.queryByTestId("launch-intro")).toBeNull();
-    expect(screen.getByText("Can't reach Jack right now")).toBeTruthy();
+    expect(screen.getByText("Can't reach John right now")).toBeTruthy();
   });
 
   it("tap skips immediately and releases the splash", async () => {

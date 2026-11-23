@@ -55,7 +55,7 @@ const PHOTOS_FAILED_LINE = "We couldn't prepare your after photos. Add another o
 const PROCESSING = "Finishing your photos…";
 const SLOW = "Your photos are taking longer than usual. Try again in a moment.";
 const WAITING = "Job's done. Waiting for Maria to confirm.";
-const OFFLINE = "We couldn't reach Jack Fix It. Check your connection and try again.";
+const OFFLINE = "We couldn't reach John Got It. Check your connection and try again.";
 
 /** The calls Job's done makes over the whole retry window (one, then one every interval). */
 const WINDOW_CALLS =

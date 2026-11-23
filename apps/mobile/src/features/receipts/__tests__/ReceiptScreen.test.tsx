@@ -62,7 +62,7 @@ const receipt = (overrides: Partial<ReceiptOut> = {}): ReceiptOut => ({
   currency: "usd",
   payment_method: { brand: "visa", last4: "4242", wallet: null },
   tip: { can_tip: false, closes_at: null },
-  issuer: { legal_name: "Jack Fix It LLC", support_email: "help@example.com" },
+  issuer: { legal_name: "John Got It LLC", support_email: "help@example.com" },
   ...overrides,
 });
 
@@ -110,7 +110,7 @@ describe("ReceiptScreen (#62)", () => {
       params: { request_id: mockRequestId },
     });
     expect(paper().getByText("Receipt JF-000124")).toBeTruthy();
-    expect(paper().getByText("Jack Fix It LLC")).toBeTruthy();
+    expect(paper().getByText("John Got It LLC")).toBeTruthy();
     expect(paper().getByText("With Dan R.")).toBeTruthy();
     expect(paper().getByTestId("receipt-address")).toHaveTextContent(
       "1200 Seabreeze Blvd, Fort Lauderdale",
@@ -124,7 +124,7 @@ describe("ReceiptScreen (#62)", () => {
     expect(paper().getByText("Questions? help@example.com")).toBeTruthy();
     // Share is a full button with its word, not a bare icon.
     expect(within(screen.getByTestId("receipt-share")).getByText("Share")).toBeTruthy();
-    // Never Jack's fee: the customer pays the total.
+    // Never John's fee: the customer pays the total.
     expect(screen.queryByText(/fee/i, HIDDEN)).toBeNull();
   });
 
@@ -161,13 +161,13 @@ describe("ReceiptScreen (#62)", () => {
     await renderScreen(async () => receipt({ issuer: null, pro_name: null }));
     await screen.findByTestId("receipt-paper");
 
-    expect(paper().queryByText("Jack Fix It LLC")).toBeNull();
+    expect(paper().queryByText("John Got It LLC")).toBeNull();
     expect(paper().queryByText(/^Questions\?/)).toBeNull();
     expect(paper().queryByText(/^With /)).toBeNull();
     expect(screen.getByLabelText("Tip, $12.50")).toBeTruthy();
     // The rest of the paper is whole.
     expect(paper().getByText("Receipt JF-000124")).toBeTruthy();
-    expect(paper().getByText("Thank you for using Jack Fix It.")).toBeTruthy();
+    expect(paper().getByText("Thank you for using John Got It.")).toBeTruthy();
     expect(screen.getByLabelText("Total paid, $137.50")).toBeTruthy();
   });
 

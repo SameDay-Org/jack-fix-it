@@ -524,7 +524,7 @@ describe("Add a card", () => {
     expect(postsTo(SETUP_PATH)).toEqual([[SETUP_PATH, undefined, { auth: true, generation: 1 }]]);
     expect(sheet).toHaveBeenCalledTimes(1);
     expect(sheet.mock.calls[0][0]).toEqual(SETUP);
-    expect(sheet.mock.calls[0][1]).toMatchObject({ merchantName: "Jack Fix It" });
+    expect(sheet.mock.calls[0][1]).toMatchObject({ merchantName: "John Got It" });
     // The API never makes the first card the default by itself: the app asks for it.
     expect(postsTo(DEFAULT_PATH)).toEqual([
       [

@@ -41,7 +41,7 @@ const { mockSession } = jest.requireMock<ReturnType<typeof apiMock>>("@/api");
 const ON_THE_WAY = "/v1/pros/me/jobs/{job_id}/on-the-way";
 const PINNED = { auth: true, generation: 1, params: { job_id: JOB_ID } };
 const MINUTE_MS = 60_000;
-const OFFLINE = "We couldn't reach Jack Fix It. Check your connection and try again.";
+const OFFLINE = "We couldn't reach John Got It. Check your connection and try again.";
 
 const NO_BREAK_SPACE = String.fromCharCode(0xa0);
 /** Labels keep their words together with no-break spaces; tests read them with plain ones. */

@@ -265,7 +265,9 @@ export default async function QueuePage({
                     <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="font-semibold">{item.public_code}</span>
                       <span className="truncate text-sm">
-                        {item.customer_name ?? t("admin.queue.noName")}
+                        {item.customer_deleted
+                          ? t("admin.deletedUser")
+                          : (item.customer_name ?? t("admin.queue.noName"))}
                       </span>
                       {item.urgency ? (
                         <Badge variant="warning">{t("admin.queue.urgent")}</Badge>

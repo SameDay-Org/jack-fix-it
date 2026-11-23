@@ -152,7 +152,7 @@ describe("the services that get a page", () => {
     expect(findService({ categories: [CLEANING], regions: [empty] }, "house-cleaning")).toBeNull();
   });
 
-  it("name the region when Jack serves one, none when several", () => {
+  it("name the region when John serves one, none when several", () => {
     const empty = { ...TREASURE_COAST, cities: [{ ...TREASURE_COAST.cities[0], zips: [] }] };
 
     expect(servedPlace({ categories: [], regions: [SOUTH_FLORIDA] })).toBe("South Florida");

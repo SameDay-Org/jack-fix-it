@@ -62,12 +62,12 @@ describe("BrandHero", () => {
   it("wordmark, one accessible sentence with the first word, the given word in place, support line", async () => {
     await render(<BrandHero word={<Text testID="word">fix</Text>} testID="hero" />);
 
-    expect(screen.getByText("Jack Fix It")).toBeTruthy();
+    expect(screen.getByText("John Got It")).toBeTruthy();
     expect(
       screen.getByRole("header", { name: "Whatever happens at home, we fix it." }),
     ).toBeTruthy();
     expect(within(headline()).getByTestId("word", HIDDEN)).toBeTruthy();
-    expect(screen.getByText("Tell Jack. We'll take care of the rest.")).toBeTruthy();
+    expect(screen.getByText("Tell John. We'll take care of the rest.")).toBeTruthy();
     expect(screen.getAllByRole("header")).toHaveLength(1);
     // The sentence is announced once: the words are not accessibility nodes, and the word slot
     // hides whatever rolls inside it.

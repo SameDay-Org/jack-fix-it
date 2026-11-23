@@ -74,7 +74,7 @@ const { mockSession, mockSignOut } = jest.requireMock<{
 
 const PHOTOS = "/v1/pros/me/jobs/{job_id}/photos";
 const MAX = proJobsConfig.photoMaxPerKind;
-const OFFLINE = "We couldn't reach Jack Fix It. Check your connection and try again.";
+const OFFLINE = "We couldn't reach John Got It. Check your connection and try again.";
 
 /** Signed URLs and upload keys: neither may reach a log. */
 const URL_MARK = "storage.test";

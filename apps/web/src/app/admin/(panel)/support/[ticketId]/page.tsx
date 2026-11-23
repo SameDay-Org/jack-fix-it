@@ -73,7 +73,9 @@ export default async function TicketPage({ params }: { params: Promise<{ ticketI
               <dt className="text-gray-500">{t("admin.support.detail.from")}</dt>
               <dd className="flex min-w-0 flex-wrap items-center gap-2">
                 <span className="font-semibold break-words">
-                  {ticket.user_first_name ?? t("admin.support.noName")}
+                  {ticket.user_deleted
+                    ? t("admin.deletedUser")
+                    : (ticket.user_first_name ?? t("admin.support.noName"))}
                 </span>
                 <Badge variant="muted">{t(`admin.support.role.${ticket.role}`)}</Badge>
               </dd>

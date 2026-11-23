@@ -1,6 +1,6 @@
 {
   "brand": {
-    "name": "Jack Fix It",
+    "name": "John Got It",
     "tagline": "Whatever happens at home, we fix it."
   },
   "site": {
@@ -17,7 +17,7 @@
       "home": "Go to the home page"
     },
     "notFound": {
-      "metaTitle": "Page not found | Jack Fix It",
+      "metaTitle": "Page not found | John Got It",
       "title": "We can't find this page",
       "body": "The link may be old or have a typo.",
       "home": "Go to the home page"
@@ -25,12 +25,12 @@
   },
   "landing": {
     "meta": {
-      "title": "Jack Fix It · Whatever happens at home, we fix it.",
-      "description": "Tell Jack what's going on at home, compare fixed-price quotes from pros near you and follow the job in the app.",
-      "ogAlt": "The Jack Fix It name and its line “Whatever happens at home, we fix it.” on navy."
+      "title": "John Got It · Whatever happens at home, we fix it.",
+      "description": "Tell John what's going on at home, compare fixed-price quotes from pros near you and follow the job in the app.",
+      "ogAlt": "The John Got It name and its line “Whatever happens at home, we fix it.” on navy."
     },
     "skipToContent": "Skip to content",
-    "homeLabel": "Jack Fix It, back to the top",
+    "homeLabel": "John Got It, back to the top",
     "nav": {
       "label": "Sections",
       "services": "Services",
@@ -43,7 +43,7 @@
       "eyebrow": "Home services",
       "titleLead": "Whatever happens at home,",
       "titleAccent": "we fix it.",
-      "body": "Tell Jack what's going on. Pros near you send fixed-price quotes, you pick one, and you follow the job in the app from start to finish.",
+      "body": "Tell John what's going on. Pros near you send fixed-price quotes, you pick one, and you follow the job in the app from start to finish.",
       "getApp": "Get the app",
       "explore": "Explore services",
       "badgesLabel": "What you get",
@@ -56,14 +56,14 @@
     },
     "requestFlow": {
       "title": "What's going on at home?",
-      "cta": "Tell Jack What Happened"
+      "cta": "Tell John What Happened"
     },
     "how": {
       "eyebrow": "How it works",
       "title": "From what happened to done.",
       "steps": {
         "tell": {
-          "title": "Tell Jack",
+          "title": "Tell John",
           "body": "Say what's going on at home in your own words, and add photos or a video in the app."
         },
         "match": {
@@ -98,10 +98,10 @@
         "lawn-landscaping": "Mowing, trimming and yard care.",
         "moving-assembly": "Furniture assembly and help with a move."
       },
-      "other": "Tell Jack what you need."
+      "other": "Tell John what you need."
     },
     "trust": {
-      "eyebrow": "Why Jack",
+      "eyebrow": "Why John",
       "title": "Help at home, without the hassle.",
       "items": {
         "whoToCall": {
@@ -139,14 +139,14 @@
       "terms": "Terms",
       "privacy": "Privacy",
       "contact": "Contact",
-      "rights": "© {{year}} Jack Fix It. All rights reserved."
+      "rights": "© {{year}} John Got It. All rights reserved."
     }
   },
   "forPros": {
     "meta": {
-      "title": "For professionals | Jack Fix It",
-      "description": "Get requests from homeowners near you, send your quotes and run your jobs from the Jack Fix It app. No lead fees.",
-      "ogAlt": "Jack Fix It for professionals: work that comes to you.",
+      "title": "For professionals | John Got It",
+      "description": "Get requests from homeowners near you, send your quotes and run your jobs from the John Got It app. No lead fees.",
+      "ogAlt": "John Got It for professionals: work that comes to you.",
       "ogLine": "Work that comes to you."
     },
     "nav": {
@@ -159,7 +159,7 @@
       "body": "Get requests from homeowners near you, send your quotes and run your jobs from the app.",
       "getApp": "Get the app",
       "how": "How it works",
-      "badgesLabel": "Working with Jack",
+      "badgesLabel": "Working with John",
       "badges": {
         "leadFees": "No lead fees",
         "paid": "Get paid when the job happens",
@@ -193,7 +193,7 @@
       }
     },
     "why": {
-      "eyebrow": "Why Jack",
+      "eyebrow": "Why John",
       "title": "Built around your work.",
       "items": {
         "leads": {
@@ -263,71 +263,71 @@
   "seo": {
     "service": {
       "meta": {
-        "title": "{{name}} in {{place}} | Jack Fix It",
-        "titleAnywhere": "{{name}} | Jack Fix It",
-        "description": "{{name}} in {{place}}: tell Jack about the job, compare fixed-price quotes from pros near you and follow it in the app.",
-        "descriptionAnywhere": "{{name}}: tell Jack about the job, compare fixed-price quotes from pros near you and follow it in the app.",
-        "ogAlt": "The Jack Fix It name and the name of a home service on navy."
+        "title": "{{name}} in {{place}} | John Got It",
+        "titleAnywhere": "{{name}} | John Got It",
+        "description": "{{name}} in {{place}}: tell John about the job, compare fixed-price quotes from pros near you and follow it in the app.",
+        "descriptionAnywhere": "{{name}}: tell John about the job, compare fixed-price quotes from pros near you and follow it in the app.",
+        "ogAlt": "The John Got It name and the name of a home service on navy."
       },
       "nav": {
-        "ask": "What Jack asks",
+        "ask": "What John asks",
         "areas": "Where we work"
       },
       "hero": {
         "eyebrow": "Home services",
         "title": "{{name}} in {{place}}",
         "titleAnywhere": "{{name}}",
-        "body": "Tell Jack about the job in the app. Pros near you who do this work send fixed-price quotes, you pick one, and you follow the job from start to finish.",
+        "body": "Tell John about the job in the app. Pros near you who do this work send fixed-price quotes, you pick one, and you follow the job from start to finish.",
         "getApp": "Get the app",
-        "ask": "What Jack asks"
+        "ask": "What John asks"
       },
       "ask": {
         "eyebrow": "In the app",
-        "title": "What Jack asks about the job",
+        "title": "What John asks about the job",
         "body": "A few questions, so pros near you can send a quote. You answer them in the app.",
-        "none": "Tell Jack what you need, in your own words."
+        "none": "Tell John what you need, in your own words."
       },
       "areas": {
         "eyebrow": "Where we work",
-        "title": "Where Jack works",
-        "body": "Jack serves these cities. The app checks your ZIP code when you ask for a job."
+        "title": "Where John works",
+        "body": "John serves these cities. The app checks your ZIP code when you ask for a job."
       },
       "more": {
-        "title": "More from Jack"
+        "title": "More from John"
       },
       "final": {
-        "title": "Tell Jack what's going on.",
-        "body": "Get the app and tell Jack what you need.",
+        "title": "Tell John what's going on.",
+        "body": "Get the app and tell John what you need.",
         "getApp": "Get the app"
       }
     },
     "city": {
       "meta": {
-        "title": "{{name}} in {{city}} | Jack Fix It",
-        "description": "{{name}} in {{city}}: tell Jack about the job, compare fixed-price quotes from pros near you and follow it in the app."
+        "title": "{{name}} in {{city}} | John Got It",
+        "description": "{{name}} in {{city}}: tell John about the job, compare fixed-price quotes from pros near you and follow it in the app."
       },
       "hero": {
         "title": "{{name}} in {{city}}"
       },
       "areas": {
-        "title": "Where Jack works in {{city}}",
-        "body": "Jack serves these ZIP codes in {{city}}. The app checks yours when you ask for a job.",
+        "title": "Where John works in {{city}}",
+        "body": "John serves these ZIP codes in {{city}}. The app checks yours when you ask for a job.",
         "zipsLabel": "ZIP codes served",
         "others": "{{name}} in other cities"
       },
       "more": {
-        "title": "More from Jack in {{city}}"
+        "title": "More from John in {{city}}"
       }
     }
   },
   "showcase": {
     "meta": {
-      "title": "Jack Fix It: the app for whatever happens at home",
-      "description": "Tell Jack what happened, compare fixed-price quotes from verified pros and pay in the app. You confirm when the job is done. Coming soon to iPhone and Android.",
-      "ogAlt": "The Jack Fix It name and its line “Tell Jack. We'll take care of the rest.” on navy."
+      "title": "John Got It: the app for whatever happens at home",
+      "description": "Tell John what happened, compare fixed-price quotes from verified pros and pay in the app. You confirm when the job is done. Coming soon to iPhone and Android.",
+      "ogAlt": "The John Got It name and its line “Tell John. We'll take care of the rest.” on navy."
     },
     "skipToContent": "Skip to content",
-    "homeLabel": "Jack Fix It, back to the top",
+    "homeLabel": "John Got It, back to the top",
     "nav": {
       "label": "Page sections",
       "menu": "Menu",
@@ -339,7 +339,7 @@
     "hero": {
       "soon": "Coming soon to iPhone and Android",
       "title": "Whatever happens at home, we <accent>fix</accent> it.",
-      "lead": "Tell Jack. We'll take care of the rest.",
+      "lead": "Tell John. We'll take care of the rest.",
       "body": "Describe what's going on, compare fixed-price quotes from verified pros and pay in the app. You confirm when the job is done.",
       "cta": "See how it works",
       "beats": {
@@ -356,12 +356,12 @@
     "how": {
       "eyebrow": "How it works",
       "title": "From problem to done, in one app.",
-      "body": "Here's what happens after you tell Jack."
+      "body": "Here's what happens after you tell John."
     },
     "features": {
       "describe": {
         "label": "Describe the problem",
-        "title": "Tell Jack what happened.",
+        "title": "Tell John what happened.",
         "body": "Say it in your own words and add photos or a video. You don't need to know who to call."
       },
       "quotes": {
@@ -426,8 +426,8 @@
       "title": "Questions, answered.",
       "items": {
         "what": {
-          "question": "What is Jack Fix It?",
-          "answer": "An app for home services. You tell Jack what's going on at home, pros near you answer with fixed-price quotes, and you choose the one that fits. Booking, payment, chat and the job's progress all stay in the app."
+          "question": "What is John Got It?",
+          "answer": "An app for home services. You tell John what's going on at home, pros near you answer with fixed-price quotes, and you choose the one that fits. Booking, payment, chat and the job's progress all stay in the app."
         },
         "cost": {
           "question": "Does it cost anything to ask for quotes?",
@@ -439,7 +439,7 @@
         },
         "methods": {
           "question": "How can I pay?",
-          "answer": "By card, or with Apple Pay or Google Pay where your phone offers them. The payment runs on Stripe's secure checkout, so Jack Fix It never stores your card number."
+          "answer": "By card, or with Apple Pay or Google Pay where your phone offers them. The payment runs on Stripe's secure checkout, so John Got It never stores your card number."
         },
         "verified": {
           "question": "How are pros verified?",
@@ -464,7 +464,7 @@
       }
     },
     "final": {
-      "title": "Tell Jack. We'll take care of the rest.",
+      "title": "Tell John. We'll take care of the rest.",
       "body": "The app is coming soon to iPhone and Android."
     },
     "footer": {
@@ -473,7 +473,7 @@
       "terms": "Terms of Service",
       "privacy": "Privacy Policy",
       "sampleData": "App screens on this page show sample data.",
-      "rights": "© {{year}} Jack Fix It"
+      "rights": "© {{year}} John Got It"
     },
     "media": {
       "home": "The app's home screen: “What's going on at home?” above the service categories.",
@@ -501,9 +501,10 @@
   },
   "admin": {
     "title": "Operations panel",
+    "deletedUser": "Deleted user",
     "login": {
       "title": "Sign in to the panel",
-      "subtitle": "For the Jack Fix It team.",
+      "subtitle": "For the John Got It team.",
       "email": "Email",
       "password": "Password",
       "submit": "Sign in",
@@ -1354,10 +1355,10 @@
   },
   "request": {
     "meta": {
-      "title": "Tell Jack what happened | Jack Fix It",
-      "description": "Tell Jack what's going on at home. A few quick questions, no account needed."
+      "title": "Tell John what happened | John Got It",
+      "description": "Tell John what's going on at home. A few quick questions, no account needed."
     },
-    "title": "Tell Jack what happened",
+    "title": "Tell John what happened",
     "intro": "A few quick questions. No account needed.",
     "noscript": "This form needs JavaScript. Turn it on in your browser to continue.",
     "progress": "Step {{current}} of {{total}}",
@@ -1374,7 +1375,7 @@
     },
     "zip": {
       "title": "Where's the job?",
-      "support": "First, let's check that Jack works in your area.",
+      "support": "First, let's check that John works in your area.",
       "label": "ZIP code",
       "hint": "The 5-digit ZIP code of the home.",
       "checking": "Checking your area…",
@@ -1386,19 +1387,19 @@
     },
     "waitlist": {
       "title": "We're not in your area yet",
-      "body": "Jack works in a few areas for now. Leave an email or a mobile number and we'll tell you when we come to {{zip}}.",
+      "body": "John works in a few areas for now. Leave an email or a mobile number and we'll tell you when we come to {{zip}}.",
       "emailLabel": "Email",
       "phoneLabel": "Mobile number",
       "contactHint": "One is enough.",
-      "use": "We'll use it only to tell you when Jack comes to your area.",
+      "use": "We'll use it only to tell you when John comes to your area.",
       "submit": "Let me know",
       "sending": "Sending…",
       "otherZip": "Try another ZIP code",
       "joinedTitle": "You're on the list",
-      "joinedBody": "We'll let you know when Jack comes to {{zip}}.",
-      "outOfArea": "Jack isn't taking requests in {{zip}} right now, so this one wasn't sent. We'll let you know when Jack comes to {{zip}}.",
+      "joinedBody": "We'll let you know when John comes to {{zip}}.",
+      "outOfArea": "John isn't taking requests in {{zip}} right now, so this one wasn't sent. We'll let you know when John comes to {{zip}}.",
       "home": "Back to the home page",
-      "servedNow": "Good news: Jack works in {{zip}} now.",
+      "servedNow": "Good news: John works in {{zip}} now.",
       "errors": {
         "missing_contact": "Add an email or a mobile number.",
         "invalid_email": "Enter an email like name@example.com.",
@@ -1493,16 +1494,16 @@
       "flexible": "Any day works",
       "yes": "Yes",
       "no": "No",
-      "consent": "By sending, you agree that Jack Fix It may contact you by call, text or email about this request.",
+      "consent": "By sending, you agree that John Got It may contact you by call, text or email about this request.",
       "terms": "Terms",
       "privacy": "Privacy",
       "honeypot": "Leave this field empty",
-      "send": "Send to Jack",
+      "send": "Send to John",
       "sending": "Sending…",
       "failedTitle": "Your request didn't go through",
       "errors": {
-        "stale": "This page was open for a while. Your answers are still here: press Send to Jack again.",
-        "retry": "That didn't go through. Press Send to Jack again.",
+        "stale": "This page was open for a while. Your answers are still here: press Send to John again.",
+        "retry": "That didn't go through. Press Send to John again.",
         "unavailable": "We couldn't send your request right now. Your answers are still here: try again in a moment.",
         "rate_limited": "Too many requests from here in a short time. Wait a few minutes, then try again.",
         "duplicate": "We may already have this request. If we don't reach you, reload the page and send it again.",
@@ -1512,13 +1513,13 @@
       "rateLimitedHours": "Too many requests for now. Try again in about {{hours}}\u00a0h."
     },
     "sent": {
-      "title": "Jack is on it",
+      "title": "John is on it",
       "code": "Your request number: {{code}}",
       "next": "Someone from our team will call or text you about it.",
-      "invite": "Next, get the Jack Fix It app and create your account. When we talk, we'll help you go on with your request there.",
+      "invite": "Next, get the John Got It app and create your account. When we talk, we'll help you go on with your request there.",
       "appStore": "App Store",
       "playStore": "Google Play",
-      "seeApp": "See the Jack Fix It app",
+      "seeApp": "See the John Got It app",
       "home": "Back to the home page"
     },
     "notices": {

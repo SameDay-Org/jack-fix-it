@@ -83,7 +83,7 @@ const START = "This is the start of your messages about this job.";
 const FAILED = "Not sent. Tap to try again.";
 const TOO_FAST = "You're sending messages too fast. Wait a moment, then try again.";
 const CLOSED = "This chat is closed";
-const REDACTED_NOTE = "We hid contact details. Keep the conversation in Jack Fix It.";
+const REDACTED_NOTE = "We hid contact details. Keep the conversation in John Got It.";
 
 // Every message body and typed text of this file: none may ever reach the console.
 const BODIES = new Set<string>();

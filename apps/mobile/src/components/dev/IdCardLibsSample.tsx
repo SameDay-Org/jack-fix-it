@@ -58,7 +58,7 @@ function CameraSection() {
   if (!permission) {
     return (
       <Section title="Camera" badge={{ label: "Checking", tone: "neutral" }}>
-        <Text className="text-callout text-gray-500">Asking whether Jack may use the camera.</Text>
+        <Text className="text-callout text-gray-500">Asking whether John may use the camera.</Text>
       </Section>
     );
   }
@@ -121,7 +121,7 @@ function CameraSection() {
       <Notice
         tone="info"
         title="Camera access is off"
-        body="Turn it on for Jack in Settings, then come back: the preview starts on its own."
+        body="Turn it on for John in Settings, then come back: the preview starts on its own."
       >
         <Button label="Open settings" variant="secondary" onPress={() => void openSettings()} />
       </Notice>
@@ -133,7 +133,7 @@ function SampleCard() {
   return (
     <View className="flex-1 justify-between rounded-lg bg-navy-900 p-4" style={continuousCorners}>
       <View className="flex-row items-center gap-2">
-        <Text className="flex-1 text-headline text-white">Jack Fix It</Text>
+        <Text className="flex-1 text-headline text-white">John Got It</Text>
         <View className="h-2 w-10 rounded-pill bg-green-500" />
       </View>
       <View className="gap-1">

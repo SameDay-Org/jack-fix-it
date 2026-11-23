@@ -206,9 +206,13 @@ function rowCells(dispute: DisputeItem, t: T, locale: string) {
     reason: t(`admin.disputes.reason.${dispute.reason_code}`),
     parties: (
       <span className="break-words">
-        {dispute.customer_first_name ?? t("admin.disputes.noName")}
+        {dispute.customer_deleted
+          ? t("admin.deletedUser")
+          : (dispute.customer_first_name ?? t("admin.disputes.noName"))}
         <span className="text-gray-500"> · </span>
-        {dispute.pro_first_name ?? t("admin.disputes.noName")}
+        {dispute.pro_deleted
+          ? t("admin.deletedUser")
+          : (dispute.pro_first_name ?? t("admin.disputes.noName"))}
       </span>
     ),
     money: `${total} / ${formatMoney(dispute.pro_payout_cents, dispute.currency, locale)}`,

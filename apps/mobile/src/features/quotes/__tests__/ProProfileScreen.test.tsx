@@ -58,7 +58,7 @@ const [, MARIA, DAN] = QUOTES;
 const PATH = "/v1/requests/{request_id}/quotes/{quote_id}/pro";
 const BIO = "Licensed plumber. Kitchens and bathrooms, same day when I can. Reach me at [hidden].";
 const TRUST =
-  "Verified by Jack Fix It: our team reviewed the information and documents this pro provided and approved their profile before they could send you a quote.";
+  "Verified by John Got It: our team reviewed the information and documents this pro provided and approved their profile before they could send you a quote.";
 const PROFILE: ProPublicProfile = {
   id: MARIA.pro.id,
   name: "María P.",
@@ -194,7 +194,7 @@ describe("ProProfileScreen", () => {
 
     expect(
       await screen.findByText(
-        "María P. is new to Jack Fix It. They joined in March 2024 and haven't completed a job here yet. Like every pro on Jack Fix It, they were verified before they could send you a quote.",
+        "María P. is new to John Got It. They joined in March 2024 and haven't completed a job here yet. Like every pro on John Got It, they were verified before they could send you a quote.",
       ),
     ).toBeTruthy();
     expect(screen.queryByText("rating")).toBeNull();
@@ -217,10 +217,10 @@ describe("ProProfileScreen", () => {
       verified: false,
     });
     await renderOver();
-    expect(await screen.findByRole("header", { name: "Jack pro" })).toBeTruthy();
+    expect(await screen.findByRole("header", { name: "John pro" })).toBeTruthy();
     expect(
       screen.getByText(
-        "This pro is new to Jack Fix It. They joined in March 2024 and haven't completed a job here yet.",
+        "This pro is new to John Got It. They joined in March 2024 and haven't completed a job here yet.",
       ),
     ).toBeTruthy();
     expect(screen.queryByTestId("pro-profile-figures")).toBeNull();
@@ -229,7 +229,7 @@ describe("ProProfileScreen", () => {
     expect(screen.queryByTestId("pro-profile-verified", HIDDEN)).toBeNull();
     expect(screen.queryByTestId("pro-profile-trust")).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Accept the quote from Jack pro for $250" }),
+      screen.getByRole("button", { name: "Accept the quote from John pro for $250" }),
     ).toBeTruthy();
   });
 
@@ -246,7 +246,7 @@ describe("ProProfileScreen", () => {
     });
     expect(screen.queryByTestId("pro-profile-verified")).toBeNull();
     // The pill is gone; only the trust line at the end says what verified means.
-    expect(screen.queryByText("Verified by Jack Fix It", HIDDEN)).toBeNull();
+    expect(screen.queryByText("Verified by John Got It", HIDDEN)).toBeNull();
     await unmount();
 
     jest.mocked(apiGet).mockResolvedValue({ ...PROFILE, verified: false });
@@ -269,7 +269,7 @@ describe("ProProfileScreen", () => {
     expect(screen.getByLabelText("Reparaciones")).toBeTruthy();
     expect(screen.getByRole("header", { name: "Qué hace" })).toBeTruthy();
     expect(screen.getByRole("header", { name: "María P., verificado" })).toBeTruthy();
-    expect(screen.getByText(/^Verificado por Jack Fix It: nuestro equipo/)).toBeTruthy();
+    expect(screen.getByText(/^Verificado por John Got It: nuestro equipo/)).toBeTruthy();
     expect(screen.getByText(/^Aceptar por /)).toBeTruthy();
     expect(screen.getByText("Ver presupuestos")).toBeTruthy();
   });
@@ -282,7 +282,7 @@ describe("ProProfileScreen", () => {
     await act(() => i18n.changeLanguage("es"));
     expect(
       screen.getByText(
-        "María P. se está estrenando en Jack Fix It. Se unió en marzo de 2024 y todavía no ha completado ningún trabajo aquí. Como todos los profesionales de Jack Fix It, pasó la verificación antes de poder enviarte un presupuesto.",
+        "María P. se está estrenando en John Got It. Se unió en marzo de 2024 y todavía no ha completado ningún trabajo aquí. Como todos los profesionales de John Got It, pasó la verificación antes de poder enviarte un presupuesto.",
       ),
     ).toBeTruthy();
   });
