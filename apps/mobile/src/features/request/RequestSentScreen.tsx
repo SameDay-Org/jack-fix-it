@@ -12,7 +12,7 @@ import { tokens } from "@/theme";
 import { sentRequest } from "./sent";
 
 /**
- * "Jack is on it": the request went through. The whole navy screen, not a card: a green seal,
+ * "John is on it": the request went through. The whole navy screen, not a card: a green seal,
  * the headline, what was asked and where, the request's code to quote to support, one line on what happens next, and the way to the
  * request (its quotes, waiting until the first arrives). The flow is gone from the stack, so Back
  * goes Home. Reached with an id this account did not just send from this session, it opens that

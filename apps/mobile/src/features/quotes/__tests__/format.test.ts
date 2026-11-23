@@ -74,18 +74,18 @@ describe("format", () => {
   });
 
   it("a null or blank name shows the neutral label, never an empty string", async () => {
-    expect(proName(t, quote(1, { pro: { name: null } }))).toBe("Jack pro");
-    expect(proName(t, quote(1, { pro: { name: "  " } }))).toBe("Jack pro");
+    expect(proName(t, quote(1, { pro: { name: null } }))).toBe("John pro");
+    expect(proName(t, quote(1, { pro: { name: "  " } }))).toBe("John pro");
     expect(proName(t, quote(1, { pro: { name: "María P." } }))).toBe("María P.");
     await i18n.changeLanguage("es");
-    expect(proName(t, quote(1, { pro: { name: null } }))).toBe("Profesional de Jack");
+    expect(proName(t, quote(1, { pro: { name: null } }))).toBe("Profesional de John");
   });
 
   it("reads a card as one sentence: pro, verified, price, start and the rest", () => {
     const text = quoteText(t, quote(1, { amount_cents: 18_050 }), "open", NOW, "en-US");
 
     expect(plain(text.summary)).toMatch(
-      /^Pro 1\., Verified by Jack Fix It, \$180\.50, Starts .+, About 2 h, Rated 4\.8, 12 jobs, 8 years of experience, Expires in 6 h$/,
+      /^Pro 1\., Verified by John Got It, \$180\.50, Starts .+, About 2 h, Rated 4\.8, 12 jobs, 8 years of experience, Expires in 6 h$/,
     );
     expect(
       plain(quoteText(t, quote(2, { pro: { rating_avg: null } }), "open", NOW, "en-US").stats),

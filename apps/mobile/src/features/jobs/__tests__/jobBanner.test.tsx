@@ -539,12 +539,12 @@ describe("the tabs' open request banner (#474)", () => {
     calls().filter(([path, options]) => path === REQUESTS_PATH && options?.generation === undefined)
       .length;
 
-  it("a request Jack is working on shows on every tab, and a tap opens that request", async () => {
+  it("a request John is working on shows on every tab, and a tap opens that request", async () => {
     mockApi.requests = [request(1, "finding_pro")];
     await renderRouter(routes, { initialUrl: "/" });
 
     const banner = await screen.findByTestId("request-banner");
-    expect(banner.props.accessibilityLabel).toBe("Jack is finding a pro");
+    expect(banner.props.accessibilityLabel).toBe("John is finding a pro");
     expect(banner.props.accessibilityHint).toBe("Opens your request");
     expect(screen.queryByTestId("request-banner-tail")).toBeNull();
     expect(screen.getByTestId("tab-bar-accessory")).toBeTruthy();
@@ -557,12 +557,12 @@ describe("the tabs' open request banner (#474)", () => {
     expect(screen.getByTestId("request-stub").props.children).toBe(`request ${requestId(1)}`);
   });
 
-  it("says Jack got the request while it is received or being reviewed", async () => {
+  it("says John got the request while it is received or being reviewed", async () => {
     mockApi.requests = [request(1, "reviewing")];
     await renderRouter(routes, { initialUrl: "/" });
 
     expect((await screen.findByTestId("request-banner")).props.accessibilityLabel).toBe(
-      "Jack got your request",
+      "John got your request",
     );
   });
 

@@ -398,7 +398,7 @@ describe("CancelJobScreen", () => {
     expect(keyOf(second!)).toBe(keyOf(first!));
   });
 
-  it("says a job that can no longer be cancelled is closed, and points to Talk to Jack", async () => {
+  it("says a job that can no longer be cancelled is closed, and points to Talk to John", async () => {
     await renderScreen();
     await pick();
     await confirm();

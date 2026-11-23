@@ -69,7 +69,7 @@ export function FlowKitSample() {
       <Notice
         tone="danger"
         title="We're not in this area yet"
-        body="Jack serves a few areas for now. Try another address."
+        body="John serves a few areas for now. Try another address."
       />
       <Notice tone="info" title="We couldn't load your saved addresses.">
         <Button label="Try again" variant="secondary" onPress={() => undefined} />

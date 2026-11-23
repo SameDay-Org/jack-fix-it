@@ -55,7 +55,7 @@ const PINNED = { auth: true, generation: 1, params: { job_id: JOB_ID } };
 const LAT = 26.1189;
 const LNG = -80.1365;
 const SENT = { arrival_code: ARRIVAL_CODE, lat: LAT, lng: LNG };
-const OFFLINE = "We couldn't reach Jack Fix It. Check your connection and try again.";
+const OFFLINE = "We couldn't reach John Got It. Check your connection and try again.";
 
 type Permission = Awaited<ReturnType<typeof Location.getForegroundPermissionsAsync>>;
 type Position = Awaited<ReturnType<typeof Location.getCurrentPositionAsync>>;
@@ -312,7 +312,7 @@ describe("CheckInSheet", () => {
 
     expect(screen.getByText("Share your location to check in")).toBeTruthy();
     expect(screen.getByTestId("check-in-ask").props.children).toBe(
-      "Jack Fix It checks your location once, when you check in, so Maria knows you've arrived. " +
+      "John Got It checks your location once, when you check in, so Maria knows you've arrived. " +
         "It's used only for this check-in.",
     );
     expect(Location.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
@@ -333,7 +333,7 @@ describe("CheckInSheet", () => {
     await submit();
 
     const explanation =
-      "Share your location to check in. Jack Fix It checks your location once, when you check " +
+      "Share your location to check in. John Got It checks your location once, when you check " +
       "in, so Maria knows you've arrived. It's used only for this check-in.";
     expect(announced()).toEqual([explanation]);
     expect(AccessibilityInfo.announceForAccessibilityWithOptions).toHaveBeenCalledWith(
@@ -365,7 +365,7 @@ describe("CheckInSheet", () => {
     await press("check-in-allow");
 
     expect(await screen.findByTestId("check-in-blocked")).toBeTruthy();
-    expect(screen.getByText("Location is off for Jack Fix It")).toBeTruthy();
+    expect(screen.getByText("Location is off for John Got It")).toBeTruthy();
     expect(
       screen.getByText(
         "Checking in needs your location so Maria knows you've arrived. Turn it on in Settings, " +
