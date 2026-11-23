@@ -188,6 +188,13 @@ describe("pros list page", () => {
     expect(page).not.toMatch(/Pending\s*<span/);
   });
 
+  it("says Deleted user for a deleted pro (#97)", async () => {
+    api(() => Response.json(pageOf([item({ name: null, pro_deleted: true })])));
+    const page = await render();
+    expect(page).toContain("Deleted user");
+    expect(page).not.toContain("No name on file");
+  });
+
   it("is in Spanish for a Spanish-speaking staff member", async () => {
     api(() => Response.json(pageOf([item()])), "es");
 

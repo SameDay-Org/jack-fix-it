@@ -388,7 +388,7 @@ describe("ProJobScreen", () => {
 
       await waitFor(() =>
         expect(toast()?.message).toBe(
-          "We couldn't reach Jack Fix It. Check your connection and try again.",
+          "We couldn't reach John Got It. Check your connection and try again.",
         ),
       );
       expect(apiGet).toHaveBeenCalledTimes(1);

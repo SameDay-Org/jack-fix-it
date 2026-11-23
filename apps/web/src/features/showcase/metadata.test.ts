@@ -36,11 +36,11 @@ describe("showcase metadata", () => {
 
     const metadata = await showcaseMetadata("en");
 
-    expect(metadata.title).toBe("Jack Fix It: the app for whatever happens at home");
+    expect(metadata.title).toBe("John Got It: the app for whatever happens at home");
     expect(metadata.description).toContain("Coming soon to iPhone and Android.");
     expect(metadata.openGraph).toMatchObject({
       type: "website",
-      siteName: "Jack Fix It",
+      siteName: "John Got It",
       title: metadata.title,
       description: metadata.description,
       locale: "en_US",
@@ -53,7 +53,7 @@ describe("showcase metadata", () => {
 
     const metadata = await showcaseMetadata("es");
 
-    expect(metadata.title).toBe("Jack Fix It: la app para lo que pase en casa");
+    expect(metadata.title).toBe("John Got It: la app para lo que pase en casa");
     expect(metadata.description).toContain("Muy pronto en iPhone y Android.");
     expect(metadata.openGraph).toMatchObject({ locale: "es_US", alternateLocale: ["en_US"] });
   });
@@ -93,10 +93,10 @@ describe("showcase metadata", () => {
 
 describe("legal placeholder metadata", () => {
   it.each([
-    ["en", "terms", "Terms of Service · Jack Fix It"],
-    ["en", "privacy", "Privacy Policy · Jack Fix It"],
-    ["es", "terms", "Términos de servicio · Jack Fix It"],
-    ["es", "privacy", "Política de privacidad · Jack Fix It"],
+    ["en", "terms", "Terms of Service · John Got It"],
+    ["en", "privacy", "Privacy Policy · John Got It"],
+    ["es", "terms", "Términos de servicio · John Got It"],
+    ["es", "privacy", "Política de privacidad · John Got It"],
   ] as const)(
     "%s %s has its title and stays out of search indexes",
     async (locale, document, title) => {

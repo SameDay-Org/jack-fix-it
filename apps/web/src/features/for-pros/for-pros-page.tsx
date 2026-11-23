@@ -275,8 +275,8 @@ function FinalCall({ t, locale }: { t: TFunction; locale: Locale }) {
 }
 
 /**
- * The page for professionals (#88, D17.2) in one language: how a pro gets work through Jack
- * Fix It, what we ask of them and their questions, ending on the app (pros sign up there only:
+ * The page for professionals (#88, D17.2) in one language: how a pro gets work through John
+ * Got It, what we ask of them and their questions, ending on the app (pros sign up there only:
  * no web sign-up or sign-in). Static, rendered on the server, readable without JavaScript. It
  * says only what the product does: no income, volume or rating claims, no price or percentage.
  */

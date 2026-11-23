@@ -36,7 +36,7 @@ describe("WelcomeScreen", () => {
   it("hero copy: brand, tagline with one accent word, support line; two ways in and nothing else", async () => {
     await renderInSafeArea(<WelcomeScreen />);
 
-    expect(screen.getByText("Jack Fix It")).toBeTruthy();
+    expect(screen.getByText("John Got It")).toBeTruthy();
     // The same hero the launch intro draws: one accessible sentence, the lime word in place.
     expect(
       screen.getByRole("header", { name: "Whatever happens at home, we fix it." }),
@@ -46,7 +46,7 @@ describe("WelcomeScreen", () => {
     expect(
       screen.getAllByText("fix", { includeHiddenElements: true })[0].props.className,
     ).toContain("text-green-500");
-    expect(screen.getByText("Tell Jack. We'll take care of the rest.")).toBeTruthy();
+    expect(screen.getByText("Tell John. We'll take care of the rest.")).toBeTruthy();
     expect(screen.getAllByRole("button")).toHaveLength(2);
     expect(screen.queryByTestId("welcome-actions-partial-cleanup")).toBeNull();
   });

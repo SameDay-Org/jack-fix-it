@@ -263,6 +263,16 @@ describe("operations queue page", () => {
     expect(page).not.toContain('role="alert"');
   });
 
+  it("says Deleted user for a deleted customer's request (#97), in each language", async () => {
+    api(() => pageOf([item({ customer_name: null, customer_deleted: true })]));
+    const words = text(await render());
+    expect(words).toContain("Deleted user");
+    expect(words).not.toContain("No name on file");
+
+    api(() => pageOf([item({ customer_name: null, customer_deleted: true })]), { locale: "es" });
+    expect(text(await render())).toContain("Usuario eliminado");
+  });
+
   it("is in Spanish for a Spanish-speaking staff member", async () => {
     api(() => pageOf([item()]), { locale: "es" });
 

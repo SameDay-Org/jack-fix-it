@@ -93,6 +93,19 @@ describe("dispute page", () => {
     expect(page).toMatch(/whitespace-pre-wrap">The tap still leaks.\n</);
   });
 
+  it("says Deleted user for a deleted customer or pro (#97)", async () => {
+    api(() => Response.json(dispute({ customer_first_name: null, customer_deleted: true })));
+    const page = await render();
+    expect(page).toContain("Deleted user");
+    expect(page).toContain("Dan");
+    expect(page).not.toContain("No name");
+
+    api(() => Response.json(dispute({ pro_first_name: null, pro_deleted: true })));
+    const other = await render();
+    expect(other).toContain("Deleted user");
+    expect(other).toContain("Jamie");
+  });
+
   it("says when the pro has not replied", async () => {
     api(() => Response.json(dispute({ pro_reply: null, pro_replied_at: null })));
     expect(await render()).toContain("The pro hasn't replied.");

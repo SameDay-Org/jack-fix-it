@@ -100,7 +100,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   // Keeps the pro's location fixes out of persisted Android jobs (#352): see withoutBootCompleted.
   return withNoBootCompleted({
     ...config,
-    name: `Jack Fix It${variant.nameSuffix}`,
+    name: `John Got It${variant.nameSuffix}`,
     slug: "jack-fix-it",
     owner: EAS_OWNER,
     platforms: ["ios", "android"],

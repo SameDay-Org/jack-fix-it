@@ -56,7 +56,7 @@ describe("HelpScreen", () => {
   it("opens the message form from the row under the last section", async () => {
     await renderScreen();
 
-    await fireEvent.press(screen.getByRole("button", { name: "Still need help?, Talk to Jack" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Still need help?, Talk to John" }));
 
     expect(router.push).toHaveBeenCalledWith("/help/contact");
   });
@@ -68,7 +68,7 @@ describe("HelpScreen", () => {
     expect(buttons.map((button) => button.props.accessibilityLabel)).toEqual([
       "Back",
       ...FAQ.map(({ id }) => faq[id].question),
-      "Still need help?, Talk to Jack",
+      "Still need help?, Talk to John",
     ]);
     // The team is reached inside the app: no link leads out of it.
     expect(screen.queryAllByRole("link")).toHaveLength(0);

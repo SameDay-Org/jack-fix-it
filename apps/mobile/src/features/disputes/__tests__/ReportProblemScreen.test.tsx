@@ -282,7 +282,7 @@ describe("ReportProblemScreen", () => {
     expect(screen.getByLabelText("Something was damaged, Today, Open")).toBeTruthy();
   });
 
-  it("says reporting is closed when the API says so, and points to Talk to Jack", async () => {
+  it("says reporting is closed when the API says so, and points to Talk to John", async () => {
     view = { dispute: null, can_report: false, report_by: null };
     await renderScreen();
     expect(screen.getByText("Reporting is closed for this job")).toBeTruthy();

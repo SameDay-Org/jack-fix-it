@@ -31,7 +31,7 @@ const { paymentConfig } = jest.requireMock<{ paymentConfig: { appleMerchantId?: 
 );
 
 const open = (stillWanted = () => true) =>
-  openPaymentSheet(SHEET, { merchantName: "Jack Fix It", stillWanted });
+  openPaymentSheet(SHEET, { merchantName: "John Got It", stillWanted });
 
 beforeEach(() => {
   paymentConfig.appleMerchantId = "merchant.com.jackfixit.app";
@@ -90,7 +90,7 @@ describe("openPaymentSheet", () => {
       customerId: "cus_jack",
       customerSessionClientSecret: "cuss_secret_789",
       paymentIntentClientSecret: "pi_123_secret_456",
-      merchantDisplayName: "Jack Fix It",
+      merchantDisplayName: "John Got It",
       allowsDelayedPaymentMethods: false,
     });
     // The API still sends the old key for one release (#436): a sheet given it has full rights.
@@ -110,7 +110,7 @@ describe("openPaymentSheet", () => {
         customer_session_client_secret: secret,
       } as unknown as PaymentSheetOut;
       await expect(
-        openPaymentSheet(old, { merchantName: "Jack Fix It", stillWanted: () => true }),
+        openPaymentSheet(old, { merchantName: "John Got It", stillWanted: () => true }),
       ).resolves.toEqual({ kind: "failed", reason: "unavailable" });
       expect(sdkCalls()).toEqual(NONE);
       expect(resetPaymentSheetCustomer).not.toHaveBeenCalled();
@@ -159,7 +159,7 @@ describe("openPaymentSheet", () => {
   it("a live key uses Google Pay's production wallet", async () => {
     await openPaymentSheet(
       { ...SHEET, publishable_key: "pk_live_jack" },
-      { merchantName: "Jack Fix It", stillWanted: () => true },
+      { merchantName: "John Got It", stillWanted: () => true },
     );
     expect(jest.mocked(initPaymentSheet).mock.calls[0][0].googlePay?.testEnv).toBe(false);
   });
@@ -216,7 +216,7 @@ describe("openPaymentSheet", () => {
     resetSheetCustomer();
     const leaving = new AbortController();
     const result = openPaymentSheet(SHEET, {
-      merchantName: "Jack Fix It",
+      merchantName: "John Got It",
       stillWanted: () => true,
       signal: leaving.signal,
     });
@@ -250,7 +250,7 @@ describe("openSetupSheet", () => {
   const NEVER_LOGGED = [...Object.values(SETUP), ...Object.values(STRIPE_SAYS)];
 
   const save = (stillWanted = () => true) =>
-    openSetupSheet(SETUP, { merchantName: "Jack Fix It", stillWanted });
+    openSetupSheet(SETUP, { merchantName: "John Got It", stillWanted });
 
   let consoleSpies: ReturnType<typeof spyOnConsole> = [];
   beforeEach(() => {
@@ -273,7 +273,7 @@ describe("openSetupSheet", () => {
     await expect(
       openSetupSheet(
         { ...SETUP, ephemeral_key_secret: OLD_KEY },
-        { merchantName: "Jack Fix It", stillWanted: () => true },
+        { merchantName: "John Got It", stillWanted: () => true },
       ),
     ).resolves.toEqual({ kind: "saved" });
 
@@ -283,7 +283,7 @@ describe("openSetupSheet", () => {
     const params = jest.mocked(initPaymentSheet).mock.calls[0][0];
     expect(params).toMatchObject({
       setupIntentClientSecret: "seti_123_secret_456",
-      merchantDisplayName: "Jack Fix It",
+      merchantDisplayName: "John Got It",
       returnURL: "jackfixit://stripe-redirect",
       allowsDelayedPaymentMethods: false,
     });
