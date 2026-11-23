@@ -119,7 +119,7 @@ describe("the page for professionals", () => {
 
   it("shows the three approved badges, word for word", async () => {
     const html = await page("en");
-    const list = /<ul aria-label="Working with Jack"[^>]*>(.*?)<\/ul>/.exec(html)?.[1] ?? "";
+    const list = /<ul aria-label="Working with John"[^>]*>(.*?)<\/ul>/.exec(html)?.[1] ?? "";
     const badges = [...list.matchAll(/<\/svg>([^<]+)<\/li>/g)].map((match) => match[1]);
     expect(badges).toEqual([
       "No lead fees",
@@ -166,7 +166,7 @@ describe("the page for professionals", () => {
     },
   );
 
-  it("draws Jack from the mascot package as still images only", async () => {
+  it("draws John from the mascot package as still images only", async () => {
     const html = await page("en");
     expect(html).not.toMatch(/<svg[^>]*data-pose=|data-part=|data-motion/);
     const images = html.match(/<img[^>]*data-pose="[^"]*"[^>]*>/g) ?? [];

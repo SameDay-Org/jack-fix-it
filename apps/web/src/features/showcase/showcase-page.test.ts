@@ -205,7 +205,7 @@ describe("showcase page", () => {
     expect(footer).toMatch(/<a[^>]*href="\/terms"[^>]*>Terms of Service<\/a>/);
     expect(footer).toMatch(/<a[^>]*href="\/privacy"[^>]*>Privacy Policy<\/a>/);
     expect(footer).toContain("App screens on this page show sample data.");
-    expect(footer).toContain(`© ${new Date().getFullYear()} Jack Fix It`);
+    expect(footer).toContain(`© ${new Date().getFullYear()} John Got It`);
   });
 
   it("is in Spanish under /es, with its content marked as Spanish", async () => {

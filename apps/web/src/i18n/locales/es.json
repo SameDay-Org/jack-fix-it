@@ -1,6 +1,6 @@
 {
   "brand": {
-    "name": "Jack Fix It",
+    "name": "John Got It",
     "tagline": "Pase lo que pase en casa, lo arreglamos."
   },
   "site": {
@@ -17,7 +17,7 @@
       "home": "Ir a la página de inicio"
     },
     "notFound": {
-      "metaTitle": "Página no encontrada | Jack Fix It",
+      "metaTitle": "Página no encontrada | John Got It",
       "title": "No encontramos esta página",
       "body": "Puede que el enlace sea antiguo o tenga un error.",
       "home": "Ir a la página de inicio"
@@ -25,12 +25,12 @@
   },
   "landing": {
     "meta": {
-      "title": "Jack Fix It · Pase lo que pase en casa, lo arreglamos.",
-      "description": "Cuéntale a Jack qué pasa en casa, compara presupuestos de precio fijo de profesionales cercanos y sigue el trabajo en la app.",
-      "ogAlt": "El nombre Jack Fix It y su frase “Pase lo que pase en casa, lo arreglamos.” sobre azul marino."
+      "title": "John Got It · Pase lo que pase en casa, lo arreglamos.",
+      "description": "Cuéntale a John qué pasa en casa, compara presupuestos de precio fijo de profesionales cercanos y sigue el trabajo en la app.",
+      "ogAlt": "El nombre John Got It y su frase “Pase lo que pase en casa, lo arreglamos.” sobre azul marino."
     },
     "skipToContent": "Saltar al contenido",
-    "homeLabel": "Jack Fix It, volver arriba",
+    "homeLabel": "John Got It, volver arriba",
     "nav": {
       "label": "Secciones",
       "services": "Servicios",
@@ -43,7 +43,7 @@
       "eyebrow": "Servicios para el hogar",
       "titleLead": "Pase lo que pase en casa,",
       "titleAccent": "lo arreglamos.",
-      "body": "Cuéntale a Jack qué pasa. Profesionales cercanos te envían presupuestos de precio fijo, tú eliges uno y sigues el trabajo en la app de principio a fin.",
+      "body": "Cuéntale a John qué pasa. Profesionales cercanos te envían presupuestos de precio fijo, tú eliges uno y sigues el trabajo en la app de principio a fin.",
       "getApp": "Obtén la app",
       "explore": "Ver servicios",
       "badgesLabel": "Lo que obtienes",
@@ -56,14 +56,14 @@
     },
     "requestFlow": {
       "title": "¿Qué está pasando en casa?",
-      "cta": "Cuéntale a Jack lo que pasó"
+      "cta": "Cuéntale a John lo que pasó"
     },
     "how": {
       "eyebrow": "Cómo funciona",
       "title": "Del problema al trabajo terminado.",
       "steps": {
         "tell": {
-          "title": "Cuéntale a Jack",
+          "title": "Cuéntale a John",
           "body": "Di con tus palabras qué pasa en casa y agrega fotos o un video en la app."
         },
         "match": {
@@ -98,10 +98,10 @@
         "lawn-landscaping": "Corte de césped, poda y cuidado del jardín.",
         "moving-assembly": "Armado de muebles y ayuda con una mudanza."
       },
-      "other": "Cuéntale a Jack lo que necesitas."
+      "other": "Cuéntale a John lo que necesitas."
     },
     "trust": {
-      "eyebrow": "Por qué Jack",
+      "eyebrow": "Por qué John",
       "title": "Ayuda en casa, sin complicaciones.",
       "items": {
         "whoToCall": {
@@ -139,14 +139,14 @@
       "terms": "Términos",
       "privacy": "Privacidad",
       "contact": "Contacto",
-      "rights": "© {{year}} Jack Fix It. Todos los derechos reservados."
+      "rights": "© {{year}} John Got It. Todos los derechos reservados."
     }
   },
   "forPros": {
     "meta": {
-      "title": "Para profesionales | Jack Fix It",
-      "description": "Recibe solicitudes de clientes cerca de ti, envía tus presupuestos y maneja tus trabajos desde la app de Jack Fix It. Sin cargos por clientes potenciales.",
-      "ogAlt": "Jack Fix It para profesionales: trabajo que llega a ti.",
+      "title": "Para profesionales | John Got It",
+      "description": "Recibe solicitudes de clientes cerca de ti, envía tus presupuestos y maneja tus trabajos desde la app de John Got It. Sin cargos por clientes potenciales.",
+      "ogAlt": "John Got It para profesionales: trabajo que llega a ti.",
       "ogLine": "Trabajo que llega a ti."
     },
     "nav": {
@@ -159,7 +159,7 @@
       "body": "Recibe solicitudes de clientes cerca de ti, envía tus presupuestos y maneja tus trabajos desde la app.",
       "getApp": "Obtén la app",
       "how": "Cómo funciona",
-      "badgesLabel": "Trabajar con Jack",
+      "badgesLabel": "Trabajar con John",
       "badges": {
         "leadFees": "Sin cargos por clientes potenciales",
         "paid": "Recibe tu pago cuando el trabajo se hace",
@@ -193,7 +193,7 @@
       }
     },
     "why": {
-      "eyebrow": "Por qué Jack",
+      "eyebrow": "Por qué John",
       "title": "Pensado para tu trabajo.",
       "items": {
         "leads": {
@@ -263,71 +263,71 @@
   "seo": {
     "service": {
       "meta": {
-        "title": "{{name}} en {{place}} | Jack Fix It",
-        "titleAnywhere": "{{name}} | Jack Fix It",
-        "description": "{{name}} en {{place}}: cuéntale a Jack sobre el trabajo, compara presupuestos de precio fijo de profesionales cercanos y síguelo en la app.",
-        "descriptionAnywhere": "{{name}}: cuéntale a Jack sobre el trabajo, compara presupuestos de precio fijo de profesionales cercanos y síguelo en la app.",
-        "ogAlt": "El nombre Jack Fix It y el nombre de un servicio para el hogar sobre azul marino."
+        "title": "{{name}} en {{place}} | John Got It",
+        "titleAnywhere": "{{name}} | John Got It",
+        "description": "{{name}} en {{place}}: cuéntale a John sobre el trabajo, compara presupuestos de precio fijo de profesionales cercanos y síguelo en la app.",
+        "descriptionAnywhere": "{{name}}: cuéntale a John sobre el trabajo, compara presupuestos de precio fijo de profesionales cercanos y síguelo en la app.",
+        "ogAlt": "El nombre John Got It y el nombre de un servicio para el hogar sobre azul marino."
       },
       "nav": {
-        "ask": "Qué pregunta Jack",
+        "ask": "Qué pregunta John",
         "areas": "Dónde trabajamos"
       },
       "hero": {
         "eyebrow": "Servicios para el hogar",
         "title": "{{name}} en {{place}}",
         "titleAnywhere": "{{name}}",
-        "body": "Cuéntale a Jack sobre el trabajo en la app. Profesionales cercanos que hacen este trabajo te envían presupuestos de precio fijo, tú eliges uno y sigues el trabajo de principio a fin.",
+        "body": "Cuéntale a John sobre el trabajo en la app. Profesionales cercanos que hacen este trabajo te envían presupuestos de precio fijo, tú eliges uno y sigues el trabajo de principio a fin.",
         "getApp": "Obtén la app",
-        "ask": "Qué pregunta Jack"
+        "ask": "Qué pregunta John"
       },
       "ask": {
         "eyebrow": "En la app",
-        "title": "Qué pregunta Jack sobre el trabajo",
+        "title": "Qué pregunta John sobre el trabajo",
         "body": "Unas pocas preguntas para que los profesionales cercanos puedan enviarte un presupuesto. Las respondes en la app.",
-        "none": "Cuéntale a Jack qué necesitas, con tus propias palabras."
+        "none": "Cuéntale a John qué necesitas, con tus propias palabras."
       },
       "areas": {
         "eyebrow": "Dónde trabajamos",
-        "title": "Dónde trabaja Jack",
-        "body": "Jack atiende estas ciudades. La app revisa tu código postal cuando pides un trabajo."
+        "title": "Dónde trabaja John",
+        "body": "John atiende estas ciudades. La app revisa tu código postal cuando pides un trabajo."
       },
       "more": {
-        "title": "Más de Jack"
+        "title": "Más de John"
       },
       "final": {
-        "title": "Cuéntale a Jack qué pasa.",
-        "body": "Obtén la app y dile a Jack qué necesitas.",
+        "title": "Cuéntale a John qué pasa.",
+        "body": "Obtén la app y dile a John qué necesitas.",
         "getApp": "Obtén la app"
       }
     },
     "city": {
       "meta": {
-        "title": "{{name}} en {{city}} | Jack Fix It",
-        "description": "{{name}} en {{city}}: cuéntale a Jack el trabajo, compara presupuestos de precio fijo y síguelo en la app."
+        "title": "{{name}} en {{city}} | John Got It",
+        "description": "{{name}} en {{city}}: cuéntale a John el trabajo, compara presupuestos de precio fijo y síguelo en la app."
       },
       "hero": {
         "title": "{{name}} en {{city}}"
       },
       "areas": {
-        "title": "Dónde trabaja Jack en {{city}}",
-        "body": "Jack atiende estos códigos postales en {{city}}. La app revisa el tuyo cuando pides un trabajo.",
+        "title": "Dónde trabaja John en {{city}}",
+        "body": "John atiende estos códigos postales en {{city}}. La app revisa el tuyo cuando pides un trabajo.",
         "zipsLabel": "Códigos postales atendidos",
         "others": "{{name}} en otras ciudades"
       },
       "more": {
-        "title": "Más de Jack en {{city}}"
+        "title": "Más de John en {{city}}"
       }
     }
   },
   "showcase": {
     "meta": {
-      "title": "Jack Fix It: la app para lo que pase en casa",
-      "description": "Cuéntale a Jack qué pasó, compara presupuestos de precio fijo de profesionales verificados y paga en la app. Tú confirmas cuando el trabajo está terminado. Muy pronto en iPhone y Android.",
-      "ogAlt": "El nombre Jack Fix It y su frase “Cuéntaselo a Jack. Nosotros nos encargamos del resto.” sobre azul marino."
+      "title": "John Got It: la app para lo que pase en casa",
+      "description": "Cuéntale a John qué pasó, compara presupuestos de precio fijo de profesionales verificados y paga en la app. Tú confirmas cuando el trabajo está terminado. Muy pronto en iPhone y Android.",
+      "ogAlt": "El nombre John Got It y su frase “Cuéntaselo a John. Nosotros nos encargamos del resto.” sobre azul marino."
     },
     "skipToContent": "Saltar al contenido",
-    "homeLabel": "Jack Fix It, volver al inicio",
+    "homeLabel": "John Got It, volver al inicio",
     "nav": {
       "label": "Secciones de la página",
       "menu": "Menú",
@@ -339,7 +339,7 @@
     "hero": {
       "soon": "Muy pronto en iPhone y Android",
       "title": "Pase lo que pase en casa, lo <accent>arreglamos</accent>.",
-      "lead": "Cuéntaselo a Jack. Nosotros nos encargamos del resto.",
+      "lead": "Cuéntaselo a John. Nosotros nos encargamos del resto.",
       "body": "Describe lo que pasa, compara presupuestos de precio fijo de profesionales verificados y paga en la app. Tú confirmas cuando el trabajo está terminado.",
       "cta": "Mira cómo funciona",
       "beats": {
@@ -356,12 +356,12 @@
     "how": {
       "eyebrow": "Cómo funciona",
       "title": "Del problema al trabajo terminado, en una sola app.",
-      "body": "Esto es lo que pasa después de contárselo a Jack."
+      "body": "Esto es lo que pasa después de contárselo a John."
     },
     "features": {
       "describe": {
         "label": "Describe el problema",
-        "title": "Cuéntale a Jack qué pasó.",
+        "title": "Cuéntale a John qué pasó.",
         "body": "Dilo con tus propias palabras y agrega fotos o un video. No necesitas saber a quién llamar."
       },
       "quotes": {
@@ -426,8 +426,8 @@
       "title": "Preguntas, con respuesta.",
       "items": {
         "what": {
-          "question": "¿Qué es Jack Fix It?",
-          "answer": "Una app de servicios para el hogar. Le cuentas a Jack lo que pasa en casa, los profesionales cercanos responden con presupuestos de precio fijo y tú eliges el que te convenga. La reserva, el pago, el chat y el avance del trabajo quedan en la app."
+          "question": "¿Qué es John Got It?",
+          "answer": "Una app de servicios para el hogar. Le cuentas a John lo que pasa en casa, los profesionales cercanos responden con presupuestos de precio fijo y tú eliges el que te convenga. La reserva, el pago, el chat y el avance del trabajo quedan en la app."
         },
         "cost": {
           "question": "¿Cuesta algo pedir presupuestos?",
@@ -439,7 +439,7 @@
         },
         "methods": {
           "question": "¿Cómo puedo pagar?",
-          "answer": "Con tarjeta, o con Apple Pay o Google Pay si tu teléfono los ofrece. El pago se hace en la plataforma segura de Stripe, así que Jack Fix It nunca guarda el número de tu tarjeta."
+          "answer": "Con tarjeta, o con Apple Pay o Google Pay si tu teléfono los ofrece. El pago se hace en la plataforma segura de Stripe, así que John Got It nunca guarda el número de tu tarjeta."
         },
         "verified": {
           "question": "¿Cómo se verifica a los profesionales?",
@@ -464,7 +464,7 @@
       }
     },
     "final": {
-      "title": "Cuéntaselo a Jack. Nosotros nos encargamos del resto.",
+      "title": "Cuéntaselo a John. Nosotros nos encargamos del resto.",
       "body": "La app llega muy pronto a iPhone y Android."
     },
     "footer": {
@@ -473,7 +473,7 @@
       "terms": "Términos de servicio",
       "privacy": "Política de privacidad",
       "sampleData": "Las pantallas de la app en esta página muestran datos de ejemplo.",
-      "rights": "© {{year}} Jack Fix It"
+      "rights": "© {{year}} John Got It"
     },
     "media": {
       "home": "La pantalla de inicio de la app: “¿Qué está pasando en casa?” sobre las categorías de servicio.",
@@ -503,7 +503,7 @@
     "title": "Panel de operaciones",
     "login": {
       "title": "Ingresa al panel",
-      "subtitle": "Para el equipo de Jack Fix It.",
+      "subtitle": "Para el equipo de John Got It.",
       "email": "Correo electrónico",
       "password": "Contraseña",
       "submit": "Ingresar",
@@ -1354,10 +1354,10 @@
   },
   "request": {
     "meta": {
-      "title": "Cuéntale a Jack qué pasó | Jack Fix It",
-      "description": "Cuéntale a Jack qué pasa en casa. Unas preguntas rápidas, sin crear una cuenta."
+      "title": "Cuéntale a John qué pasó | John Got It",
+      "description": "Cuéntale a John qué pasa en casa. Unas preguntas rápidas, sin crear una cuenta."
     },
-    "title": "Cuéntale a Jack qué pasó",
+    "title": "Cuéntale a John qué pasó",
     "intro": "Unas preguntas rápidas. Sin crear una cuenta.",
     "noscript": "Este formulario necesita JavaScript. Actívalo en tu navegador para continuar.",
     "progress": "Paso {{current}} de {{total}}",
@@ -1374,7 +1374,7 @@
     },
     "zip": {
       "title": "¿Dónde es el trabajo?",
-      "support": "Primero, veamos si Jack trabaja en tu zona.",
+      "support": "Primero, veamos si John trabaja en tu zona.",
       "label": "Código postal (ZIP)",
       "hint": "El código postal de 5 dígitos de la casa.",
       "checking": "Revisando tu zona…",
@@ -1386,19 +1386,19 @@
     },
     "waitlist": {
       "title": "Todavía no llegamos a tu zona",
-      "body": "Por ahora Jack trabaja en pocas zonas. Déjanos un correo o un número de celular y te avisamos cuando lleguemos a {{zip}}.",
+      "body": "Por ahora John trabaja en pocas zonas. Déjanos un correo o un número de celular y te avisamos cuando lleguemos a {{zip}}.",
       "emailLabel": "Correo electrónico",
       "phoneLabel": "Número de celular",
       "contactHint": "Con uno basta.",
-      "use": "Solo lo usaremos para avisarte cuando Jack llegue a tu zona.",
+      "use": "Solo lo usaremos para avisarte cuando John llegue a tu zona.",
       "submit": "Avísame",
       "sending": "Enviando…",
       "otherZip": "Probar otro código postal",
       "joinedTitle": "Ya estás en la lista",
-      "joinedBody": "Te avisaremos cuando Jack llegue a {{zip}}.",
-      "outOfArea": "Jack no recibe solicitudes en {{zip}} por ahora, así que esta no se envió. Te avisaremos cuando Jack llegue a {{zip}}.",
+      "joinedBody": "Te avisaremos cuando John llegue a {{zip}}.",
+      "outOfArea": "John no recibe solicitudes en {{zip}} por ahora, así que esta no se envió. Te avisaremos cuando John llegue a {{zip}}.",
       "home": "Volver a la página de inicio",
-      "servedNow": "Buenas noticias: Jack ya trabaja en {{zip}}.",
+      "servedNow": "Buenas noticias: John ya trabaja en {{zip}}.",
       "errors": {
         "missing_contact": "Agrega un correo o un número de celular.",
         "invalid_email": "Escribe un correo como nombre@ejemplo.com.",
@@ -1493,16 +1493,16 @@
       "flexible": "Cualquier día me sirve",
       "yes": "Sí",
       "no": "No",
-      "consent": "Al enviar, aceptas que Jack Fix It te contacte por llamada, mensaje de texto o correo sobre esta solicitud.",
+      "consent": "Al enviar, aceptas que John Got It te contacte por llamada, mensaje de texto o correo sobre esta solicitud.",
       "terms": "Términos",
       "privacy": "Privacidad",
       "honeypot": "Deja este campo vacío",
-      "send": "Enviar a Jack",
+      "send": "Enviar a John",
       "sending": "Enviando…",
       "failedTitle": "Tu solicitud no se envió",
       "errors": {
-        "stale": "Esta página estuvo abierta un buen rato. Tus respuestas siguen aquí: pulsa Enviar a Jack otra vez.",
-        "retry": "No se envió. Pulsa Enviar a Jack otra vez.",
+        "stale": "Esta página estuvo abierta un buen rato. Tus respuestas siguen aquí: pulsa Enviar a John otra vez.",
+        "retry": "No se envió. Pulsa Enviar a John otra vez.",
         "unavailable": "No pudimos enviar tu solicitud ahora. Tus respuestas siguen aquí: inténtalo de nuevo en un momento.",
         "rate_limited": "Demasiadas solicitudes desde aquí en poco tiempo. Espera unos minutos y vuelve a intentarlo.",
         "duplicate": "Puede que ya tengamos esta solicitud. Si no te contactamos, vuelve a cargar la página y envíala otra vez.",
@@ -1512,13 +1512,13 @@
       "rateLimitedHours": "Demasiadas solicitudes por ahora. Vuelve a intentarlo en unas {{hours}}\u00a0h."
     },
     "sent": {
-      "title": "Jack ya está en ello",
+      "title": "John ya está en ello",
       "code": "Tu número de solicitud: {{code}}",
       "next": "Alguien de nuestro equipo te llamará o te escribirá sobre ella.",
-      "invite": "Ahora, descarga la app de Jack Fix It y crea tu cuenta. Cuando hablemos, te ayudaremos a seguir con tu solicitud allí.",
+      "invite": "Ahora, descarga la app de John Got It y crea tu cuenta. Cuando hablemos, te ayudaremos a seguir con tu solicitud allí.",
       "appStore": "App Store",
       "playStore": "Google Play",
-      "seeApp": "Ver la app de Jack Fix It",
+      "seeApp": "Ver la app de John Got It",
       "home": "Volver a la página de inicio"
     },
     "notices": {

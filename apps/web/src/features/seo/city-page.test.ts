@@ -67,13 +67,13 @@ describe("a service's page for one city", () => {
     expect(html).toMatch(/<h1 id="hero-title"[^>]*>Painting in Fort Lauderdale, FL<\/h1>/);
     expect(html).toContain("Rooms, walls and touch-ups.");
     expect(html).toContain("Which jobs do you need?");
-    expect(html).toMatch(/<h2 id="areas-title"[^>]*>Where Jack works in Fort Lauderdale, FL<\/h2>/);
+    expect(html).toMatch(/<h2 id="areas-title"[^>]*>Where John works in Fort Lauderdale, FL<\/h2>/);
     expect(html).toMatch(/aria-label="ZIP codes served"[^>]*>.*33301.*33304.*<\/ul>/s);
     expect(html).not.toContain("33019"); // Hollywood's ZIP stays on Hollywood's page
     expect(html).toContain("Painting in other cities");
     expect(html).toMatch(/<a[^>]*href="\/hollywood\/painting"[^>]*>Hollywood, FL<\/a>/);
     // The other services, in this city.
-    expect(html).toContain("More from Jack in Fort Lauderdale, FL");
+    expect(html).toContain("More from John in Fort Lauderdale, FL");
     expect(hrefs(html)).toEqual(
       expect.arrayContaining(["/fort-lauderdale/house-cleaning", "/fort-lauderdale/pool-care"]),
     );
@@ -87,7 +87,7 @@ describe("a service's page for one city", () => {
 
     expect(html).toMatch(/^<div lang="es">/);
     expect(html).toMatch(/<h1[^>]*>Limpieza del hogar en Hollywood, FL<\/h1>/);
-    expect(html).toContain("Dónde trabaja Jack en Hollywood, FL");
+    expect(html).toContain("Dónde trabaja John en Hollywood, FL");
     expect(html).toMatch(
       /<a[^>]*href="\/es\/fort-lauderdale\/house-cleaning"[^>]*>Fort Lauderdale, FL<\/a>/,
     );
@@ -169,9 +169,9 @@ describe("a city page's metadata", () => {
     const en = await serviceMetadata("en", "painting", "fort-lauderdale");
     const es = await serviceMetadata("es", "painting", "fort-lauderdale");
 
-    expect(en.title).toBe("Painting in Fort Lauderdale, FL | Jack Fix It");
+    expect(en.title).toBe("Painting in Fort Lauderdale, FL | John Got It");
     expect(en.description).toBe(
-      "Painting in Fort Lauderdale, FL: tell Jack about the job, compare fixed-price quotes from pros near you and follow it in the app.",
+      "Painting in Fort Lauderdale, FL: tell John about the job, compare fixed-price quotes from pros near you and follow it in the app.",
     );
     expect(en.alternates).toEqual({
       canonical: "/fort-lauderdale/painting",
@@ -181,7 +181,7 @@ describe("a city page's metadata", () => {
         "x-default": "/fort-lauderdale/painting",
       },
     });
-    expect(es.title).toBe("Pintura en Fort Lauderdale, FL | Jack Fix It");
+    expect(es.title).toBe("Pintura en Fort Lauderdale, FL | John Got It");
     expect(es.alternates?.canonical).toBe("/es/fort-lauderdale/painting");
   });
 
@@ -226,7 +226,7 @@ describe("the city routes", () => {
       city: "hollywood",
     });
     expect((await esRoute.generateMetadata({ params })).title).toBe(
-      "Pintura en Hollywood, FL | Jack Fix It",
+      "Pintura en Hollywood, FL | John Got It",
     );
   });
 });
