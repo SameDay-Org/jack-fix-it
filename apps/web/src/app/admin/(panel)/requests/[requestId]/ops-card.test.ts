@@ -372,6 +372,41 @@ describe("the request's answers (#546)", () => {
     expect(pairs).toContainEqual(["rooms", "kitchen, attic"]);
   });
 
+  it("keep a long question's answer in its own column, wrapping, at a phone's width (#593)", async () => {
+    const question = "Enumera todos los trabajos pequeños que necesitas, uno por línea";
+    const answer = "Colgar dos cuadros en la sala\nCambiar la manija de la puerta del baño";
+    const categories = [
+      {
+        ...CATEGORIES[0],
+        intake_questions: [
+          {
+            key: "jobs_list",
+            type: "text",
+            required: true,
+            labels: { en: "List every small job you need, one per line", es: question },
+            max_length: 500,
+          },
+        ],
+      },
+    ];
+    api(
+      card({ status: "quote_ready", intake_answers: { jobs_list: answer } }),
+      "agent",
+      "es",
+      categories,
+    );
+
+    const html = decoded(await markup());
+    const list = /<dl class="([^"]*)">(?:(?!<\/dl>)[\s\S])*?<dt[^>]*>Enumera/.exec(html);
+
+    expect(facts(html)).toContainEqual([question, answer]);
+    // The question's column fits its text up to 40% of the card, then wraps; an `auto` column
+    // took the whole row and left the answer one letter wide.
+    expect(list?.[1]).toContain("grid-cols-[fit-content(40%)_minmax(0,1fr)]");
+    expect(html).toMatch(/<dt class="[^"]*break-words[^"]*">Enumera/);
+    expect(html).toMatch(/<dd class="break-words whitespace-pre-wrap">Colgar dos cuadros/);
+  });
+
   it("are in the request's own category's words, never another's with the same key", async () => {
     // As in the demo seed: several categories ask "jobs", each with its own words and options.
     const jobs = (en: string, options: [string, string][]) => [
