@@ -10,6 +10,9 @@ staff may choose from.
 - held (`info_requested_at`, #82: the BDC asked the customer for more information): nothing.
   A run queued before the hold (the request's first dispatch, the sweep, a kick) ends here;
   staff release it (resume, a status change, an assignment) and the sweep takes it then;
+- a guest's (#86: made on the web without an account): nothing, ever, in the MVP. No pro could
+  have their quote accepted: the BDC calls the customer, who requests again in the app. The
+  sweep leaves these out, and a manual assignment refuses them;
 - received without a category: to reviewing (SYSTEM), for the BDC to classify; no dispatch;
 - received or reviewing with a category: the eligible pros, best ranked first, up to
   `dispatch_max_pros` (settings); one request_dispatches row each and the move to finding_pro,
@@ -86,6 +89,7 @@ class DispatchOutcome(StrEnum):
     NOT_DISPATCHABLE = "not_dispatchable"
     UNKNOWN_REQUEST = "unknown_request"
     HELD = "held"  # the BDC holds it (#82): nothing until staff release it
+    NO_ACCOUNT = "no_account"  # a guest's web request (#86): never dispatched in the MVP
 
 
 class AssignRefusal(StrEnum):
@@ -93,6 +97,7 @@ class AssignRefusal(StrEnum):
     order. Nothing was written."""
 
     UNKNOWN_REQUEST = "unknown_request"
+    NO_ACCOUNT = "no_account"  # a guest's web request (#86): no quote could be accepted
     NOT_ASSIGNABLE = "not_assignable"  # accepted, expired or cancelled
     NOT_CLASSIFIED = "not_classified"  # no category to match a pro against
     UNKNOWN_PRO = "unknown_pro"  # no such profile, or its account is not an active pro
@@ -228,6 +233,8 @@ class DispatchService:
         if request.info_requested_at is not None:
             # Read under the lock: a hold committed after this run was queued still stops it.
             return self._done(DispatchOutcome.HELD, extra)
+        if await UserService(self._session).is_guest(request.customer_id):
+            return self._done(DispatchOutcome.NO_ACCOUNT, extra)
         if await self._dispatches.exists_for(request.id):
             return self._done(DispatchOutcome.ALREADY_DISPATCHED, extra)
         if request.status is RequestStatus.RECEIVED and request.category_id is None:
@@ -280,6 +287,8 @@ class DispatchService:
         request = await self._requests.lock(request_id)
         if request is None:
             return AssignRefusal.UNKNOWN_REQUEST
+        if await UserService(self._session).is_guest(request.customer_id):
+            return AssignRefusal.NO_ACCOUNT
         if request.status not in ASSIGNABLE:
             return AssignRefusal.NOT_ASSIGNABLE
         if request.category_id is None:

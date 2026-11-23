@@ -3,6 +3,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.modules.users.schemas import deleted_party
+
 
 class _Out(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -80,6 +82,7 @@ class ReceiptOut(_Out):
     pro_name: str | None = Field(
         examples=["Dan R."], description="The pro's public name; null when none can be shown."
     )
+    pro_deleted: bool = deleted_party("pro")
     scheduled_start_at: datetime
     completed_at: datetime | None = Field(description="When the pro marked the job done.")
     address: ReceiptAddress | None

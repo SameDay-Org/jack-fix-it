@@ -516,6 +516,11 @@
         "unavailable": "We couldn't sign you in right now. Try again in a moment."
       }
     },
+    "busy": {
+      "title": "The panel is busy right now",
+      "body": "You're still signed in; try again in a moment.",
+      "retry": "Try again"
+    },
     "nav": {
       "label": "Panel",
       "home": "Home",
@@ -749,6 +754,8 @@
       "request": {
         "title": "Request",
         "preferred": "Preferred day",
+        "yes": "Yes",
+        "no": "No",
         "period": {
           "morning": "Morning",
           "afternoon": "Afternoon",
@@ -1359,6 +1366,12 @@
     "optional": "{{label}} (optional)",
     "counter": "{{length}} / {{max}}",
     "check": "Some answers need a look:",
+    "loading": "Loading…",
+    "loadFailed": {
+      "title": "This step didn't load",
+      "body": "Check your connection, then try again. Your answers are kept.",
+      "retry": "Try again"
+    },
     "zip": {
       "title": "Where's the job?",
       "support": "First, let's check that Jack works in your area.",
@@ -1383,6 +1396,7 @@
       "otherZip": "Try another ZIP code",
       "joinedTitle": "You're on the list",
       "joinedBody": "We'll let you know when Jack comes to {{zip}}.",
+      "outOfArea": "Jack isn't taking requests in {{zip}} right now, so this one wasn't sent. We'll let you know when Jack comes to {{zip}}.",
       "home": "Back to the home page",
       "servedNow": "Good news: Jack works in {{zip}} now.",
       "errors": {
@@ -1410,6 +1424,106 @@
       "tooFew": "Pick at least {{count}}.",
       "tooMany": "Pick up to {{count}}.",
       "pickUpTo": "Pick up to {{count}}."
+    },
+    "where": {
+      "title": "What's the address?",
+      "support": "We use it to find pros who work in your area.",
+      "line1": "Street address",
+      "line2": "Apartment, suite or unit",
+      "city": "City",
+      "state": "State",
+      "stateHint": "Two letters.",
+      "zip": "ZIP code: {{zip}}",
+      "changeZip": "Change the ZIP code",
+      "errors": {
+        "line1": "Enter the street address.",
+        "city": "Enter the city.",
+        "state": "Enter the state's 2-letter code."
+      }
+    },
+    "when": {
+      "title": "When works for you?",
+      "support": "Pick a day, or leave it open: each pro proposes a start time with their quote.",
+      "day": "Day",
+      "dayHint": "Leave it empty if any day works.",
+      "period": "Time of day",
+      "periods": {
+        "morning": "Morning",
+        "afternoon": "Afternoon",
+        "evening": "Evening",
+        "flexible": "Flexible"
+      },
+      "errors": {
+        "day": "Pick today or a later day."
+      }
+    },
+    "contact": {
+      "title": "How do we reach you?",
+      "support": "We use it only to talk with you about this request.",
+      "firstName": "First name",
+      "phone": "Mobile number",
+      "phoneHint": "A US number, 10 digits.",
+      "email": "Email",
+      "errors": {
+        "firstName": "Enter your first name, in letters.",
+        "phone": "Enter a 10-digit mobile number.",
+        "email": "Enter an email like name@example.com."
+      }
+    },
+    "review": {
+      "title": "Check your request",
+      "support": "Make sure it's all right before you send it.",
+      "sections": {
+        "description": "What's going on",
+        "service": "Service",
+        "answers": "Your answers",
+        "address": "Address",
+        "when": "When",
+        "contact": "How we reach you"
+      },
+      "edit": {
+        "description": "Edit what's going on",
+        "answers": "Edit your answers",
+        "address": "Edit the address",
+        "when": "Edit the day",
+        "contact": "Edit how we reach you"
+      },
+      "editLabel": "Edit",
+      "notSure": "Not sure",
+      "flexible": "Any day works",
+      "yes": "Yes",
+      "no": "No",
+      "consent": "By sending, you agree that Jack Fix It may contact you by call, text or email about this request.",
+      "terms": "Terms",
+      "privacy": "Privacy",
+      "honeypot": "Leave this field empty",
+      "send": "Send to Jack",
+      "sending": "Sending…",
+      "failedTitle": "Your request didn't go through",
+      "errors": {
+        "stale": "This page was open for a while. Your answers are still here: press Send to Jack again.",
+        "retry": "That didn't go through. Press Send to Jack again.",
+        "unavailable": "We couldn't send your request right now. Your answers are still here: try again in a moment.",
+        "rate_limited": "Too many requests from here in a short time. Wait a few minutes, then try again.",
+        "duplicate": "We may already have this request. If we don't reach you, reload the page and send it again.",
+        "invalid": "Some answers didn't go through. Look them over, then send again."
+      },
+      "rateLimitedIn": "Too many requests from here in a short time. Try again in {{minutes}}\u00a0min.",
+      "rateLimitedHours": "Too many requests for now. Try again in about {{hours}}\u00a0h."
+    },
+    "sent": {
+      "title": "Jack is on it",
+      "code": "Your request number: {{code}}",
+      "next": "Someone from our team will call or text you about it.",
+      "invite": "Next, get the Jack Fix It app and create your account. When we talk, we'll help you go on with your request there.",
+      "appStore": "App Store",
+      "playStore": "Google Play",
+      "seeApp": "See the Jack Fix It app",
+      "home": "Back to the home page"
+    },
+    "notices": {
+      "invalidCategory": "This service isn't available right now. Pick another one, or Not sure.",
+      "invalidAnswers": "The questions for this service changed. Check your answers, then continue."
     }
   }
 }

@@ -13,6 +13,9 @@ const DISMISSED = "1";
 // The push token this device last sent the API, and whether an account may still hold it after a
 // removal that never completed (#334). The device's, not an account's: it stays across sign-outs.
 const PUSH_TOKEN_KEY = "jackfixit.notifications.pushToken";
+// The saved language of the account signed in on this device (#378), for the next launch to start
+// in. Not a secret, and an account's: it is removed once nobody is signed in.
+const LANGUAGE_HINT_KEY = "jackfixit.session.languageHint";
 const WRITE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
 };
@@ -80,6 +83,30 @@ export const onboardingMarkerStorage = {
 
   clear: (): Promise<void> =>
     serialized(() => SecureStore.deleteItemAsync(ONBOARDING_USER_KEY).catch(() => undefined)),
+};
+
+/**
+ * The language the next launch starts in (#378): the saved language of the account signed in on
+ * this device, so the launch intro speaks it while the session is restored. Read once and
+ * synchronously, as the app starts, so no frame waits for it; written in order with the other
+ * entries. A failed read or write only means a launch in the device's language, as before.
+ */
+export const languageHintStorage = {
+  readNow: (): string | null => {
+    try {
+      return SecureStore.getItem(LANGUAGE_HINT_KEY);
+    } catch {
+      return null;
+    }
+  },
+
+  /** Keeps `language` for the next launch; `null` removes it. Never rejects. */
+  write: (language: string | null): Promise<void> =>
+    serialized(() =>
+      language === null
+        ? SecureStore.deleteItemAsync(LANGUAGE_HINT_KEY)
+        : SecureStore.setItemAsync(LANGUAGE_HINT_KEY, language, WRITE_OPTIONS),
+    ).catch(() => undefined),
 };
 
 /**

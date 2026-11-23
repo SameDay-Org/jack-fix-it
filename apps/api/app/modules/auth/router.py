@@ -13,6 +13,7 @@ from app.modules.auth.dependencies import (
     limit_password_forgot,
     limit_password_reset,
     limit_phone_send,
+    limit_phone_send_daily,
     limit_phone_verify,
     limit_refresh,
     limit_register,
@@ -156,7 +157,7 @@ async def logout(
 async def me(user: CurrentUser, auth: Annotated[AuthService, Depends(get_auth_service)]) -> UserOut:
     """The caller's own account, with the ID card fields (#250): the public code, the home
     city and state, the ID photo as a signed URL and the member-since date."""
-    return auth.present(user, auth.prepare_photo(user))
+    return auth.present(user, auth.prepare_photo(user), await auth.terms_required(user))
 
 
 @router.patch(
@@ -203,14 +204,19 @@ _PHONE_UNAVAILABLE = _error("verification_unavailable: the SMS provider is unava
     status_code=status.HTTP_202_ACCEPTED,
     response_class=Response,
     summary="Send a phone verification code",
-    dependencies=[Depends(limit_phone_send)],
+    dependencies=[Depends(limit_phone_send), Depends(limit_phone_send_daily)],
     responses={
         status.HTTP_202_ACCEPTED: {"description": "Accepted; a code is on its way by SMS."},
         status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
         status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
-            "validation_error: not an E.164 number, or a country code that is not allowed."
+            "validation_error: not an E.164 number, or a country code or number range that is "
+            "not allowed."
         ),
         **_RATE_LIMITED,
+        status.HTTP_503_SERVICE_UNAVAILABLE: _error(
+            "verification_unavailable: the daily count of codes cannot be taken; nothing was "
+            "sent, retry later."
+        ),
     },
 )
 async def send_phone_code(
@@ -255,7 +261,11 @@ async def verify_phone(
     # verifier has consumed the code and the number is committed (#290). Verifying a number
     # never changes the photo, so the prepared one presents the verified account.
     photo = auth.prepare_photo(user)
-    return auth.present(await phones.verify_code(user, data.phone, data.code), photo)
+    # Read first too: the role, which decides it, never changes here.
+    terms_required = await auth.terms_required(user)
+    return auth.present(
+        await phones.verify_code(user, data.phone, data.code), photo, terms_required
+    )
 
 
 @router.post(

@@ -39,7 +39,8 @@ class JobMessage(IdTimestampsMixin, Base):
     `body` is the text as stored and shown, already redacted (app.redaction) when it was
     written. When something was masked, the original as typed is kept for staff only (#72):
     encrypted (app.crypto; the message id is its associated data), with the id of its key, and
-    cleared by the worker once `original_expires_at` passes. Without a configured key no
+    cleared by the worker once `original_expires_at` passes, or when the sender deletes their
+    account (#97, chat.erasure). Without a configured key no
     original is kept. The three original_* columns are set or cleared together.
     `created_at` is set by the service under the job's lock, so messages of a job are ordered
     by (created_at, id) in the order they committed.

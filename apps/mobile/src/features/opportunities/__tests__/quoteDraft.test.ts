@@ -41,16 +41,27 @@ describe("defaultStartAt", () => {
 
   it("is the next whole hour without a preferred day, also on the hour", () => {
     expect(defaultStartAt(null, NOW)).toBe(local(10, 28, 11));
-    expect(defaultStartAt(null, local(10, 28, 21))).toBe(local(10, 28, 22));
+    expect(defaultStartAt(null, local(10, 28, 16, 59))).toBe(local(10, 28, 17));
     expect(defaultStartAt(null, local(10, 28, 8, 5))).toBe(local(10, 28, 9));
   });
 
   it("never opens in the small hours: those move to 9:00 AM that morning (#475)", () => {
     expect(defaultStartAt(null, local(10, 28, 1, 6))).toBe(local(10, 28, 9));
-    expect(defaultStartAt(null, local(10, 28, 23, 40))).toBe(local(10, 29, 9));
     expect(defaultStartAt(null, local(10, 28, 0))).toBe(local(10, 28, 9));
     // A preferred day already past at night: the same morning rule.
     expect(defaultStartAt("2026-10-27", local(10, 28, 2, 30))).toBe(local(10, 28, 9));
+  });
+
+  it("never opens in the evening: a next hour past 6:00 PM moves to 9:00 AM the next day (#475)", () => {
+    // The last daytime start the form proposes on its own.
+    expect(defaultStartAt(null, local(10, 28, 17, 5))).toBe(local(10, 28, 18));
+    expect(defaultStartAt(null, local(10, 28, 18, 5))).toBe(local(10, 29, 9));
+    expect(defaultStartAt(null, local(10, 28, 22, 22))).toBe(local(10, 29, 9));
+    expect(defaultStartAt(null, local(10, 28, 23, 40))).toBe(local(10, 29, 9));
+    // Across a month's end.
+    expect(defaultStartAt(null, local(10, 31, 21))).toBe(local(11, 1, 9));
+    // A preferred day already past, written in the evening: the same next-morning rule.
+    expect(defaultStartAt("2026-10-27", local(10, 28, 20))).toBe(local(10, 29, 9));
   });
 });
 

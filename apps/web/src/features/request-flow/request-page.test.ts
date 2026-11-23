@@ -1,3 +1,7 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,10 +12,29 @@ import es from "@/i18n/locales/es.json";
 import { getT } from "@/i18n/server";
 import { routeFetch } from "@/lib/test-helpers";
 
+import { checkFormToken } from "@/lib/public-form/form-token";
+
 import { requestFlowText } from "./copy";
 import { requestMetadata } from "./metadata";
+import type { RequestFlowProps } from "./request-flow";
 import { preselectedCategoryId, RequestPage } from "./request-page";
 import type { RequestCategory } from "./server";
+
+/** What the page handed the flow the last time it showed it. */
+const handed = vi.hoisted(() => ({ props: null as RequestFlowProps | null }));
+vi.mock("./request-flow", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./request-flow")>();
+  const { createElement } = await import("react");
+  return {
+    ...actual,
+    RequestFlow: (props: RequestFlowProps) => {
+      handed.props = props;
+      return createElement(actual.RequestFlow, props);
+    },
+  };
+});
+
+const FORM_SECRET = "form-secret-for-tests-0123456789abcdef";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -29,6 +52,10 @@ beforeEach(() => {
   vi.stubEnv("API_TIMEOUT_MS", "1000");
   vi.stubEnv("CONTACT_EMAIL", "");
   vi.stubEnv("REQUEST_FLOW_ENABLED", "true");
+  vi.stubEnv("REQUEST_FORM_SECRET", FORM_SECRET);
+  vi.stubEnv("APP_STORE_URL", "");
+  vi.stubEnv("PLAY_STORE_URL", "");
+  vi.stubEnv("WEB_SERVICE_KEY", "web-service-key-for-tests-0123456789");
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockImplementation(routeFetch({ "/v1/categories": () => Response.json([HANDYMAN]) }));
 });
@@ -79,6 +106,26 @@ describe("the request page (#86)", () => {
     },
   );
 
+  it("hands the flow the campaign of its address, a token for this form, the stores once set", async () => {
+    await page("en", { utm_source: "google", utm_campaign: "launch", service: "x" });
+    expect(handed.props?.utm).toEqual({ source: "google", campaign: "launch" });
+    // A token for the request form (not the interest form's), old enough once the visitor sends.
+    const timings = { minSeconds: 3, maxAgeSeconds: 3600 };
+    const later = Date.now() + 60_000;
+    const token = handed.props?.formToken;
+    expect(checkFormToken(token, FORM_SECRET, "request", later, timings).ok).toBe(true);
+    expect(handed.props?.storeLinks).toBeNull();
+
+    vi.stubEnv("APP_STORE_URL", "https://apps.apple.com/app/id100");
+    vi.stubEnv("PLAY_STORE_URL", "https://play.google.com/store/apps/details?id=x");
+    await page("en");
+    expect(handed.props?.utm).toBeNull();
+    expect(handed.props?.storeLinks).toEqual({
+      appStore: "https://apps.apple.com/app/id100",
+      playStore: "https://play.google.com/store/apps/details?id=x",
+    });
+  });
+
   it("reads the services once for every visitor (cached for an hour), not once each", async () => {
     await page("en");
     const [url, init] = fetchMock.mock.calls[0]!;
@@ -87,6 +134,16 @@ describe("the request page (#86)", () => {
       revalidate: 3600,
     });
   });
+
+  it.each(["REQUEST_FORM_SECRET", "WEB_SERVICE_KEY"])(
+    "fails without %s: a form that cannot be sent is never shown",
+    async (name) => {
+      for (const value of ["", "too-short"]) {
+        vi.stubEnv(name, value);
+        await expect(RequestPage({ locale: "en", search: {} }), value).rejects.toThrow(name);
+      }
+    },
+  );
 
   it("still opens when the services cannot be read", async () => {
     fetchMock.mockRejectedValue(new TypeError("fetch failed"));
@@ -147,4 +204,38 @@ describe("requestFlowText", () => {
       }
     },
   );
+});
+
+describe("the browser's side of the flow", () => {
+  // The secrets and the API client stay on the server: a client component imports none of the
+  // server modules (a type import is erased and allowed).
+  const here = dirname(fileURLToPath(import.meta.url));
+  const SERVER_ONLY = [
+    "./actions",
+    "./api-client",
+    "./config",
+    "./send-body",
+    "./server",
+    "@/lib/public-form/form-token",
+    "@/lib/public-form/settings",
+    "@/lib/public-form/visitor",
+  ];
+
+  it("never imports a server module", () => {
+    const clientFiles = readdirSync(here).filter(
+      (file) =>
+        /\.tsx?$/.test(file) &&
+        !file.endsWith(".test.ts") &&
+        readFileSync(join(here, file), "utf8").startsWith('"use client";'),
+    );
+    expect(clientFiles.length).toBeGreaterThan(5);
+    for (const file of clientFiles) {
+      const source = readFileSync(join(here, file), "utf8");
+      const imports = [...source.matchAll(/^import (?!type )[^;]*? from "([^"]+)";/gm)].map(
+        (match) => match[1],
+      );
+      for (const name of imports)
+        expect(SERVER_ONLY, `${file} imports ${name}`).not.toContain(name);
+    }
+  });
 });

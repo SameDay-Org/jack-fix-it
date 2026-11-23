@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { descriptionFits, emailInput, phoneInput, zipInput } from "./input";
+import {
+  dayInput,
+  descriptionFits,
+  emailInput,
+  firstDay,
+  lineInput,
+  localToday,
+  nameInput,
+  phoneInput,
+  stateInput,
+  utcToday,
+  zipInput,
+} from "./input";
 
 describe("zipInput", () => {
   it.each([
@@ -68,5 +80,52 @@ describe("descriptionFits", () => {
     expect(descriptionFits("   ")).toBe(false);
     expect(descriptionFits(` ${"a".repeat(2000)} `)).toBe(true);
     expect(descriptionFits("a".repeat(2001))).toBe(false);
+  });
+});
+
+describe("the address, the day and the names (W1b)", () => {
+  it("nameInput: letters with their accents, spaces, hyphens, apostrophes, periods", () => {
+    expect(nameInput("  María   José ")).toBe("María José");
+    for (const name of ["O'Neil", "Pérez-Gómez", "St. John", "D\u2019Angelo", "Nguyễn"]) {
+      expect(nameInput(name), name).toBe(name);
+    }
+    for (const name of [
+      "",
+      "  ",
+      "Ana 954",
+      "ana@example.com",
+      "-",
+      "<b>Ana</b>",
+      "a".repeat(61),
+      7,
+    ]) {
+      expect(nameInput(name), String(name)).toBeNull();
+    }
+  });
+
+  it("lineInput and stateInput", () => {
+    expect(lineInput(" 100 Las Olas Blvd ", 255)).toBe("100 Las Olas Blvd");
+    expect(lineInput("", 255)).toBeNull();
+    expect(lineInput("a".repeat(256), 255)).toBeNull();
+    expect(lineInput("line\u0000", 255)).toBeNull();
+    expect(stateInput(" fl ")).toBe("FL");
+    for (const state of ["F", "FLA", "F1", "Florida", ""])
+      expect(stateInput(state), state).toBeNull();
+  });
+
+  it("firstDay: the later of the visitor's today and the UTC one", () => {
+    // 9 pm in Florida is already tomorrow in UTC: the API would refuse the local today.
+    const evening = new Date("2026-11-20T02:00:00Z");
+    expect(utcToday(evening)).toBe("2026-11-20");
+    expect(firstDay(evening) >= utcToday(evening)).toBe(true);
+    expect(firstDay(evening) >= localToday(evening)).toBe(true);
+  });
+
+  it("dayInput: a real day, from the first one on", () => {
+    expect(dayInput("2026-11-20", "2026-11-20")).toBe("2026-11-20");
+    expect(dayInput("2026-11-19", "2026-11-20")).toBeNull();
+    for (const day of ["2026-02-30", "2026-13-01", "20261120", "tomorrow", "", 20261120]) {
+      expect(dayInput(day, "2026-01-01"), String(day)).toBeNull();
+    }
   });
 });

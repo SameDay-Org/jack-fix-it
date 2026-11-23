@@ -35,6 +35,11 @@ export type ButtonProps = {
   disabled?: boolean;
   /** Shows a spinner and ignores presses; the width does not change. */
   loading?: boolean;
+  /**
+   * Lets the label wrap onto more lines: for a full-width choice whose label can outgrow the width
+   * at a large font size (a sheet's choices, #441). Off by default: a label is one line elsewhere.
+   */
+  wrap?: boolean;
   /** Layout-only classes (margins, width). */
   className?: string;
   /** The pressable host, to move screen-reader focus onto the button. */
@@ -106,6 +111,7 @@ export function Button({
   size = "md",
   disabled = false,
   loading = false,
+  wrap = false,
   className,
   ref,
   testID,
@@ -137,13 +143,16 @@ export function Button({
         classes.base,
         forState(classes.fill, pressed),
         glyph ? ROUND[size] : SIZE[size],
+        // A wrapped label keeps clear of the pill's rounded ends.
+        wrap && "py-3",
         disabled && "opacity-50",
         className,
       )}
     >
       {/* The label stays mounted, invisible, while loading so the width does not jump. A button label
           is one line by contract: without `numberOfLines`, Android can wrap a label that measures as
-          one line by a fraction of a pixel and hide its second half. */}
+          one line by a fraction of a pixel and hide its second half. `wrap` lifts it, shrinking the label
+          to the button's width so it breaks between words. */}
       {glyph ? (
         <View className={cx(loading && "opacity-0")}>
           <ControlIcon
@@ -159,11 +168,12 @@ export function Button({
         </View>
       ) : (
         <Text
-          numberOfLines={1}
+          numberOfLines={wrap ? undefined : 1}
           className={cx(
             "text-center text-headline",
             forState(classes.label, pressed),
             loading && "opacity-0",
+            wrap && "shrink",
             // Beside a badge, the label gives way first (cut short) so the count always shows.
             badge > 0 && "shrink",
           )}

@@ -5,7 +5,7 @@ import uuid
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
-from sqlalchemy import BigInteger, Connection, Float, Integer, inspect, select, text
+from sqlalchemy import BigInteger, Connection, Float, Integer, func, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -100,8 +100,15 @@ async def test_user_role_and_status_reject_unknown_values(
 
 async def test_enum_checks_accept_every_value(db_session: AsyncSession) -> None:
     # The migration's enum CHECKs are written by hand; every StrEnum member must pass them.
+    # A deleted account carries its deletion time (ck_users_deleted_at_status, #97).
     users = [
-        User(email=f"{role}.{status}@x.com", password_hash=FAKE_HASH, role=role, status=status)
+        User(
+            email=f"{role}.{status}@x.com",
+            password_hash=FAKE_HASH,
+            role=role,
+            status=status,
+            deleted_at=func.now() if status is UserStatus.DELETED else None,
+        )
         for role in UserRole
         for status in UserStatus
     ]

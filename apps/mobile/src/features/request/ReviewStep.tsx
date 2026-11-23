@@ -18,10 +18,10 @@ import {
   savedAddressBody,
   typedAddressBody,
 } from "./address";
-import { answerText } from "./answerText";
+import { AnswerList } from "./AnswerList";
 import { formatLongDay, isPastDay } from "./dates";
 import { withPeriod } from "./period";
-import { refuseStep, useRequestDraft, type RequestDraft, type StepRefusal } from "./requestDraft";
+import { refuseStep, useRequestDraft, type StepRefusal } from "./requestDraft";
 import { useRequestFlowContext } from "./RequestFlowLayout";
 import { requestBody } from "./send";
 import { holdsSendKey } from "./sendKey";
@@ -139,7 +139,12 @@ export function ReviewStep({ category, steps }: ReviewStepProps) {
           onEdit={() => router.dismissTo(stepHref("questions", steps))}
           testID="review-answers"
         >
-          <AnswerList category={category} draft={draft} locale={locale} />
+          <AnswerList
+            questions={category.intake_questions}
+            answers={draft.answers}
+            locale={locale}
+            testIDPrefix="review-answer"
+          />
         </ReviewSection>
       ) : null}
       <ReviewSection
@@ -217,27 +222,6 @@ function ReviewSection({ title, editLabel, onEdit, locked, children, testID }: R
         />
       </View>
       {children}
-    </View>
-  );
-}
-
-type AnswerListProps = { category: Category; draft: RequestDraft; locale: string };
-
-/** Each answered question as "label: answer"; an optional one left empty is not listed. */
-function AnswerList({ category, draft, locale }: AnswerListProps) {
-  const { t } = useTranslation();
-  const rows = category.intake_questions.flatMap((question) => {
-    const text = answerText(t, question, draft.answers[question.key], locale);
-    return text === null ? [] : [{ key: question.key, label: question.labels, text }];
-  });
-  return (
-    <View className="gap-3">
-      {rows.map((row) => (
-        <View key={row.key} className="gap-0.5" testID={`review-answer-${row.key}`}>
-          <Text className="text-callout text-gray-500">{row.label[locale] ?? row.label.en}</Text>
-          <Text className="text-body text-navy-900">{row.text}</Text>
-        </View>
-      ))}
     </View>
   );
 }

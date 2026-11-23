@@ -2,7 +2,15 @@ import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 import { router, useIsFocused, useLocalSearchParams, type Href } from "expo-router";
 import { useEffect, useRef, useState, type ComponentRef } from "react";
 import { useTranslation } from "react-i18next";
-import { RefreshControl, ScrollView, Text, useWindowDimensions, View } from "react-native";
+import {
+  KeyboardAvoidingView,
+  RefreshControl,
+  ScrollView,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { apiGet, SessionExpiredError, useSessionGeneration } from "@/api";
 import { Button, Milestones, Screen, showToast, Skeleton, TextSkeleton } from "@/components/ui";
@@ -99,6 +107,7 @@ export function JobScreen() {
   // A new layout opens at its top: the offset the last one was read at means nothing in it, and
   // the confirmed seal grows where the customer can see it.
   const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
+  const { top } = useSafeAreaInsets();
   const layout = data === undefined ? null : layoutOf(jobPhase(data));
   useEffect(() => {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
@@ -117,60 +126,67 @@ export function JobScreen() {
 
   return (
     <Screen bar="hero" edges={[]} testID="job-screen">
-      <ScrollView
-        ref={scrollRef}
-        className="flex-1"
-        contentContainerClassName="flex-grow"
-        refreshControl={
-          valid ? (
-            <RefreshControl
-              refreshing={pulling}
-              onRefresh={() => void refresh()}
-              tintColor={tokens.colors.white}
-              colors={[tokens.colors["navy-900"]]}
+      {/* The custom tip (#273) is a field on this screen: the content makes room for the
+          keyboard (padding on both platforms, edge to edge on Android; the offset adds back the
+          status bar `Screen` sits under), and a tap on a button with the keyboard up acts. */}
+      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={top} className="flex-1">
+        <ScrollView
+          ref={scrollRef}
+          className="flex-1"
+          contentContainerClassName="flex-grow"
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          refreshControl={
+            valid ? (
+              <RefreshControl
+                refreshing={pulling}
+                onRefresh={() => void refresh()}
+                tintColor={tokens.colors.white}
+                colors={[tokens.colors["navy-900"]]}
+              />
+            ) : undefined
+          }
+          testID="job-scroll"
+        >
+          {data ? (
+            <JobView
+              job={data}
+              requestId={id}
+              updatedAt={dataUpdatedAt}
+              refetch={refetch}
+              push={push}
             />
-          ) : undefined
-        }
-        testID="job-scroll"
-      >
-        {data ? (
-          <JobView
-            job={data}
-            requestId={id}
-            updatedAt={dataUpdatedAt}
-            refetch={refetch}
-            push={push}
-          />
-        ) : !valid ? (
-          <JobState
-            map="bare"
-            title={t("jobs.notFound.title")}
-            body={t("jobs.notFound.body")}
-            action={t("jobs.notFound.home")}
-            onAction={() => router.dismissTo("/")}
-            testID="job-not-found"
-          />
-        ) : isNoJobYet(shownError) ? (
-          <JobState
-            map="route"
-            title={t("jobs.booking.title")}
-            body={t("jobs.booking.body")}
-            testID="job-booking"
-          />
-        ) : shownError ? (
-          <JobState
-            map="bare"
-            title={t("jobs.error.title")}
-            body={t("jobs.error.body")}
-            action={t("jobs.error.retry")}
-            onAction={() => void refetch()}
-            busy={isFetching}
-            testID="job-error"
-          />
-        ) : (
-          <JobSkeleton />
-        )}
-      </ScrollView>
+          ) : !valid ? (
+            <JobState
+              map="bare"
+              title={t("jobs.notFound.title")}
+              body={t("jobs.notFound.body")}
+              action={t("jobs.notFound.home")}
+              onAction={() => router.dismissTo("/")}
+              testID="job-not-found"
+            />
+          ) : isNoJobYet(shownError) ? (
+            <JobState
+              map="route"
+              title={t("jobs.booking.title")}
+              body={t("jobs.booking.body")}
+              testID="job-booking"
+            />
+          ) : shownError ? (
+            <JobState
+              map="bare"
+              title={t("jobs.error.title")}
+              body={t("jobs.error.body")}
+              action={t("jobs.error.retry")}
+              onAction={() => void refetch()}
+              busy={isFetching}
+              testID="job-error"
+            />
+          ) : (
+            <JobSkeleton />
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
       {data && confirmable ? (
         <ConfirmDock job={data} requestId={id} updatedAt={dataUpdatedAt} push={push} />
       ) : null}
@@ -385,7 +401,7 @@ function JobContent({ job, requestId, updatedAt, refetch, text, now }: JobConten
         {job.cancellation ? <CancellationStatus cancellation={job.cancellation} /> : null}
         {job.cancellation?.cancelled_by === "pro" ? <NewRequestAction /> : null}
         {hasReport(job) ? <ReportStatus job={job} /> : null}
-        <PaidRow job={job} />
+        <PaidRow job={job} requestId={requestId} />
         <JobPhotos photos={job.photos} updatedAt={updatedAt} refetch={refetch} />
         <JobTimeline items={timelineOf(t, job, now)} />
       </Sheet>

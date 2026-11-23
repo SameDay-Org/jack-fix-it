@@ -30,6 +30,7 @@ Stripe does not have (404) is None, not an error. The `stripe` logger runs at WA
 """
 
 from dataclasses import dataclass, field
+from functools import cache
 from typing import Final, Protocol
 
 import stripe
@@ -40,7 +41,7 @@ from stripe.params import (
     SetupIntentCreateParams,
 )
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.integrations.stripe_errors import StripeRejectedError, raise_typed
 
 # The only type the wallet saves and lists.
@@ -233,6 +234,17 @@ def _object_id(value: object) -> str | None:
 def _request_id(resource: stripe.StripeObject) -> str | None:
     response = resource.last_response
     return response.request_id if response else None
+
+
+@cache
+def worker_stripe_payment_methods() -> StripePaymentMethods | None:
+    """The worker's client: one per process, built on first use, from the same settings. A
+    deleted account's cards are detached with it (accounts.cleanup, #97). None without
+    STRIPE_SECRET_KEY: the cleanup then waits and is tried again. Tests pass a fake instead."""
+    settings = get_settings()
+    if settings.stripe_secret_key is None:
+        return None
+    return StripePaymentMethodsClient.from_settings(settings)
 
 
 def get_stripe_payment_methods(request: Request) -> StripePaymentMethods | None:

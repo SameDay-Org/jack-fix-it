@@ -5,7 +5,7 @@ import { Text, View } from "react-native";
 import { Button, Card, Skeleton, StatusBadge, TextSkeleton, VerifiedBadge } from "@/components/ui";
 import { continuousCorners, tokens } from "@/theme";
 
-import { useQuoteText, type QuoteState } from "./quoteText";
+import { useQuoteText, type PaymentLine, type QuoteState } from "./quoteText";
 import { ApproachText, ScopeText } from "./QuoteNotes";
 import type { CustomerQuote } from "./useRequestQuotes";
 
@@ -18,6 +18,8 @@ type QuoteCardProps = {
   onViewProfile: (quote: CustomerQuote) => void;
   /** What an accepted quote's footer shows instead of the plain note: its payment (#59). */
   payment?: ReactNode;
+  /** What an accepted quote's summary says of that payment (#373); "next" by default. */
+  paymentLine?: PaymentLine;
 };
 
 // Shown to sighted users only: the card's summary label already says it.
@@ -33,9 +35,17 @@ const VISUAL_ONLY = {
  * since a list of them shares the screen and the confirmation carries the primary action, and
  * "View profile" is a ghost under the pro's name, in every state of the quote.
  */
-export function QuoteCard({ quote, state, now, onAccept, onViewProfile, payment }: QuoteCardProps) {
+export function QuoteCard({
+  quote,
+  state,
+  now,
+  onAccept,
+  onViewProfile,
+  payment,
+  paymentLine,
+}: QuoteCardProps) {
   const { t } = useTranslation();
-  const text = useQuoteText(quote, state, now);
+  const text = useQuoteText(quote, state, now, paymentLine);
   const testID = `quote-${quote.id}`;
 
   return (

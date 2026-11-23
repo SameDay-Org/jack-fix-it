@@ -476,3 +476,89 @@ describe("a paid request opened cold: the card's job fills a notice that has non
     expect(Haptics.notificationAsync).not.toHaveBeenCalled();
   });
 });
+
+describe("the accepted card's summary says where its payment stands (#373)", () => {
+  const summary = (): string =>
+    screen.getByTestId(`quote-${ACCEPTED.id}-summary`).props.accessibilityLabel;
+  const NEXT = "Payment comes next";
+  /** Neither that the payment comes next nor that it is paid: the quote was accepted, no more. */
+  const claimsNothing = () => {
+    expect(summary()).toContain("Quote accepted.");
+    expect(summary()).not.toContain(NEXT);
+    expect(summary()).not.toMatch(/paid/i);
+  };
+
+  it("before the payment, or when the job could not be looked up: the payment comes next", async () => {
+    api.job = () => Promise.reject(notFound());
+    const first = await renderWithQuery(<App />);
+    await screen.findByRole("button", { name: PAY_NAME });
+    expect(summary()).toContain("Quote accepted. Payment comes next.");
+    await first.unmount();
+
+    api.job = () => Promise.reject(new ApiError(503, "unavailable"));
+    await renderWithQuery(<App />, newQueryClient());
+    await screen.findByRole("button", { name: PAY_NAME });
+    expect(summary()).toContain("Quote accepted. Payment comes next.");
+  });
+
+  it("paid: it says so, and no longer that the payment comes next, in English and Spanish", async () => {
+    const first = await renderWithQuery(<App />);
+    await screen.findByTestId(`${payTestId(ACCEPTED)}-paid`);
+    expect(summary()).toContain("Quote accepted and paid.");
+    expect(summary()).not.toContain(NEXT);
+    await first.unmount();
+
+    await act(() => i18n.changeLanguage("es"));
+    await renderWithQuery(<App />, newQueryClient());
+    await screen.findByTestId(`${payTestId(ACCEPTED)}-paid`);
+    expect(summary()).toContain("Presupuesto aceptado y pagado.");
+    expect(summary()).not.toContain("Lo siguiente es el pago");
+  });
+
+  it.each(["cancelled", "refunded"] as const)(
+    "a %s job: the quote was accepted, and nothing about its payment",
+    async (status) => {
+      api.job = () => Promise.resolve({ ...JOB, status });
+      await renderWithQuery(<App />);
+      // The job is in: the card is there, its panel past its first look, showing neither Pay nor
+      // Paid.
+      await waitFor(() => {
+        expect(screen.getByTestId(`quote-${ACCEPTED.id}`)).toBeTruthy();
+        expect(screen.queryByTestId(`${payTestId(ACCEPTED)}-loading`)).toBeNull();
+      });
+      expect(screen.queryByRole("button", { name: PAY_NAME })).toBeNull();
+      expect(paidState()).toHaveLength(0);
+      claimsNothing();
+    },
+  );
+
+  it("a request with no accepted quote never asks for a job from its cards", async () => {
+    api.quotes = () => Promise.resolve(list([OTHER]));
+    await renderWithQuery(<App />);
+    await screen.findByTestId(`quote-${OTHER.id}-summary`);
+    await act(async () => undefined);
+
+    expect(callsTo(apiGet, JOB_PATH)).toHaveLength(0);
+  });
+
+  it("while the job is first looked up it claims nothing", async () => {
+    api.job = () => new Promise<CustomerJob>(() => undefined);
+    await renderWithQuery(<App />);
+    await screen.findByTestId(`${payTestId(ACCEPTED)}-loading`);
+    claimsNothing();
+  });
+
+  it("while the payment is confirmed it claims nothing; then it says paid", async () => {
+    fakeClock();
+    api.job = () => Promise.reject(notFound());
+    await renderWithQuery(<App />);
+    await act(async () => fireEvent.press(await screen.findByRole("button", { name: PAY_NAME })));
+    await screen.findByTestId(`${payTestId(ACCEPTED)}-confirming`);
+    claimsNothing();
+
+    api.job = () => Promise.resolve(JOB);
+    await act(async () => jest.advanceTimersByTime(2_000));
+    await screen.findByTestId(`${payTestId(ACCEPTED)}-paid`);
+    expect(summary()).toContain("Quote accepted and paid.");
+  });
+});

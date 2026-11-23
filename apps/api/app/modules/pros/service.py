@@ -80,6 +80,8 @@ class ProCard:
     name: str | None
     years_of_experience: int | None
     verified: bool  # verification approved
+    # The pro's account was deleted (#97): name is None, and a view sends pro_deleted (#590).
+    deleted: bool
 
 
 @dataclass(frozen=True)
@@ -319,7 +321,12 @@ class ProService:
         self, pro_ids: Collection[uuid.UUID], *, hireable_only: bool
     ) -> dict[uuid.UUID, ProCard]:
         rows = await self._profiles.public_fields(pro_ids, hireable_only=hireable_only)
+        # One read of the accounts: their public names, and which are deleted (#97).
         names = await self._users.public_names([row[1] for row in rows])
+        if hireable_only:
+            # A deleted pro (#97) is never hired again: their profile may still look approved
+            # with payouts enabled (Stripe's events can turn them back on).
+            rows = [row for row in rows if not names.is_deleted(row[1])]
         return {
             pro_id: ProCard(
                 pro_id=pro_id,
@@ -327,6 +334,7 @@ class ProService:
                 name=names.get(user_id),
                 years_of_experience=years,
                 verified=status is ProVerificationStatus.APPROVED,
+                deleted=names.is_deleted(user_id),
             )
             for pro_id, user_id, years, status in rows
         }

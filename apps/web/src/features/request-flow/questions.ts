@@ -79,3 +79,27 @@ export function questionErrors(
   }
   return errors;
 }
+
+/**
+ * The answers as the request's `intake_answers`: by key, only the service's own questions, in
+ * their order. A yes/no left alone is "no"; a blank text and an empty pick are left out (the
+ * app's `intakeAnswersFor`).
+ */
+export function intakeAnswersFor(
+  questions: readonly IntakeQuestion[],
+  answers: IntakeAnswers,
+): Record<string, number | string | boolean | string[]> {
+  const body: Record<string, number | string | boolean | string[]> = {};
+  for (const question of questions) {
+    const answer = answers[question.key];
+    if (question.type === "boolean") body[question.key] = answer === true;
+    else if (question.type === "multi_choice") {
+      const picks = offeredPicks(question, answer);
+      if (picks.length > 0) body[question.key] = picks;
+    } else if (typeof answer === "string") {
+      const text = question.type === "text" ? answer.trim() : answer;
+      if (text !== "") body[question.key] = text;
+    } else if (typeof answer === "number") body[question.key] = answer;
+  }
+  return body;
+}

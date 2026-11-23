@@ -95,6 +95,7 @@ from app.modules.ops.errors import (
     RequestHeldError,
     RequestNotClassifiableError,
     RequestNotClassifiedError,
+    RequestWithoutAccountError,
 )
 from app.modules.ops.models import RequestFollowup, RequestNote
 from app.modules.ops.repository import FollowupRepository, NoteRepository
@@ -149,6 +150,7 @@ _ASSIGN_REFUSALS: Final[Mapping[AssignRefusal, type[AppError]]] = {
     AssignRefusal.PAYOUTS_DISABLED: ProPayoutsDisabledError,
     AssignRefusal.CATEGORY_MISMATCH: ProCategoryMismatchError,
     AssignRefusal.OUT_OF_AREA: ProOutOfAreaError,
+    AssignRefusal.NO_ACCOUNT: RequestWithoutAccountError,
 }
 
 

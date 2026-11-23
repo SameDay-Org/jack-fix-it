@@ -141,6 +141,7 @@ async def test_customer_sees_the_profile_of_a_pro_who_quoted(
         "jobs_count": 5,
         "years_of_experience": 9,
         "verified": True,
+        "pro_deleted": False,
         "bio": "Licensed plumber, water heaters and leaks.",
         "member_since": "2025-03-01",
     }

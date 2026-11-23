@@ -273,6 +273,7 @@ class JobExecutionService:
             pro=QuotePro(
                 id=card.pro_id,
                 name=card.name,
+                pro_deleted=card.deleted,
                 rating_avg=rating.text,
                 rating_count=rating.count,
                 jobs_count=rating.jobs_completed,
@@ -637,6 +638,7 @@ class JobExecutionService:
                         zip_code=address.zip_code,
                     ),
                     customer_first_name=names.get(job.customer_id),
+                    customer_deleted=names.is_deleted(job.customer_id),
                     eta_at=job.eta_at,
                     checked_in_at=job.checked_in_at,
                     arrival_code_locked=job.arrival_code_locked_at is not None,

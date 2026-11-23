@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLayoutEffect, useRef } from "react";
 
 import { useSession } from "@/api";
+import { languageHintStorage } from "@/api/tokenStorage";
 import { activeLanguage, deviceLanguage, languageOf, setLanguage } from "@/i18n";
 
 import { isSavingLocale } from "./api";
@@ -13,8 +14,12 @@ type Followed = { account: string | null; locale: string | null };
  * Keeps the app in the signed-in account's saved language, and in the device's when nobody is
  * signed in or the app is not written in the saved one (#218).
  *
+ * - At launch, until the restore answers, the app stays in the language it started in: the saved
+ *   language of the account signed in on this device, kept for that (#378), so the launch intro
+ *   speaks it. That hint follows the account's saved language, and is removed when nobody is
+ *   signed in.
  * - An account arrives (a restore at launch, a sign-in, another account): its saved language. It
- *   leaves: the device's.
+ *   leaves, or the launch finds nobody signed in: the device's.
  * - The same account, saved in another language since (changed on another device, learned at a
  *   token refresh): this device follows, as long as it was in step with the account. A device
  *   holding its own choice keeps it: one the server has not saved yet (Settings says so and
@@ -28,24 +33,26 @@ type Followed = { account: string | null; locale: string | null };
  * native view tree on Android).
  */
 export function useAccountLanguage(): void {
-  const { user } = useSession();
+  const { status, user } = useSession();
   const queryClient = useQueryClient();
-  // Nobody at first: the app starts in the device's language.
-  const followed = useRef<Followed>({ account: null, locale: null });
+  // Nobody followed yet: the app is in the language it started in.
+  const followed = useRef<Followed | null>(null);
 
   useLayoutEffect(() => {
     const last = followed.current;
+    if (last === null && status === "restoring") return;
     const next: Followed = { account: user?.id ?? null, locale: user?.locale ?? null };
-    if (last.account === next.account && last.locale === next.locale) return;
+    if (last?.account === next.account && last.locale === next.locale) return;
     followed.current = next;
 
     const saved = languageOf(next.locale);
-    if (last.account !== next.account) {
+    void languageHintStorage.write(next.account === null ? null : saved);
+    if (last?.account !== next.account) {
       setLanguage(saved ?? deviceLanguage());
     } else if (saved && activeLanguage() === last.locale && !isSavingLocale(queryClient)) {
       setLanguage(saved);
     }
-  }, [user, queryClient]);
+  }, [status, user, queryClient]);
 }
 
 /** Renders nothing. The root layout mounts it ahead of the screens, so its effect runs first. */
