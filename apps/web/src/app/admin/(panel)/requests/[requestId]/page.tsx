@@ -47,7 +47,12 @@ const FILE_LINK =
 type CatalogCategory = components["schemas"]["CategoryOut"];
 
 const TERM = "text-gray-500";
-const FACTS = "grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-3 text-sm";
+/**
+ * A card's label and value pairs. The label column fits its text up to 40% of the card, then
+ * wraps (#593): an `auto` column let a long intake question take the whole row at 390 px, which
+ * squeezed its answer to one letter per line and scrolled the page sideways.
+ */
+const FACTS = "grid grid-cols-[fit-content(40%)_minmax(0,1fr)] gap-x-6 gap-y-3 text-sm";
 
 /**
  * The active categories with their intake questions; none when the API cannot say. They name
