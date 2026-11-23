@@ -136,7 +136,9 @@ export default async function ProsPage({
                 >
                   <span className="flex min-w-0 flex-wrap items-center gap-2">
                     <span className="truncate font-semibold">
-                      {pro.name ?? t("admin.pros.noName")}
+                      {pro.pro_deleted
+                        ? t("admin.deletedUser")
+                        : (pro.name ?? t("admin.pros.noName"))}
                     </span>
                     {pro.payouts_enabled ? null : (
                       <Badge variant="muted" className="shrink-0">

@@ -181,6 +181,18 @@ describe("support list page", () => {
     expect(page).toMatch(/<a[^>]*href="\/admin\/support\?status=closed"[^>]*>Try again/);
   });
 
+  it("says Deleted user for a deleted account's ticket (#97)", async () => {
+    api(() =>
+      Response.json({
+        items: [item({ user_first_name: null, user_deleted: true })],
+        next_cursor: null,
+      }),
+    );
+    const page = await render();
+    expect(page).toContain("Deleted user");
+    expect(page).not.toContain("No name on file");
+  });
+
   it("speaks the staff member's language", async () => {
     api(() => Response.json({ items: [item({ topic: "safety" })], next_cursor: null }), "es");
 

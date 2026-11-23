@@ -249,6 +249,26 @@ describe("request card page", () => {
     },
   );
 
+  it("says Deleted user for a deleted customer and a deleted pro's quote (#97)", async () => {
+    const base = card();
+    api(() =>
+      Response.json(
+        card({
+          customer_name: null,
+          customer_deleted: true,
+          customer: { ...base.customer, first_name: null, last_name: null },
+          quotes: base.quotes.map((quote) => ({ ...quote, pro_name: null, pro_deleted: true })),
+        }),
+      ),
+    );
+
+    const words = text(await render());
+
+    // Once in the customer's details, once on the quote.
+    expect(words.split("Deleted user")).toHaveLength(3);
+    expect(words).not.toContain("No name on file");
+  });
+
   it("answers 404 when the request does not exist (#494)", async () => {
     api(() => Response.json({ error: { code: "request_not_found" } }, { status: 404 }));
 

@@ -129,7 +129,9 @@ export default async function SupportPage({
                   <span className="flex items-center justify-between gap-3 md:contents">
                     <span className="flex min-w-0 items-center gap-2">
                       <span className="truncate font-semibold">
-                        {ticket.user_first_name ?? t("admin.support.noName")}
+                        {ticket.user_deleted
+                          ? t("admin.deletedUser")
+                          : (ticket.user_first_name ?? t("admin.support.noName"))}
                       </span>
                       <Badge variant="muted" className="shrink-0">
                         {t(`admin.support.role.${ticket.role}`)}

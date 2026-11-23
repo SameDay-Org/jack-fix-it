@@ -173,6 +173,13 @@ describe("support ticket page", () => {
     expect(page).not.toContain("<button");
   });
 
+  it("says Deleted user for a deleted account's ticket (#97)", async () => {
+    api(() => Response.json(ticket({ user_first_name: null, user_deleted: true })));
+    const page = await render();
+    expect(page).toContain("Deleted user");
+    expect(page).not.toContain("No name on file");
+  });
+
   it("speaks the staff member's language", async () => {
     api(() => Response.json(ticket({ user_first_name: null })), "es");
 

@@ -143,10 +143,16 @@ function DisputeView({
           <dd>{t(`admin.requests.job.statuses.${dispute.job_status}`)}</dd>
           <dt className={TERM}>{t("admin.disputes.detail.customer")}</dt>
           <dd className="break-words">
-            {dispute.customer_first_name ?? t("admin.disputes.noName")}
+            {dispute.customer_deleted
+              ? t("admin.deletedUser")
+              : (dispute.customer_first_name ?? t("admin.disputes.noName"))}
           </dd>
           <dt className={TERM}>{t("admin.disputes.detail.pro")}</dt>
-          <dd className="break-words">{dispute.pro_first_name ?? t("admin.disputes.noName")}</dd>
+          <dd className="break-words">
+            {dispute.pro_deleted
+              ? t("admin.deletedUser")
+              : (dispute.pro_first_name ?? t("admin.disputes.noName"))}
+          </dd>
         </dl>
       </Card>
 
