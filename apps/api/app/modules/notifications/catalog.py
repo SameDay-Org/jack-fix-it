@@ -25,7 +25,7 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
     {
         "en": MappingProxyType(
             {
-                "push.test.title": "Jack Fix It",
+                "push.test.title": "John Got It",
                 "push.test.body": "This is a test notification for {public_code}.",
                 "push.new_request.title": "New request",
                 "push.new_request.body": "Request {public_code} is waiting for your quote.",
@@ -113,7 +113,7 @@ CATALOG: Final[Mapping[str, Mapping[str, str]]] = MappingProxyType(
         ),
         "es": MappingProxyType(
             {
-                "push.test.title": "Jack Fix It",
+                "push.test.title": "John Got It",
                 "push.test.body": "Esta es una notificación de prueba para {public_code}.",
                 "push.new_request.title": "Nueva solicitud",
                 "push.new_request.body": "La solicitud {public_code} espera tu presupuesto.",

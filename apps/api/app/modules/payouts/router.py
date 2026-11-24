@@ -112,10 +112,10 @@ _PAGE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="0; url={link}">
-<title>Jack Fix It</title>
+<title>John Got It</title>
 </head>
 <body>
-<p><a href="{link}">Back to Jack Fix It</a></p>
+<p><a href="{link}">Back to John Got It</a></p>
 </body>
 </html>
 """

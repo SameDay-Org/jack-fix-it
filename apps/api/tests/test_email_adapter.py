@@ -12,7 +12,7 @@ from app.observability import JsonFormatter
 from tests.conftest import TEST_EMAIL_SETTINGS, make_settings
 
 API_KEY = "re_test_key_not_real"
-SENDER = "Jack Fix It <no-reply@example.invalid>"
+SENDER = "John Got It <no-reply@example.invalid>"
 TO = "ana.probe@example.com"
 SUBJECT = "Probe subject 4821"
 TEXT = "Probe text 482915"
