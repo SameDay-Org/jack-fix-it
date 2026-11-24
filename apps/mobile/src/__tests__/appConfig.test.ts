@@ -47,6 +47,16 @@ describe("app config (#600: the app is John Got It)", () => {
     expect(config.extra?.eas).toEqual({ projectId: "dc856055-5039-4f97-aeff-dc6aea84f8c0" });
   });
 
+  it.each(["development", "preview", "production"] as const)(
+    "declares no non-exempt encryption in the iOS Info.plist (%s)",
+    (variant) => {
+      expect(configFor(variant).ios?.infoPlist).toEqual({
+        CFBundleAllowMixedLocalizations: true,
+        ITSAppUsesNonExemptEncryption: false,
+      });
+    },
+  );
+
   it.each(["en", "es"] as const)("the %s iOS permission prompts name John, never Jack", (lang) => {
     const prompts = Object.values(iosPrompts(lang));
 

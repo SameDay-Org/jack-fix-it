@@ -110,8 +110,13 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     userInterfaceStyle: "light",
     ios: {
       bundleIdentifier: appId,
-      // Lets iOS use the Spanish InfoPlist strings below in an app whose base language is English.
-      infoPlist: { CFBundleAllowMixedLocalizations: true },
+      infoPlist: {
+        // Lets iOS use the Spanish InfoPlist strings below in an app whose base language is English.
+        CFBundleAllowMixedLocalizations: true,
+        // The app uses no encryption beyond the system's HTTPS, so App Store Connect and EAS ask
+        // nothing about export compliance at upload (a change here needs a new build).
+        ITSAppUsesNonExemptEncryption: false,
+      },
     },
     android: {
       package: appId,
