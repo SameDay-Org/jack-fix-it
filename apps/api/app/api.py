@@ -21,6 +21,7 @@ from app.modules.earnings.router import router as earnings_router
 from app.modules.geo.router import router as geo_router
 from app.modules.interest.router import router as interest_router
 from app.modules.jobs.router import customer_router as customer_jobs_router
+from app.modules.jobs.router import live_router as job_live_router
 from app.modules.jobs.router import location_router as job_location_router
 from app.modules.jobs.router import route_router as job_route_router
 from app.modules.jobs.router import router as jobs_router
@@ -78,6 +79,7 @@ v1_router.include_router(customer_jobs_router)
 v1_router.include_router(jobs_router)
 v1_router.include_router(job_location_router)
 v1_router.include_router(job_route_router)
+v1_router.include_router(job_live_router)
 v1_router.include_router(chat_router)
 v1_router.include_router(staff_chat_router)
 v1_router.include_router(chat_flags_router)

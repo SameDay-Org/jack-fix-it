@@ -144,6 +144,9 @@ export default async function RequestPage({ params }: { params: Promise<{ reques
   }
 
   const links = contactLinks(card.customer);
+  // A deleted customer's email comes as null (#594), so the card says so and offers no link.
+  // Typed as nullable here so the page handles it whatever the generated type says.
+  const email: string | null = card.customer.email;
   // A deleted account (#97) has no name any more: the API flags it and the card says so.
   const name = card.customer_deleted
     ? t("admin.deletedUser")
@@ -280,7 +283,7 @@ export default async function RequestPage({ params }: { params: Promise<{ reques
             {card.customer.phone ?? t("admin.requests.customer.noPhone")}
           </dd>
           <dt className={TERM}>{t("admin.requests.customer.email")}</dt>
-          <dd className="break-all">{card.customer.email}</dd>
+          <dd className="break-all">{email ?? t("admin.requests.customer.noEmail")}</dd>
           <dt className={TERM}>{t("admin.requests.customer.language")}</dt>
           <dd>{card.customer.language.toUpperCase()}</dd>
           <dt className={TERM}>{t("admin.requests.customer.address")}</dt>

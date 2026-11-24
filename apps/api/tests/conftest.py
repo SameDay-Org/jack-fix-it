@@ -171,6 +171,7 @@ class InMemoryJobLocationStore:
 
     def __init__(self) -> None:
         self.positions: dict[uuid.UUID, Position] = {}
+        self.trips: dict[uuid.UUID, float] = {}
 
     async def put(
         self, job_id: uuid.UUID, position: Position, *, min_interval: timedelta, ttl_seconds: int
@@ -189,6 +190,14 @@ class InMemoryJobLocationStore:
 
     async def delete(self, job_id: uuid.UUID) -> None:
         self.positions.pop(job_id, None)
+        self.trips.pop(job_id, None)
+
+    async def keep_trip_distance(self, job_id: uuid.UUID, meters: float) -> None:
+        if job_id in self.positions:
+            self.trips.setdefault(job_id, meters)
+
+    async def trip_distance(self, job_id: uuid.UUID) -> float | None:
+        return self.trips.get(job_id)
 
 
 class InMemoryJobRouteCache:

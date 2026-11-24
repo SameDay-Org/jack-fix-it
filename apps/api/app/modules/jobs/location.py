@@ -38,6 +38,7 @@ reads the latest one. Both sides poll; there is no history.
 import asyncio
 import json
 import logging
+import math
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -84,6 +85,15 @@ redis.call('HSET', KEYS[1], 'position', ARGV[1], 'recorded', ARGV[2], 'updated',
 redis.call('EXPIRE', KEYS[1], ARGV[5])
 return 1
 """
+# Keeps ARGV[1] as the trip's first route distance (#596) in the job's position hash, only
+# while the position is there (the hash keeps its expiry, and the delete takes both) and only
+# when none is kept yet. 1 when kept.
+_TRIP_SCRIPT: Final = """
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  return redis.call('HSETNX', KEYS[1], 'trip_m', ARGV[1])
+end
+return 0
+"""
 
 
 def position_key(prefix: str, job_id: uuid.UUID) -> str:
@@ -125,6 +135,17 @@ class JobLocationStore(Protocol):
 
     async def delete(self, job_id: uuid.UUID) -> None: ...
 
+    async def keep_trip_distance(self, job_id: uuid.UUID, meters: float) -> None:
+        """Keeps `meters` as the trip's first route distance (#596), what the live view's
+        progress is measured against, while the job's position is there and unless one is
+        kept already: it goes with the position (its expiry and its delete)."""
+        ...
+
+    async def trip_distance(self, job_id: uuid.UUID) -> float | None:
+        """The trip's first route distance; None before the first route, or once the
+        position is gone."""
+        ...
+
 
 class RedisJobLocationStore:
     """Every call gives up after `timeout_seconds` (TimeoutError): a hung Redis must not hang a
@@ -135,6 +156,7 @@ class RedisJobLocationStore:
         self._timeout = timeout_seconds
         self._prefix = prefix
         self._put = redis.register_script(_PUT_SCRIPT)
+        self._trip = redis.register_script(_TRIP_SCRIPT)
 
     def key(self, job_id: uuid.UUID) -> str:
         return position_key(self._prefix, job_id)
@@ -158,6 +180,21 @@ class RedisJobLocationStore:
             # on redis.asyncio it is always awaitable.
             raw = await self._redis.hget(self.key(job_id), "position")  # type: ignore[misc]
         return None if raw is None else _decode(raw)
+
+    async def keep_trip_distance(self, job_id: uuid.UUID, meters: float) -> None:
+        async with asyncio.timeout(self._timeout):
+            await self._trip(keys=[self.key(job_id)], args=[repr(float(meters))])
+
+    async def trip_distance(self, job_id: uuid.UUID) -> float | None:
+        async with asyncio.timeout(self._timeout):
+            raw = await self._redis.hget(self.key(job_id), "trip_m")  # type: ignore[misc]
+        if raw is None:
+            return None
+        try:
+            meters = float(raw)
+        except ValueError:
+            return None  # a value this code did not write: never shown, never an error
+        return meters if math.isfinite(meters) and meters > 0 else None
 
     async def delete(self, job_id: uuid.UUID) -> None:
         # One command: the position and the route computed from it (#351) go together.
@@ -228,6 +265,16 @@ class GuardedJobLocationStore:
     async def delete(self, job_id: uuid.UUID) -> None:
         await self._inner.delete(job_id)
 
+    async def keep_trip_distance(self, job_id: uuid.UUID, meters: float) -> None:
+        async with asyncio.timeout(self._timeout):
+            await self._guard.require()
+            await self._inner.keep_trip_distance(job_id, meters)
+
+    async def trip_distance(self, job_id: uuid.UUID) -> float | None:
+        async with asyncio.timeout(self._timeout):
+            await self._guard.require()
+            return await self._inner.trip_distance(job_id)
+
 
 class NoJobLocationStore:
     """The store where LOCATION_REDIS_URL is required and missing: it takes and gives no
@@ -243,6 +290,12 @@ class NoJobLocationStore:
 
     async def delete(self, job_id: uuid.UUID) -> None:
         return None
+
+    async def keep_trip_distance(self, job_id: uuid.UUID, meters: float) -> None:
+        raise LocationStoreRefusedError("not_configured")
+
+    async def trip_distance(self, job_id: uuid.UUID) -> float | None:
+        raise LocationStoreRefusedError("not_configured")
 
 
 @dataclass(frozen=True)

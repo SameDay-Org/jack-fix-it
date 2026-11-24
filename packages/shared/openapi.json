@@ -4630,6 +4630,95 @@
         }
       }
     },
+    "/v1/jobs/{job_id}/live": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Follow an ongoing job at a glance (lock screen)",
+        "description": "The job's stage, the pro's ETA and road left while on the way, and a progress, for the\ncustomer's and the pro's lock screens (#596). No name, address, arrival code, amount or\nposition. `eta_seconds` and `distance_meters` are null whenever they are unknown: not on\nthe way, no route yet, or the pro's position is too old.",
+        "operationId": "get_job_live_v1_jobs__job_id__live_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobLiveOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers and pros have jobs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job with this id of which the caller is the customer or the pro.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "job_not_live: the job is not under way: not on the way yet, or past the customer's confirmation (or cancelled, refunded, disputed). Stop following it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/jobs/{job_id}/messages": {
       "get": {
         "tags": [
@@ -13692,6 +13781,70 @@
         ],
         "title": "JobCategory"
       },
+      "JobLiveOut": {
+        "properties": {
+          "job_public_code": {
+            "type": "string",
+            "title": "Job Public Code",
+            "description": "The request's code, as lock screens show it."
+          },
+          "stage": {
+            "$ref": "#/components/schemas/LiveStage",
+            "description": "on_the_way until the pro checks in, arrived until the work starts, working until the pro marks it done, done_waiting_confirm until the customer confirms."
+          },
+          "eta_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta Seconds",
+            "description": "Seconds left to the job's address from the pro's latest position, never negative. null when unknown: not on the way, no route, or the position is too old."
+          },
+          "distance_meters": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Meters",
+            "description": "Meters of road left to the job's address; null when unknown, as above."
+          },
+          "progress": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Progress",
+            "description": "0 to 1: on the way 0 to 0.5 by the road left of the trip, arrived 0.5, working 0.75, done 1."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At",
+            "description": "When this view was put together (server time)."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_public_code",
+          "stage",
+          "eta_seconds",
+          "distance_meters",
+          "progress",
+          "updated_at"
+        ],
+        "title": "JobLiveOut",
+        "description": "An ongoing job as the lock screen shows it (#596): no name, address, arrival code,\namount or position, the same on both sides."
+      },
       "JobPayout": {
         "properties": {
           "status": {
@@ -13971,6 +14124,17 @@
         "title": "JobTransferOut"
       },
       "JsonValue": {},
+      "LiveStage": {
+        "type": "string",
+        "enum": [
+          "on_the_way",
+          "arrived",
+          "working",
+          "done_waiting_confirm"
+        ],
+        "title": "LiveStage",
+        "description": "Where an ongoing job stands, for the lock screen (#596)."
+      },
       "LivenessResponse": {
         "properties": {
           "status": {

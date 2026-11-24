@@ -26,6 +26,14 @@ class NotOnTheWayError(ConflictError):
     message = "The job is not on the way."
 
 
+class JobNotLiveError(ConflictError):
+    """The live view (#596) of a job that is not under way: not on the way yet, or past the
+    customer's confirmation (or cancelled, refunded, disputed)."""
+
+    code = "job_not_live"
+    message = "The job is not under way."
+
+
 class ProLocationUnavailableError(AppError):
     """The store of the pros' live positions (Redis) is down or too slow (#350): the position
     is dropped, and the pro's app sends its next one. Also the answer of both position

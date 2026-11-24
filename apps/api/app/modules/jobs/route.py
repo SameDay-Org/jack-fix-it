@@ -396,6 +396,12 @@ class JobRouteService:
         await self._session.commit()
         if not is_tracked:
             return NO_ROUTE
+        return await self.current(job_id, request_id)
+
+    async def current(self, job_id: uuid.UUID, request_id: uuid.UUID) -> JobRouteOut:
+        """The route of a tracked job (on the way, not checked in) from its pro's latest
+        position: the caller has decided who may see it, found the job tracked, and holds no
+        transaction. The customer's route and the live view (#596) both come here."""
         ids = {"job_id": str(job_id)}
         try:
             position = await self._store.get(job_id)
@@ -441,6 +447,8 @@ class JobRouteService:
                 failed = True  # Mapbox's failure only: a cache that fails holds nobody off
                 raise
             await self._keep(job_id, CachedRoute(origin=origin, route=route))
+            if route is not None:
+                await self._keep_trip(job_id, route.distance_m)
         finally:
             await self._end_turn(job_id, token, failed=failed)
         return JobRouteOut(route=route)
@@ -513,6 +521,19 @@ class JobRouteService:
             )
         except (RedisError, OSError):
             logger.error("job_route_cache_unavailable", extra={"job_id": str(job_id)})
+
+    async def _keep_trip(self, job_id: uuid.UUID, meters: float) -> None:
+        """The trip's first route distance, kept by the first route computed after On my way
+        (#596): the live view's progress is measured against it. Not kept, the progress stays
+        at the stage's start; the route is answered all the same."""
+        try:
+            await self._store.keep_trip_distance(job_id, meters)
+        except LocationStoreRefusedError as refused:
+            logger.error(
+                "job_route_store_refused", extra={"job_id": str(job_id), "reason": refused.reason}
+            )
+        except (RedisError, OSError):
+            logger.error("job_trip_distance_unavailable", extra={"job_id": str(job_id)})
 
     async def _end_turn(self, job_id: uuid.UUID, token: str, *, failed: bool) -> None:
         """Gives the turn taken with `token` back, or, after Mapbox failed, to nobody for a
