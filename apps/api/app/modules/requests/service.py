@@ -22,12 +22,13 @@ Logs carry the request id, the user id and counts: never the description, the ad
 keys or URLs.
 """
 
+import asyncio
 import base64
 import binascii
 import json
 import logging
 import uuid
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Final
@@ -93,7 +94,7 @@ from app.modules.uploads.schemas import UploadPurpose
 from app.modules.users.service import UserService
 from app.modules.users.types import ContactPoints, UserAccount
 from app.queue import JobQueue
-from app.redaction import KnownValues, redact_address_contacts, redact_text
+from app.redaction import KnownValues, RedactionResult, redact_address_contacts, redact_text
 
 logger = logging.getLogger(__name__)
 
@@ -778,7 +779,7 @@ class ProRequestReader:
         streets = await self._addresses.street_lines([r.address_id for r in rows])
         if contacts is None:
             contacts = await self._users.contact_points([r.customer_id for r in rows])
-        views: dict[uuid.UUID, RequestForPro] = {}
+        page: list[_ToRedact] = []
         for row in rows:
             contact = contacts.get(row.customer_id)
             known = KnownValues(
@@ -786,8 +787,11 @@ class ProRequestReader:
                 phones=(contact.phone,) if contact and contact.phone else (),
                 streets=streets.get(row.address_id, ()),
             )
-            description = redact_text(row.description, known)
-            answers, answers_redacted = _redact_answers(row.intake_answers, known)
+            page.append(_ToRedact(row.description, row.intake_answers, known))
+        # The whole page in a worker thread (#528): the event loop serves other calls meanwhile.
+        redacted = await asyncio.to_thread(_redact_page, page)
+        views: dict[uuid.UUID, RequestForPro] = {}
+        for row, (description, answers, answers_redacted) in zip(rows, redacted, strict=True):
             views[row.id] = RequestForPro(
                 id=row.id,
                 public_code=row.public_code,
@@ -831,6 +835,27 @@ class ProRequestReader:
                 "opportunity_city_missing", extra={"service_request_id": str(request_id)}
             )
         return AddressArea(zip_code=zip_code, city=city)
+
+
+@dataclass(frozen=True)
+class _ToRedact:
+    """One row's customer text and the customer's own details, read off the ORM row on the
+    event loop: the worker thread touches no database object."""
+
+    description: str
+    intake_answers: Mapping[str, JsonValue]
+    known: KnownValues
+
+
+def _redact_page(
+    page: Sequence[_ToRedact],
+) -> list[tuple[RedactionResult, dict[str, JsonValue], bool]]:
+    """Each row's description and answers redacted, in order; pure CPU, run in a worker thread
+    (#528)."""
+    return [
+        (redact_text(row.description, row.known), *_redact_answers(row.intake_answers, row.known))
+        for row in page
+    ]
 
 
 def _redact_answers(

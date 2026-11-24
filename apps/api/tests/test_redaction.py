@@ -10,11 +10,12 @@ import sys
 import time
 import unicodedata
 from collections.abc import Callable
-from typing import Final, Literal, NamedTuple
+from types import ModuleType
+from typing import Final, Literal, NamedTuple, SupportsIndex
 
 import pytest
 
-from app import redaction_legacy
+from app import redaction, redaction_legacy
 from app.redaction import (
     _MARK_RANGES,
     _SPELLED_EMAILS,
@@ -2314,3 +2315,98 @@ def test_address_contacts_do_not_mask_the_known_street() -> None:
     known = KnownValues(streets=("742 Evergreen Terrace", "Apt 63"))
     text = "742 Evergreen Terrace, Apt 63"
     assert redact_address_contacts(text, known) == RedactionResult(text, False)
+
+
+# #528 (found by the #96 review): the glued-code check walked back over the whole run of letters
+# and digits for every digit run in it, so "a1" * 1000 cost about 0.16 s a call, and a page of
+# 20 such rows over 3 s of one read. The walk now stops at the first digit, so each character
+# is read about once per text, in both passes.
+LETTER_DIGIT_RUNS: Final = [
+    "a1" * 1000,
+    "A1" * 1000,
+    "1a" * 1000,
+    "aB3" * 666,
+    ("x" + "A" * 9 + "1") * 200,
+    ("Q" * 98 + "7") * 20,
+    "word " * 400,
+]
+
+
+class CountingText(str):
+    """A text that counts the characters read from it, one per index and each of a slice's."""
+
+    reads: int
+
+    def __new__(cls, value: str) -> "CountingText":
+        text = super().__new__(cls, value)
+        text.reads = 0
+        return text
+
+    def __getitem__(self, key: SupportsIndex | slice) -> str:
+        if isinstance(key, slice):
+            self.reads += len(range(*key.indices(len(self))))
+        else:
+            self.reads += 1
+        return str.__getitem__(self, key)
+
+
+@pytest.mark.parametrize("unit", ["a1", "A1", "1a"])
+def test_letter_digit_runs_are_fast(unit: str) -> None:
+    """The #240 timing cases gain the #528 runs, at 5,000 characters as round one's: quadratic,
+    "a1" * 2500 took about a second; the whole text is within the floor budget now."""
+    text = unit * 2500
+    assert len(text) >= 5000
+    assert_within_the_floor_budget(text)
+
+
+@pytest.mark.parametrize("module", [redaction, redaction_legacy], ids=["filter", "floor"])
+@pytest.mark.parametrize("text", LETTER_DIGIT_RUNS, ids=lambda text: text[:6])
+def test_the_glued_code_check_reads_each_character_about_once(
+    module: ModuleType, text: str
+) -> None:
+    counted = CountingText(text)
+
+    for match in module.DIGIT_RUN.finditer(counted):
+        module._glued_to_a_code(match)
+
+    assert counted.reads <= 3 * len(text), f"{counted.reads} reads of {len(text)} characters"
+
+
+@pytest.mark.parametrize(
+    ("text", "masked"),
+    [
+        ("WH3055550199", False),  # an uppercase code prefix: a serial, not a phone
+        ("cell3055550199", True),  # a cue word glued to the number
+        ("x9" + "A" * 40 + "3055550199", False),  # a digit far back in the run: a code
+        ("q" + "A" * 40 + "3055550199", True),  # a lowercase letter far back: not all uppercase
+        ("ab3055550199 and AB12 then 3055550188", True),
+    ],
+)
+def test_the_glued_code_rule_reads_the_whole_run(text: str, masked: bool) -> None:
+    """The walk back stops at the first digit, but what it decides is unchanged: the whole run
+    before the number counts, however long."""
+    assert (MASK in redact_text(text, KnownValues()).text) is masked
+    floor = redaction_legacy.redact_text(text, redaction_legacy.KnownValues())
+    assert (MASK in floor.text) is masked
+
+
+@pytest.mark.parametrize("module", [redaction, redaction_legacy], ids=["filter", "floor"])
+@pytest.mark.parametrize(
+    ("prefix", "code"),
+    [
+        ("WH", True),  # uppercase: a model or serial code
+        ("1Z999AA", True),  # letters and digits: a tracking code
+        ("cell", False),  # a cue word
+        ("CELL", False),  # a cue word, whatever its case
+        ("ab", False),  # a word
+        ("Ab", False),  # a capitalized word
+        ("x9" + "A" * 40, True),  # a digit far back in the run
+        ("q" + "A" * 40, False),  # a lowercase letter far back: not all uppercase
+        ("A" * 40, True),
+    ],
+)
+def test_the_glued_code_decision_of_each_pass(module: ModuleType, prefix: str, code: bool) -> None:
+    """Each pass's own decision (the end-to-end mask above is the union of both passes)."""
+    *_, match = module.DIGIT_RUN.finditer(prefix + "3055550199")  # the number's run
+
+    assert module._glued_to_a_code(match) is code
