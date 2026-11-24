@@ -184,4 +184,12 @@ describe("the links that reach a customer", () => {
   it.each(["", "no-at-sign", "@example.com", "ana@"])("gives no mail link for %j", (email) => {
     expect(contactLinks({ phone: null, email }).mailto).toBeNull();
   });
+
+  it("gives no mail link without an email and keeps the phone's (#594)", () => {
+    expect(contactLinks({ phone: "+13055550181", email: null })).toEqual({
+      tel: "tel:+13055550181",
+      sms: "sms:+13055550181",
+      mailto: null,
+    });
+  });
 });

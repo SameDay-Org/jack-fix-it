@@ -269,6 +269,33 @@ describe("request card page", () => {
     expect(words).not.toContain("No name on file");
   });
 
+  it.each([
+    ["en", "Email No email on file", "Phone No phone on file"],
+    ["es", "Correo Sin correo registrado", "Teléfono Sin teléfono registrado"],
+  ] as const)(
+    "says there is no email and offers no link for a null email (%s, #594)",
+    async (locale, noEmail, noPhone) => {
+      const base = card();
+      // A deleted customer's contact as the API sends it once #594's API part lands. It goes
+      // through JSON, so the nulls reach the page whatever today's generated type says.
+      const deleted = {
+        ...card({ customer_name: null, customer_deleted: true }),
+        customer: { ...base.customer, first_name: null, last_name: null, phone: null, email: null },
+      };
+      api(() => Response.json(deleted), "agent", locale);
+
+      const page = await render();
+      const words = text(page);
+
+      expect(words).toContain(noEmail);
+      expect(words).toContain(noPhone);
+      // No Call, Text or Email link: nothing to reach the customer with.
+      expect(outsideLinks(page)).toEqual([]);
+      expect(page).not.toContain("mailto:");
+      expect(words).not.toContain("Enviar correo");
+    },
+  );
+
   it("answers 404 when the request does not exist (#494)", async () => {
     api(() => Response.json({ error: { code: "request_not_found" } }, { status: 404 }));
 
