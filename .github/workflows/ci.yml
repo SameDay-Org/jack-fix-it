@@ -90,11 +90,19 @@ jobs:
       # the apt mirror, which has timed out on both shards (#364, #613). A new runner image
       # misses the cache once and fetches as below; a cached install that fails also falls
       # back to the fetch.
+      # The runner image names the cache: without its name and version there is no cache (a
+      # shared key could hold packages fetched for another image), and the fetch below runs.
       - name: ffmpeg cache key
         id: ffmpeg-key
-        run: echo "key=ffmpeg-debs-${ImageOS:-unknown}-${ImageVersion:-unknown}-v1" >> "$GITHUB_OUTPUT"
+        run: |
+          if [ -n "${ImageOS:-}" ] && [ -n "${ImageVersion:-}" ]; then
+            echo "key=ffmpeg-debs-$ImageOS-$ImageVersion-v1" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::ImageOS or ImageVersion is not set: ffmpeg comes from the apt mirror, uncached (#626)."
+          fi
       - name: Restore the ffmpeg packages
         id: ffmpeg-cache
+        if: steps.ffmpeg-key.outputs.key != ''
         uses: actions/cache/restore@v6
         with:
           path: ~/ffmpeg-debs
@@ -105,6 +113,7 @@ jobs:
         continue-on-error: true
         timeout-minutes: 3
         run: |
+          set -o pipefail  # a tool that does not run fails the step, piped or not
           sudo DEBIAN_FRONTEND=noninteractive dpkg -i ~/ffmpeg-debs/*.deb
           dpkg-query -W ffmpeg
           ffmpeg -version | head -1
@@ -113,16 +122,37 @@ jobs:
       # Each attempt's downloads get a time limit; a failed attempt is retried and reuses the
       # .deb files it already downloaded. A successful fetch keeps its .deb files for the cache.
       - name: Install ffmpeg
+        id: ffmpeg-fetch
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true' || steps.ffmpeg-cached.outcome == 'failure'
         timeout-minutes: 10
         env:
           ATTEMPTS: "3"
           ATTEMPT_TIMEOUT: 150s # update + download of one attempt; healthy runs take 10-180 s
+          CACHED_INSTALL: ${{ steps.ffmpeg-cached.outcome }}
         run: |
+          if [ "$CACHED_INSTALL" = "failure" ]; then
+            echo "::warning::The cached ffmpeg packages did not install; fetching them from the apt mirror (#626)."
+          fi
           fetch_packages() {
             sudo DEBIAN_FRONTEND=noninteractive timeout --kill-after=10s "$ATTEMPT_TIMEOUT" bash -c '
               apt-get -q -o Acquire::Retries=3 update &&
               apt-get -q -y -o Acquire::Retries=3 --no-install-recommends --download-only install ffmpeg'
+          }
+          # Every .deb apt fetched goes to the cache, or none: a half copy is never saved.
+          keep_for_cache() {
+            local debs=(/var/cache/apt/archives/*.deb)
+            if [ ! -e "${debs[0]}" ]; then
+              echo "::notice::apt fetched no ffmpeg package (the image had them all): nothing to cache."
+              return 0
+            fi
+            mkdir -p ~/ffmpeg-debs
+            if cp "${debs[@]}" ~/ffmpeg-debs/ &&
+              [ "$(find ~/ffmpeg-debs -maxdepth 1 -name '*.deb' | wc -l)" -eq "${#debs[@]}" ]; then
+              echo "cache=yes" >> "$GITHUB_OUTPUT"
+            else
+              echo "::warning::The fetched ffmpeg packages could not all be copied: not cached (#626)."
+              rm -rf ~/ffmpeg-debs
+            fi
           }
           # Installs only what fetch_packages downloaded: no network, so no time limit.
           install_from_cache() {
@@ -133,9 +163,7 @@ jobs:
             { fetch_packages && install_from_cache; } || rc=$?
             if [ "$rc" -eq 0 ]; then
               dpkg-query -W ffmpeg
-              # For the cache: what apt fetched (nothing to keep if the image had it all).
-              mkdir -p ~/ffmpeg-debs
-              cp /var/cache/apt/archives/*.deb ~/ffmpeg-debs/ 2>/dev/null || true
+              keep_for_cache
               exit 0
             fi
             if [ "$attempt" -lt "$ATTEMPTS" ]; then
@@ -149,7 +177,7 @@ jobs:
       # Saved as soon as the fetch worked, whatever the tests do next; the shard that saves second
       # only warns that the key is taken.
       - name: Save the ffmpeg packages
-        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        if: steps.ffmpeg-key.outputs.key != '' && steps.ffmpeg-fetch.outputs.cache == 'yes'
         continue-on-error: true
         uses: actions/cache/save@v6
         with:
