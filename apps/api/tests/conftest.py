@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 import uuid
 from collections import Counter
@@ -26,8 +27,32 @@ from app.modules.jobs.location import Position, get_job_location_store
 from app.modules.jobs.route import CachedRoute, Turn, get_job_route_cache
 from app.modules.users.models import User
 from app.rate_limit import RateLimitResult, get_rate_limiter, window_position
+from tests.sharding import SHARD_ENV, parse_shard, split, weight
 
 API_DIR = Path(__file__).resolve().parents[1]
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """With PYTEST_SHARD set (CI's api jobs, #613), only this share's test files run; the
+    others are reported as deselected. Unset, every collected test runs."""
+    spec = os.environ.get(SHARD_ENV)
+    if not spec:
+        return
+    try:
+        shard, shards = parse_shard(spec)
+    except ValueError:
+        raise pytest.UsageError(
+            f"{SHARD_ENV} must be <index>/<count>, e.g. 1/2; got {spec!r}"
+        ) from None
+    names = {item.path: item.path.relative_to(config.rootpath).as_posix() for item in items}
+    shares = split({name: weight(path) for path, name in names.items()}, shards)
+    kept = [item for item in items if shares[names[item.path]] == shard]
+    dropped = [item for item in items if shares[names[item.path]] != shard]
+    if dropped:
+        config.hook.pytest_deselected(items=dropped)
+    items[:] = kept
+
+
 # Fixture value only; real secrets live in Railway variables.
 TEST_JWT_SECRET = "test-jwt-secret-not-for-real-use-0123456789"
 # Fixture values only: a dummy endpoint (.invalid never resolves) and fake credentials. Signing is
