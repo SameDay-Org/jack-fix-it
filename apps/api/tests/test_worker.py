@@ -10,17 +10,19 @@ from arq import func
 from arq.connections import ArqRedis
 from arq.worker import Function, Worker, create_worker
 from pydantic import ValidationError
+from redis.asyncio import Redis
 from sqlalchemy.exc import ProgrammingError
 
 import app.worker as app_worker
 from app.config import Settings, get_settings
+from app.integrations.live_updates import PushLiveUpdateSender
 from app.integrations.mapbox import MapboxRouteProvider, UnconfiguredRouteProvider
 from app.integrations.stripe_payments import StripePaymentsClient
 from app.integrations.stripe_transfers import StripeTransfersClient
 from app.modules.accounts.tasks import retry_account_cleanups
 from app.modules.chat.tasks import purge_chat_originals
 from app.modules.dispatch.tasks import dispatch_request, redispatch_stalled_requests
-from app.modules.jobs.live_updates import send_live_updates
+from app.modules.jobs.live_updates import LiveUpdateDeps, send_live_updates
 from app.modules.jobs.tasks import auto_confirm_jobs
 from app.modules.media.resweep import requeue_stale_media_copies
 from app.modules.notifications.push_tasks import check_push_receipts
@@ -340,6 +342,32 @@ def test_auto_confirm_sweep_runs_at_most_hourly() -> None:
 def test_unpaid_cancel_window_must_be_positive(value: str) -> None:
     with pytest.raises(ValidationError):
         make_settings(payment_unpaid_cancel_after_seconds=int(value))
+
+
+async def test_startup_gives_the_live_updates_the_workers_redis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """send_live_update and send_live_updates (#596) read ctx["live_updates"]: built at
+    startup on the worker's session factory and on its Redis (the positions' outside staging
+    and production, LOCATION_REDIS_URL's there), with both senders."""
+    monkeypatch.setattr(app_worker, "configure_logging", lambda level: None)
+    monkeypatch.setattr(app_worker, "init_sentry", lambda settings: None)
+    settings = make_settings()
+    monkeypatch.setattr(app_worker, "get_settings", lambda: settings)
+    redis = Redis.from_url(settings.redis_url)
+    ctx: dict[str, Any] = {"redis": redis}
+    try:
+        await app_worker.startup(ctx)
+        await app_worker.shutdown(ctx)
+    finally:
+        await redis.aclose()
+
+    deps = ctx["live_updates"]
+    assert isinstance(deps, LiveUpdateDeps)
+    assert deps.sessions is ctx["session_factory"]
+    assert deps.backend is not None
+    assert deps.backend.redis is redis
+    assert isinstance(deps.sender, PushLiveUpdateSender)
 
 
 async def test_startup_gives_the_sweep_a_stripe_client_only_with_a_key(

@@ -4,18 +4,22 @@ The senders are fakes, or Expo on a mock transport: never the network. The guard
 real Redis of REDIS_URL under a prefix of the test's own, deleted afterwards.
 """
 
+import asyncio
 import json
 import logging
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.config import Settings
 from app.integrations.expo_push import ExpoPushSender
 from app.integrations.live_updates import (
     ApnsLiveActivitySender,
@@ -28,13 +32,18 @@ from app.modules.devices.models import Device, DevicePlatform
 from app.modules.devices.service import DeviceService
 from app.modules.jobs.live import JobLiveConfig, JobLiveService
 from app.modules.jobs.live_updates import (
+    STAGE_RANK,
+    LiveUpdateDeps,
     LiveUpdateService,
     RedisLiveUpdateGuard,
     kick_live_update,
+    live_update_deps,
     send_live_update,
     send_live_updates,
     sweep_live_updates,
 )
+from app.modules.jobs.location import KEY_PREFIX, location_store_of
+from app.modules.jobs.location_guard import LocationStoreRefusedError
 from app.modules.jobs.models import Job, JobStatus, LiveActivityToken
 from app.modules.jobs.route import JobRouteConfig, JobRouteService
 from app.modules.jobs.schemas import JobLiveOut, LiveStage
@@ -53,8 +62,10 @@ from tests.job_world import (
     make_job,
     record_pushes,
 )
-from tests.test_job_route_api import FakeMapbox
-from tests.test_pro_location_api import CODE, prefix, redis
+from tests.test_job_live_api import NEEDLES
+from tests.test_job_route_api import FakeMapbox, drive, locate
+from tests.test_orphan_uploads import sessions_of
+from tests.test_pro_location_api import CODE, on_the_way_job, plant, prefix, redis
 from tests.test_requests_api import RecordingQueue
 
 # Fixtures, used by name.
@@ -362,7 +373,7 @@ async def test_the_cron_drops_finished_jobs_tokens_and_updates_jobs_on_the_way(
         live.views[job.id] = view(LiveStage.ON_THE_WAY, 300)
 
     looked_at, dropped = await sweep_live_updates(
-        db_session, service(db_session, live, guard, sender)
+        db_session, service(db_session, live, guard, sender), at=T0
     )
 
     # Only the job still on the way is looked at; the cancelled job's token went.
@@ -400,3 +411,271 @@ async def test_a_context_without_the_live_updates_sends_nothing(
         await send_live_updates({})
 
     assert caplog.messages.count("live_updates_not_configured") == 2
+
+
+# The guard's rules (#631 round 1)
+
+
+class FailingGuard:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    async def due(
+        self, job_id: uuid.UUID, stage: str, eta_minute: int | None, now: datetime
+    ) -> bool:
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    "error",
+    [RedisError("down"), TimeoutError(), LocationStoreRefusedError("not_ephemeral")],
+    ids=["redis error", "redis timeout", "refused"],
+)
+async def test_a_guard_that_cannot_answer_sends_nothing(
+    db_session: AsyncSession, world: JobWorld, caplog: pytest.LogCaptureFixture, error: Exception
+) -> None:
+    """The module's rule: without the guard's answer nothing goes out, never one send per
+    run."""
+    job = await make_job(db_session, world, JobStatus.ON_THE_WAY)
+    await a_device(db_session, world.customer, DevicePlatform.ANDROID)
+    live, sender = FakeLive(), RecordingSender()
+    live.views[job.id] = view(LiveStage.ON_THE_WAY, 300)
+    updates = LiveUpdateService(
+        db_session, live, FailingGuard(error), sender, DeviceService(db_session, 10)
+    )
+
+    with caplog.at_level(logging.INFO):
+        await updates.update(job.id)
+
+    assert sender.sent == []
+    assert {"live_update_guard_refused", "live_update_guard_unavailable"} & set(caplog.messages)
+
+
+async def test_the_eta_counts_in_whole_minutes(
+    db_session: AsyncSession, world: JobWorld, guard: RedisLiveUpdateGuard
+) -> None:
+    """Past the interval, an ETA in the same minute is no change: nothing goes out."""
+    job = await make_job(db_session, world, JobStatus.ON_THE_WAY)
+    await a_device(db_session, world.customer, DevicePlatform.ANDROID)
+    live, sender = FakeLive(), RecordingSender()
+    updates = service(db_session, live, guard, sender)
+
+    live.views[job.id] = view(LiveStage.ON_THE_WAY, 600, T0)  # minute 10: sent
+    await updates.update(job.id)
+    live.views[job.id] = view(LiveStage.ON_THE_WAY, 601, T0 + timedelta(seconds=INTERVAL + 10))
+    await updates.update(job.id)  # minute 10 again, the interval passed: not sent
+
+    assert [update.eta_seconds for update, _ in sender.sent] == [600]
+
+
+def test_every_stage_has_its_place() -> None:
+    assert list(STAGE_RANK) == list(LiveStage)
+    assert list(STAGE_RANK.values()) == list(range(len(LiveStage)))
+
+
+class SlowLive(FakeLive):
+    """A view that takes its time (the route from Mapbox): `current` waits for `release`."""
+
+    def __init__(self, stale: JobLiveOut) -> None:
+        super().__init__()
+        self.stale = stale
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def current(self, job_id: uuid.UUID) -> JobLiveOut | None:
+        self.entered.set()
+        await self.release.wait()
+        return self.stale
+
+
+async def test_a_slow_run_never_sends_a_stage_behind_the_one_sent(
+    db_session: AsyncSession, world: JobWorld, guard: RedisLiveUpdateGuard
+) -> None:
+    """#631 round 1, B2. The cron's run reads the job on the way and waits for its route; the
+    pro checks in meanwhile and "arrived" goes out; then the route answers. Its view is made
+    last, so its time is the latest, but its stage is behind: it is never sent."""
+    job = await make_job(db_session, world, JobStatus.ON_THE_WAY)
+    await a_device(db_session, world.customer, DevicePlatform.ANDROID)
+    sender = RecordingSender()
+    fast = FakeLive()
+    fast.views[job.id] = view(LiveStage.ON_THE_WAY, 300, T0)
+    await service(db_session, fast, guard, sender).update(job.id)  # On my way: sent
+    slow = SlowLive(view(LiveStage.ON_THE_WAY, 120, T0 + timedelta(seconds=INTERVAL + 2)))
+
+    cron = asyncio.create_task(service(db_session, slow, guard, sender).update(job.id))
+    async with asyncio.timeout(5):
+        await slow.entered.wait()
+    fast.views[job.id] = view(LiveStage.ARRIVED, None, T0 + timedelta(seconds=INTERVAL + 1))
+    await service(db_session, fast, guard, sender).update(job.id)  # the check-in: sent
+    slow.release.set()
+    async with asyncio.timeout(5):
+        await cron
+
+    assert [update.stage for update, _ in sender.sent] == ["on_the_way", "arrived"]
+
+
+async def test_with_the_defaults_each_cron_minute_sends_a_changed_eta(
+    db_session: AsyncSession, world: JobWorld, redis: Redis, prefix: str
+) -> None:
+    """#631 round 1, B3. With the default interval, cron runs a minute apart each send a
+    changed ETA minute, wherever in its minute a job's view is ready (a route, the jobs before
+    it): a run is timed by its minute. A second run for the same minute sends nothing."""
+    settings = make_settings()
+    guard = RedisLiveUpdateGuard(
+        redis,
+        None,
+        interval_seconds=settings.live_update_interval_seconds,
+        ttl_seconds=600,
+        timeout_seconds=2.0,
+        prefix=prefix,
+    )
+    job = await make_job(db_session, world, JobStatus.ON_THE_WAY)
+    await a_device(db_session, world.customer, DevicePlatform.ANDROID)
+    live, sender = FakeLive(), RecordingSender()
+    updates = service(db_session, live, guard, sender)
+
+    # (the run's minute, when the view was ready, the ETA): the Gatekeeper's cases.
+    for minute, ready, eta in (
+        (0, 1.6, 600),  # minute 10
+        (1, 60.7, 530),  # minute 8: 59.1 s after the last view, but a minute after its run
+        (2, 122.3, 470),  # minute 7
+        (3, 181.1, 410),  # minute 6
+        (3, 181.9, 350),  # the same run's minute again: not sent
+    ):
+        live.views[job.id] = view(LiveStage.ON_THE_WAY, eta, T0 + timedelta(seconds=ready))
+        await sweep_live_updates(db_session, updates, at=T0 + timedelta(minutes=minute))
+
+    assert [update.eta_seconds for update, _ in sender.sent] == [600, 530, 470, 410]
+
+
+async def test_expo_unavailable_is_logged_and_never_raised(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An Android send that cannot reach Expo ends quietly: the cron's run goes on with the
+    jobs after it."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("unreachable", request=request)
+
+    expo = ExpoPushSender(
+        access_token=None, timeout_seconds=2.0, transport=httpx.MockTransport(handler)
+    )
+    update = LiveUpdate(
+        job_id=uuid.uuid4(),
+        job_public_code="JF-000777",
+        stage="on_the_way",
+        eta_seconds=480,
+        distance_meters=3200,
+        progress=0.3,
+        updated_at=T0,
+    )
+
+    with caplog.at_level(logging.INFO):
+        await ExpoAndroidLiveSender(expo).send(update, ["ExponentPushToken[a1]"])
+
+    assert "live_update_android_unavailable" in caplog.messages
+
+
+# The worker's own job and cron, as app.worker wires them (#631 round 1, B4)
+
+
+def expo_recording(messages: list[dict[str, Any]]) -> ExpoPushSender:
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent = json.loads(request.content)
+        messages.extend(sent)
+        tickets = [{"status": "ok", "id": f"ticket-{n}"} for n in range(len(sent))]
+        return httpx.Response(200, json={"data": tickets})
+
+    return ExpoPushSender(
+        access_token=None, timeout_seconds=2.0, transport=httpx.MockTransport(handler)
+    )
+
+
+def worker_context(
+    settings: Settings,
+    session: AsyncSession,
+    redis: Redis | None,
+    push: ExpoPushSender,
+    **overrides: Any,
+) -> dict[str, Any]:
+    """The context app.worker's startup makes (live_update_deps), on the test's session."""
+    sessions = cast(async_sessionmaker[AsyncSession], sessions_of(session))
+    deps = live_update_deps(settings, sessions, redis, push)
+    return {"live_updates": replace(deps, **overrides)}
+
+
+async def test_the_worker_job_and_cron_send_a_real_jobs_updates(
+    db_session: AsyncSession, world: JobWorld, redis: Redis
+) -> None:
+    """From a real job, its position in the positions' Redis and its route, to what Expo gets:
+    the kicked job sends the stage, each cron minute a changed ETA minute, and nothing of
+    either person, the address or the arrival code goes out."""
+    settings = make_settings()
+    messages: list[dict[str, Any]] = []
+    mapbox = FakeMapbox()
+    now = [T0]
+    ctx = worker_context(
+        settings,
+        db_session,
+        redis,
+        expo_recording(messages),
+        provider=mapbox,
+        clock=lambda: now[0],
+    )
+    deps: LiveUpdateDeps = ctx["live_updates"]
+    job = await on_the_way_job(db_session, world)
+    await locate(db_session, world)
+    android = await a_device(db_session, world.customer, DevicePlatform.ANDROID)
+    store = location_store_of(deps.backend, settings)
+
+    async def ping(seconds: float, duration: float) -> None:
+        """The clock, the pro's latest position, and what Mapbox would answer now."""
+        now[0] = T0 + timedelta(seconds=seconds)
+        mapbox.found = replace(drive(), duration_s=duration)
+        await plant(store, job.id, now[0])
+
+    try:
+        await ping(-29.6, 1260.4)  # On my way, 11:59:30.4
+        await send_live_update(ctx, str(job.id))  # the stage and minute 21: sent
+        await ping(0.6, 1230.0)
+        await send_live_updates(ctx)  # 30 s on: not yet
+        await ping(61.9, 1169.0)
+        await send_live_updates(ctx)  # minute 19: sent
+        await ping(120.3, 1110.0)
+        await send_live_updates(ctx)  # minute 18, 58.4 s later but the next minute: sent
+    finally:
+        keys = [key async for key in redis.scan_iter(match=f"{KEY_PREFIX}*{job.id}*")]
+        if keys:
+            await redis.delete(*keys)
+
+    sent = [(m["data"]["stage"], int(m["data"]["eta_seconds"]) // 60) for m in messages]
+    assert sent == [("on_the_way", 21), ("on_the_way", 19), ("on_the_way", 18)]
+    assert {message["to"] for message in messages} == {android.expo_push_token}
+    assert {message["data"]["job_id"] for message in messages} == {str(job.id)}
+    # The job's own ids aside (a random one could hold any four digits), nothing personal.
+    shown = [
+        {k: v for k, v in m["data"].items() if k not in ("job_id", "job_public_code")}
+        for m in messages
+    ]
+    wire = json.dumps(shown)
+    for needle in NEEDLES:
+        assert needle not in wire, needle
+
+
+async def test_without_the_positions_redis_nothing_is_sent(
+    db_session: AsyncSession, world: JobWorld, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A worker with no positions' Redis (LOCATION_REDIS_URL missing in staging or
+    production): its job and its cron send nothing, and say why."""
+    settings = make_settings()
+    messages: list[dict[str, Any]] = []
+    ctx = worker_context(settings, db_session, None, expo_recording(messages))
+    job = await make_job(db_session, world, JobStatus.ON_THE_WAY)
+    await a_device(db_session, world.customer, DevicePlatform.ANDROID)
+
+    with caplog.at_level(logging.INFO):
+        await send_live_update(ctx, str(job.id))
+        await send_live_updates(ctx)
+
+    assert messages == []
+    assert caplog.messages.count("live_update_guard_refused") == 2

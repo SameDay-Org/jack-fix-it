@@ -9,10 +9,18 @@
   start, done: `kick_live_update`), and while the pro is on the way, when the ETA in whole
   minutes changes, at most every LIVE_UPDATE_INTERVAL_SECONDS: a cron looks at every job on
   the way each minute (`send_live_updates`).
+  - A cron run is timed by the minute it runs for, not by when a job's view is ready (a route
+    from Mapbox, the jobs before it in the run): two runs a minute apart are 60 s apart, so
+    with the defaults every run can send a changed minute.
+  - A kicked run is timed by its view. So the first ETA after On my way (the stage goes out at
+    once, often before any route) waits a full interval from that update.
 - The guard decides: one key per job in the positions' Redis (the ETA is position-derived),
   for LIVE_UPDATE_STATE_TTL_SECONDS, holding the last stage and ETA minute sent and when. One
-  Lua step decides and records at once, so two runs never both send the same change. A guard
-  that cannot answer sends nothing: an update is never worth a flood.
+  Lua step decides and records at once, so two runs never both send the same change.
+  - Stages only move forward (transitions.py has no edge back; a check-in is never undone): a
+    stage behind the one last sent is never sent. A run that read the job before a later step
+    and answers after it (its route took a while) is stale, whatever its time.
+  - A guard that cannot answer sends nothing: an update is never worth a flood.
 - Nothing after the job is under way: a run for a job confirmed, cancelled or otherwise past
   its stages sends nothing and deletes the job's Live Activity tokens; the cron also deletes
   the tokens of every such job.
@@ -56,7 +64,7 @@ from app.modules.jobs.location import (
 from app.modules.jobs.location_guard import EphemeralRedisGuard, LocationStoreRefusedError
 from app.modules.jobs.models import Job, JobStatus, LiveActivityToken
 from app.modules.jobs.route import JobRouteConfig, JobRouteService, route_cache_of
-from app.modules.jobs.schemas import JobLiveOut
+from app.modules.jobs.schemas import JobLiveOut, LiveStage
 from app.queue import JobQueue, enqueue
 
 logger = logging.getLogger(__name__)
@@ -64,20 +72,32 @@ logger = logging.getLogger(__name__)
 # The statuses a job is under way in (live.live_stage): a token of any other job is dropped.
 LIVE_STATUSES: Final = (JobStatus.ON_THE_WAY, JobStatus.IN_PROGRESS, JobStatus.COMPLETED)
 
-# Decides and records in one step. KEYS[1]: the job's guard. ARGV: the stage, the ETA minute
-# ('' when unknown), now and the interval (whole seconds), the key's lifetime. 1 when the
-# update is due (and recorded as sent), 0 when it is not (nothing written).
+# The stages in the only order a job goes through them (live.live_stage).
+STAGE_RANK: Final = {
+    LiveStage.ON_THE_WAY: 0,
+    LiveStage.ARRIVED: 1,
+    LiveStage.WORKING: 2,
+    LiveStage.DONE_WAITING_CONFIRM: 3,
+}
+
+# Decides and records in one step. KEYS[1]: the job's guard. ARGV: the stage, its rank, the ETA
+# minute ('' when unknown), now and the interval (whole seconds), the key's lifetime. 1 when the
+# update is due (and recorded as sent), 0 when it is not (nothing written): a later stage than
+# the one recorded is due, an earlier one never, the same one when its ETA minute changed and
+# the interval has passed.
 _DUE_SCRIPT: Final = """
-local stored = redis.call('HMGET', KEYS[1], 'stage', 'eta', 'sent')
+local stored = redis.call('HMGET', KEYS[1], 'rank', 'eta', 'sent')
+local rank = tonumber(ARGV[2])
 local due = false
-if stored[1] ~= ARGV[1] then
+if not stored[1] or rank > tonumber(stored[1]) then
   due = true
-elseif stored[2] ~= ARGV[2] and tonumber(ARGV[3]) - tonumber(stored[3]) >= tonumber(ARGV[4]) then
+elseif rank == tonumber(stored[1]) and stored[2] ~= ARGV[3]
+    and tonumber(ARGV[4]) - tonumber(stored[3]) >= tonumber(ARGV[5]) then
   due = true
 end
 if due then
-  redis.call('HSET', KEYS[1], 'stage', ARGV[1], 'eta', ARGV[2], 'sent', ARGV[3])
-  redis.call('EXPIRE', KEYS[1], ARGV[5])
+  redis.call('HSET', KEYS[1], 'stage', ARGV[1], 'rank', ARGV[2], 'eta', ARGV[3], 'sent', ARGV[4])
+  redis.call('EXPIRE', KEYS[1], ARGV[6])
   return 1
 end
 return 0
@@ -125,6 +145,7 @@ class RedisLiveUpdateGuard:
                 keys=[guard_key(self._prefix, job_id)],
                 args=[
                     stage,
+                    STAGE_RANK[LiveStage(stage)],
                     "" if eta_minute is None else str(eta_minute),
                     int(now.timestamp()),
                     self._interval,
@@ -155,9 +176,10 @@ class LiveUpdateService:
         self._sender = sender
         self._devices = devices
 
-    async def update(self, job_id: uuid.UUID) -> None:
+    async def update(self, job_id: uuid.UUID, *, at: datetime | None = None) -> None:
         """Sends the job's update when it is due; for a job not under way, sends nothing and
-        drops its Live Activity tokens."""
+        drops its Live Activity tokens. `at` times the update for the guard (a cron run's
+        minute); by default, when its view was made."""
         ids = {"job_id": str(job_id)}
         view = await self._live.current(job_id)
         if view is None:
@@ -165,7 +187,9 @@ class LiveUpdateService:
             return
         eta_minute = None if view.eta_seconds is None else view.eta_seconds // 60
         try:
-            due = await self._guard.due(job_id, view.stage.value, eta_minute, view.updated_at)
+            due = await self._guard.due(
+                job_id, view.stage.value, eta_minute, view.updated_at if at is None else at
+            )
         except LocationStoreRefusedError as refused:
             logger.error("live_update_guard_refused", extra={**ids, "reason": refused.reason})
             return
@@ -339,14 +363,21 @@ async def send_live_updates(ctx: dict[str, Any]) -> None:
     if deps is None:
         logger.info("live_updates_not_configured")
         return
+    # The minute this run is for (app.worker runs it at the start of every minute), not when
+    # each job's view is ready: runs a minute apart are an interval apart, however long a
+    # route or the jobs before it took.
+    minute = deps.clock().replace(second=0, microsecond=0)
     async with deps.sessions() as session:
-        jobs, dropped = await sweep_live_updates(session, _service(deps, session))
+        jobs, dropped = await sweep_live_updates(session, _service(deps, session), at=minute)
     logger.info("live_updates_swept", extra={"jobs": jobs, "tokens_dropped": dropped})
 
 
-async def sweep_live_updates(session: AsyncSession, service: LiveUpdateService) -> tuple[int, int]:
+async def sweep_live_updates(
+    session: AsyncSession, service: LiveUpdateService, *, at: datetime
+) -> tuple[int, int]:
     """Drops the Live Activity tokens of every job no longer under way, then gives each job on
-    the way (the stage whose ETA moves) its update when due: (jobs looked at, tokens dropped)."""
+    the way (the stage whose ETA moves) its update when due, timed `at` (the run's minute):
+    (jobs looked at, tokens dropped)."""
     dropped = await session.execute(
         delete(LiveActivityToken).where(
             LiveActivityToken.job_id.in_(select(Job.id).where(Job.status.not_in(LIVE_STATUSES)))
@@ -360,5 +391,5 @@ async def sweep_live_updates(session: AsyncSession, service: LiveUpdateService) 
     await session.commit()
     count: int = dropped.rowcount  # type: ignore[attr-defined]  # CursorResult of a DELETE
     for job_id in tracked:
-        await service.update(job_id)
+        await service.update(job_id, at=at)
     return len(tracked), count
