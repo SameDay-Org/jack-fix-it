@@ -28,7 +28,7 @@ ETA_MAX_MINUTES: Final = 240
 ACCURACY_MAX_M: Final = 10_000
 
 
-# A Live Activity push token (#596): hex, as ActivityKit gives it (32 bytes and up).
+# A Live Activity push token (#596): hex, as ActivityKit gives it (32 characters and up).
 LIVE_ACTIVITY_TOKEN_MIN_LENGTH: Final = 32
 LIVE_ACTIVITY_TOKEN_PATTERN: Final = "^[0-9A-Fa-f]+$"  # noqa: S105 - a format, not a secret
 
