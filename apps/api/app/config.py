@@ -638,6 +638,8 @@ class Settings(BaseSettings):
     route_refresh_distance_m: float = Field(default=100.0, ge=0)
     route_max_points: int = Field(default=500, ge=2)
     route_max_steps: int = Field(default=30, gt=0)
+    # The live job view (#596): an ETA from a pro's position older than this is not shown.
+    live_position_max_age_seconds: int = Field(default=120, gt=0)
     # Geocode on save (#384): true gives a request's address its point once, when the request
     # is made, with Mapbox's PERMANENT geocoding (the only kind that may be stored), so its
     # route asks for no geocoding. Mapbox bills that kind apart and refuses it to an account
