@@ -40,8 +40,9 @@ GRANTS_PREFIX: Final = "upload-grants"
 _ALL: Final = datetime.max.replace(tzinfo=UTC)
 
 # KEYS[1]: the user's grants, a sorted set of "<key>|<size>" scored by when each one expires
-# (ms). ARGV: now (ms), the URL lifetime (ms), the bytes already pending in the bucket, the
-# ceiling, the new key, its size, then the keys already in the bucket (not counted twice).
+# (ms). ARGV: now (ms), a grant's lifetime (ms: its URL's, plus the time an upload begun in
+# time may take to land), the bytes already pending in the bucket, the ceiling, the new key,
+# its size, then the keys already in the bucket (not counted twice).
 # 1 and the new grant recorded when it fits; 0 and nothing written when it does not.
 _ADMIT_SCRIPT: Final = """
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
@@ -82,9 +83,18 @@ class UploadGrants(Protocol):
 
 class RedisUploadGrants:
     def __init__(
-        self, redis: Redis, *, ttl_seconds: int, max_bytes: int, timeout_seconds: float
+        self,
+        redis: Redis,
+        *,
+        ttl_seconds: int,
+        grace_seconds: int,
+        max_bytes: int,
+        timeout_seconds: float,
     ) -> None:
-        self._ttl_ms = ttl_seconds * 1000
+        """A grant counts for `ttl_seconds` (its URL's lifetime) plus `grace_seconds`
+        (UPLOAD_GRANT_GRACE_SECONDS): an upload begun just before its URL ends is still
+        counted until it lands or can no longer land."""
+        self._lifetime_ms = (ttl_seconds + grace_seconds) * 1000
         self._max = max_bytes
         self._timeout = timeout_seconds
         self._script = redis.register_script(_ADMIT_SCRIPT)
@@ -104,7 +114,7 @@ class RedisUploadGrants:
                 keys=[f"{GRANTS_PREFIX}:{user_id}"],
                 args=[
                     int(now.timestamp() * 1000),
-                    self._ttl_ms,
+                    self._lifetime_ms,
                     stored_bytes,
                     self._max,
                     key,

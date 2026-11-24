@@ -34,6 +34,7 @@ def get_upload_grants(
     return RedisUploadGrants(
         redis,
         ttl_seconds=settings.upload_url_ttl_seconds,
+        grace_seconds=settings.upload_grant_grace_seconds,
         max_bytes=settings.upload_pending_max_bytes,
         timeout_seconds=settings.rate_limit_timeout_seconds,
     )

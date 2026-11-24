@@ -22,7 +22,7 @@ while the listing ran is kept. The residual: a row that attaches a key after its
 ever in that window; a fresh upload never is.
 
 Job photos (#298) close that window by disjoint ages, with no lock shared with the sweep (dispute
-photos, #75, by the same rule and setting): a
+photos, #75, and a new request's media, #529, by the same rule and setting): a
 job accepts a job_photo key issued at most JOB_PHOTO_ATTACH_MAX_AGE_MINUTES ago (the issue time
 is in the key, uploads/keys.py), at most half of ORPHAN_UPLOAD_MIN_AGE_HOURS (config.py). An
 object is last modified after its key was issued, so one this sweep deletes had its key issued

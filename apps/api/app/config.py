@@ -234,6 +234,12 @@ class Settings(BaseSettings):
     s3_request_max_attempts: int = Field(default=2, ge=1)
     upload_pending_list_timeout_seconds: float = Field(default=10.0, gt=0)
     upload_url_ttl_seconds: int = Field(default=300, gt=0)
+    # How long after its URL ends an issued upload still counts against the pending uploads'
+    # ceiling (#529; the Foreman 2026-11-24, the Vault's N1): storage checks a URL when the
+    # upload starts, so one begun in time can still be landing. The longest the app waits for
+    # one PUT: 120 s plus the file at 128 KiB/s (apps/mobile/src/api/config.ts), about 920 s
+    # for a 100 MiB video.
+    upload_grant_grace_seconds: int = Field(default=1_200, ge=0)
     download_url_ttl_seconds: int = Field(default=300, gt=0)
     upload_max_image_bytes: int = Field(default=10 * MIB, gt=0)
     upload_max_video_bytes: int = Field(default=100 * MIB, gt=0)
@@ -585,7 +591,8 @@ class Settings(BaseSettings):
     # The oldest job_photo upload a job accepts, by the time its key was issued (#298). At most
     # half of ORPHAN_UPLOAD_MIN_AGE_HOURS (checked below; the api and the worker must share both
     # values): the sweep only deletes older uploads, so a key attach accepted was referenced
-    # long before the sweep can pick it (orphans.py).
+    # long before the sweep can pick it (orphans.py). A new request's media follow the same
+    # rule (#529; the Foreman 2026-11-24, the Vault's N2), as dispute photos do.
     job_photo_attach_max_age_minutes: int = Field(default=720, gt=0)
     # Job confirmation (#66, #67; Cesar 2026-10-29, epic #272): once the pro marks the job done,
     # the customer has this many hours to confirm it (or report a problem); a job still completed

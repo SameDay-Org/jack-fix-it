@@ -33,7 +33,7 @@ from app.modules.requests.models import (
     ServiceRequest,
 )
 from app.modules.service_areas.models import ServiceArea
-from app.modules.uploads.keys import owned_upload, upload_content_type
+from app.modules.uploads.keys import owned_upload, time_ordered_token, upload_content_type
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
@@ -58,6 +58,12 @@ NOW = 1_000.0
 DESCRIPTION = "Water leaks under the kitchen sink"
 ADDRESS = {"line1": "742 Evergreen Terrace", "city": "Orlando", "state": "FL", "zip_code": "32801"}
 INVALID_MEDIA = {"error": {"code": "invalid_media", "message": "The attached media is invalid."}}
+UPLOAD_EXPIRED = {
+    "error": {
+        "code": "upload_expired",
+        "message": "One or more photos or videos were uploaded too long ago. Upload them again.",
+    }
+}
 INVALID_CATEGORY = {
     "error": {"code": "invalid_category", "message": "The category is not available."}
 }
@@ -160,8 +166,15 @@ class Caller:
     id: uuid.UUID
     headers: dict[str, str]
 
-    def media_key(self, extension: str = ".jpg", purpose: str = "request_media") -> str:
-        return f"u/{self.id}/{purpose}/{uuid.uuid4().hex}{extension}"
+    def media_key(
+        self,
+        extension: str = ".jpg",
+        purpose: str = "request_media",
+        issued_at: datetime | None = None,
+    ) -> str:
+        """A key as the API issues it: its token holds its issue time (now by default)."""
+        token = time_ordered_token(issued_at or datetime.now(UTC))
+        return f"u/{self.id}/{purpose}/{token}{extension}"
 
 
 async def make_caller(
@@ -663,6 +676,69 @@ async def test_duplicate_media_key_rejected(
 
     assert response.status_code == 422
     assert response.json() == INVALID_MEDIA
+
+
+@pytest.mark.parametrize(
+    ("age", "made"),
+    [
+        (timedelta(minutes=719), True),
+        (timedelta(minutes=721), False),
+        (timedelta(days=2), False),
+    ],
+)
+async def test_media_uploaded_too_long_ago_is_refused(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    age: timedelta,
+    made: bool,
+) -> None:
+    """#529 (the Vault's N2; the Foreman 2026-11-24): a new request's media follow the job
+    photos' rule, issued at most JOB_PHOTO_ATTACH_MAX_AGE_MINUTES (12 h) before. An older
+    upload may be gone (the orphan sweep deletes after 24 h): 422 upload_expired, nothing
+    written, and the app uploads it again; never a request whose media names a deleted file."""
+    ana = await make_caller(db_session)
+    fresh, aged = ana.media_key(), ana.media_key(".mp4", issued_at=datetime.now(UTC) - age)
+
+    response = await create(db_client, ana, media_keys=[fresh, aged])
+
+    stored = await db_session.scalars(
+        select(RequestMedia.file_key).where(RequestMedia.file_key.in_([fresh, aged]))
+    )
+    if made:
+        assert response.status_code == 201, response.text
+        assert set(stored.all()) == {fresh, aged}
+    else:
+        assert (response.status_code, response.json()) == (422, UPLOAD_EXPIRED)
+        assert stored.all() == []
+        mine = select(func.count()).select_from(ServiceRequest)
+        assert await db_session.scalar(mine.where(ServiceRequest.customer_id == ana.id)) == 0
+
+
+async def test_a_key_without_an_issue_time_is_expired(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    """A key issued before #298 (a UUIDv4 token, no issue time) is past any age."""
+    ana = await make_caller(db_session)
+    before_298 = f"u/{ana.id}/request_media/{uuid.uuid4().hex}.jpg"
+
+    response = await create(db_client, ana, media_keys=[before_298])
+
+    assert (response.status_code, response.json()) == (422, UPLOAD_EXPIRED)
+
+
+async def test_a_key_that_is_not_the_callers_stays_invalid_media(
+    db_client: httpx.AsyncClient, db_session: AsyncSession, storage: FakeStorage
+) -> None:
+    """The keys' own checks come first: an old key of another account is invalid_media, as
+    any other key of theirs."""
+    ana = await make_caller(db_session)
+    bruno = await make_caller(db_session)
+    anas_old = ana.media_key(issued_at=datetime.now(UTC) - timedelta(days=2))
+
+    response = await create(db_client, bruno, media_keys=[bruno.media_key(), anas_old])
+
+    assert (response.status_code, response.json()) == (422, INVALID_MEDIA)
 
 
 @pytest.mark.parametrize(

@@ -333,7 +333,11 @@ URLs an hour (`UPLOAD_URL_LIMIT` per `UPLOAD_URL_WINDOW_SECONDS`), and at most
 `UPLOAD_PENDING_MAX_BYTES` (200 MiB) of uploads nothing holds yet (413 past it). To check it,
 the api lists the account's own files with short bounds of its own (`S3_REQUEST_*`: 2 s to
 connect, 5 s to read, 2 attempts; at most `UPLOAD_PENDING_LIST_TIMEOUT_SECONDS`, 10 s, in
-all); a storage or Redis that does not answer gives 503, never a URL. **Cesar (ops):**
+all); a storage or Redis that does not answer gives 503, never a URL. An upload begun before
+its URL ends still counts for `UPLOAD_GRANT_GRACE_SECONDS` (1200) after it. A new request takes
+media uploaded at most `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` (12 h) before, as job and dispute
+photos do (else 422 `upload_expired`), so the sweep never deletes a file a request then
+attaches. **Cesar (ops):**
 a worker that has `ORPHAN_UPLOAD_MODE=dry_run` set by hand keeps it: delete the variable (or set
 `delete`), staging first, then production.
 

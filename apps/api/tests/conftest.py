@@ -248,7 +248,9 @@ def make_app(settings: Settings) -> FastAPI:
     notifier = quiet_chat_notifier()
     app.dependency_overrides[get_chat_notifier] = lambda: notifier
     grants = InMemoryUploadGrants(
-        ttl=timedelta(seconds=settings.upload_url_ttl_seconds),
+        ttl=timedelta(
+            seconds=settings.upload_url_ttl_seconds + settings.upload_grant_grace_seconds
+        ),
         max_bytes=settings.upload_pending_max_bytes,
     )
     app.dependency_overrides[get_upload_grants] = lambda: grants
