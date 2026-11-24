@@ -8472,6 +8472,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description pending_uploads_too_large: this upload would put the account's uploads that nothing uses yet over UPLOAD_PENDING_MAX_BYTES; use them, or wait for unused ones to clear (a day). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description upload_invalid: content type not allowed for the purpose, or size out of range; validation_error: malformed body. */
             422: {
                 headers: {
@@ -8486,6 +8495,15 @@ export interface operations {
                 headers: {
                     /** @description Seconds until the current limit window ends. */
                     "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description uploads_unavailable: the account's pending uploads could not be counted; retry. */
+            503: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {
