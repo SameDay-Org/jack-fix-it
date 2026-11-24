@@ -4699,6 +4699,98 @@
         }
       }
     },
+    "/v1/jobs/{job_id}/live/token": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Keep my iPhone Live Activity's push token for an ongoing job",
+        "description": "The token ActivityKit gave the Live Activity the customer's iPhone started for their own\nongoing job (#596): the live view's updates reach the activity through it while the app is\nclosed. One per job and device; sending a new one replaces it.",
+        "operationId": "keep_live_activity_token_v1_jobs__job_id__live_token_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveActivityTokenIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "validation_error: a push token of the wrong shape, or an unknown field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only customers follow their job this way.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found: no job of the caller with this id. device_not_found: no device of the caller has this Expo push token; register the device first (PUT /v1/devices).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "job_not_live: the job is not under way; end the activity instead.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/jobs/{job_id}/messages": {
       "get": {
         "tags": [
@@ -14104,6 +14196,32 @@
         "title": "JobTransferOut"
       },
       "JsonValue": {},
+      "LiveActivityTokenIn": {
+        "properties": {
+          "expo_push_token": {
+            "type": "string",
+            "pattern": "^Expo(nent)?PushToken\\[[A-Za-z0-9_-]{1,200}\\]$",
+            "title": "Expo Push Token",
+            "description": "The Expo push token."
+          },
+          "live_activity_token": {
+            "type": "string",
+            "maxLength": 512,
+            "minLength": 32,
+            "pattern": "^[0-9A-Fa-f]+$",
+            "title": "Live Activity Token",
+            "description": "ActivityKit's push token for this activity, as hex."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expo_push_token",
+          "live_activity_token"
+        ],
+        "title": "LiveActivityTokenIn",
+        "description": "The push token of the Live Activity the customer's iPhone started for the job (#596),\nwith the device's own Expo push token, so the API knows which device it is."
+      },
       "LiveStage": {
         "type": "string",
         "enum": [
