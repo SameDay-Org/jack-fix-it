@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import boto3
 from boto3.exceptions import Boto3Error
@@ -55,6 +55,15 @@ class ObjectPage:
 class DeleteResult:
     deleted: int
     failed: int  # objects the storage answered an error for: they are still there
+
+
+def _stored(item: Mapping[str, Any]) -> StoredObject:
+    """A listing entry, read strictly (#529): one without a size is the storage's error, never a
+    size of zero that the pending uploads' ceiling would count as free."""
+    size = item.get("Size")
+    if not isinstance(size, int) or isinstance(size, bool) or size < 0:
+        raise StorageUnavailableError("list failed: an entry without a size")
+    return StoredObject(key=item["Key"], last_modified=item["LastModified"], size_bytes=size)
 
 
 # The most keys one DeleteObjects call takes (the S3 API's limit).
@@ -119,7 +128,10 @@ class S3Storage:
         region: str,
         connect_timeout: float,
         read_timeout: float,
+        max_attempts: int | None = None,
     ) -> None:
+        """`max_attempts`: the attempts per call, the first included (botocore's
+        `total_max_attempts`), its own default when None (the worker's)."""
         self._bucket = bucket
         # Path-style (endpoint/bucket/key): R2 and Railway Buckets serve it without a
         # bucket subdomain. Credentials are explicit, so nothing is read from ~/.aws. The
@@ -135,11 +147,18 @@ class S3Storage:
                 s3={"addressing_style": "path"},
                 connect_timeout=connect_timeout,
                 read_timeout=read_timeout,
+                **(
+                    {}
+                    if max_attempts is None
+                    else {"retries": {"total_max_attempts": max_attempts, "mode": "standard"}}
+                ),
             ),
         )
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "S3Storage":
+    def from_settings(cls, settings: Settings, *, for_requests: bool = False) -> "S3Storage":
+        """`for_requests`: the API's client (#529): S3_REQUEST_* timeouts and attempts, so a
+        call inside a request never waits on the worker's long ones."""
         if (
             settings.s3_endpoint_url is None
             or settings.s3_bucket is None
@@ -153,8 +172,17 @@ class S3Storage:
             access_key_id=settings.s3_access_key_id.get_secret_value(),
             secret_access_key=settings.s3_secret_access_key.get_secret_value(),
             region=settings.s3_region,
-            connect_timeout=settings.s3_connect_timeout_seconds,
-            read_timeout=settings.s3_read_timeout_seconds,
+            connect_timeout=(
+                settings.s3_request_connect_timeout_seconds
+                if for_requests
+                else settings.s3_connect_timeout_seconds
+            ),
+            read_timeout=(
+                settings.s3_request_read_timeout_seconds
+                if for_requests
+                else settings.s3_read_timeout_seconds
+            ),
+            max_attempts=settings.s3_request_max_attempts if for_requests else None,
         )
 
     def presign_put(
@@ -210,14 +238,7 @@ class S3Storage:
         )
         try:
             for page in pages:
-                listed = [
-                    StoredObject(
-                        key=item["Key"],
-                        last_modified=item["LastModified"],
-                        size_bytes=int(item.get("Size", 0)),
-                    )
-                    for item in page.get("Contents", [])
-                ]
+                listed = [_stored(item) for item in page.get("Contents", [])]
                 older = [item for item in listed if item.last_modified < before]
                 yield ObjectPage(objects=older, newer=len(listed) - len(older))
         except ClientError as error:
@@ -265,6 +286,6 @@ def get_storage(request: Request) -> Storage:
     """
     storage: Storage | None = getattr(request.app.state, "storage", None)
     if storage is None:
-        storage = S3Storage.from_settings(request.app.state.settings)
+        storage = S3Storage.from_settings(request.app.state.settings, for_requests=True)
         request.app.state.storage = storage
     return storage

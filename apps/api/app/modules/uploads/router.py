@@ -46,7 +46,14 @@ def get_upload_service(
     grants: Annotated[UploadGrants, Depends(get_upload_grants)],
 ) -> UploadService:
     return UploadService(
-        storage, UploadConfig.from_settings(settings), PendingUploads(session, storage, grants)
+        storage,
+        UploadConfig.from_settings(settings),
+        PendingUploads(
+            session,
+            storage,
+            grants,
+            list_timeout_seconds=settings.upload_pending_list_timeout_seconds,
+        ),
     )
 
 

@@ -6,15 +6,18 @@ The bucket is a fake that lists, deletes and presigns; the grants are the in-mem
 tests/conftest.py on the API, and the real Redis script in its own tests.
 """
 
+import time
 import uuid
-from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
 import pytest
+from fastapi import FastAPI, Request
 from redis.asyncio import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,15 +27,17 @@ from app.integrations.storage import (
     DeleteResult,
     ObjectPage,
     PresignedUpload,
+    S3Storage,
     StorageUnavailableError,
     StoredObject,
     get_storage,
 )
 from app.modules.uploads.orphans import OrphanSweepConfig, OrphanUploadSweeper
 from app.modules.uploads.pending import GRANTS_PREFIX, RedisUploadGrants
+from app.modules.uploads.router import get_upload_grants
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
-from tests.conftest import make_app, make_settings
+from tests.conftest import TEST_STORAGE_SETTINGS, make_app, make_settings
 from tests.test_orphan_uploads import MIN_AGE, NOW, sessions_of
 from tests.test_uploads_api import Caller, ask_upload, make_caller
 
@@ -64,6 +69,11 @@ class FakeBucket:
     puts: list[str] = field(default_factory=list)
     listed: list[str] = field(default_factory=list)
     failing: bool = False
+    page_size: int = 1_000  # S3's own
+    delay_seconds: float = 0.0
+    # Called while listing: what it returns is kept (the test's own probe).
+    probe: Callable[[], object] | None = None
+    probed: list[object] = field(default_factory=list)
 
     def store(self, key: str, size: int, at: datetime) -> None:
         self.objects[key] = StoredObject(key, at, size)
@@ -80,11 +90,17 @@ class FakeBucket:
 
     def list_older_than(self, prefix: str, before: datetime) -> Iterator[ObjectPage]:
         self.listed.append(prefix)
+        if self.probe is not None:
+            self.probed.append(self.probe())
+        if self.delay_seconds:
+            time.sleep(self.delay_seconds)
         if self.failing:
             raise StorageUnavailableError("list failed: test")
         mine = [item for key, item in sorted(self.objects.items()) if key.startswith(prefix)]
-        older = [item for item in mine if item.last_modified < before]
-        yield ObjectPage(objects=older, newer=len(mine) - len(older))
+        for start in range(0, max(len(mine), 1), self.page_size):
+            chunk = mine[start : start + self.page_size]
+            older = [item for item in chunk if item.last_modified < before]
+            yield ObjectPage(objects=older, newer=len(chunk) - len(older))
 
     def download_to(self, key: str, path: Path) -> None:
         raise AssertionError("the ceiling never downloads")
@@ -204,6 +220,111 @@ async def test_an_orphan_the_sweep_deletes_frees_its_bytes(
     assert (before_sweep.status_code, before_sweep.json()) == (413, TOO_LARGE)
     assert counts.deleted == 1
     assert after_sweep.status_code == 201
+
+
+async def test_no_transaction_is_open_while_the_bucket_is_listed(
+    db_session: AsyncSession, bucket: FakeBucket
+) -> None:
+    """#635 Gatekeeper (1): the request's own reads (its authentication) end before the
+    listing, so no pooled connection waits on the storage."""
+    bucket.probe = db_session.in_transaction
+    async with client_for(make_settings(), bucket, db_session) as client:
+        ana = await make_caller(db_session, UserRole.CUSTOMER)
+        response = await ask_upload(client, ana, "request_media", "image/jpeg", 1_000)
+
+    assert response.status_code == 201
+    assert bucket.probed == [False]
+
+
+async def test_a_slow_listing_gives_a_quick_503(
+    db_session: AsyncSession, bucket: FakeBucket
+) -> None:
+    """#635 Gatekeeper (2): UPLOAD_PENDING_LIST_TIMEOUT_SECONDS bounds the whole listing (0.3 s
+    here); a stalled storage answers 503 then, not after the worker's long timeouts."""
+    bucket.delay_seconds = 3.0
+    settings = make_settings(upload_pending_list_timeout_seconds=0.3)
+    async with client_for(settings, bucket, db_session) as client:
+        ana = await make_caller(db_session, UserRole.CUSTOMER)
+        started = time.monotonic()
+        response = await ask_upload(client, ana, "request_media", "image/jpeg", 1_000)
+        took = time.monotonic() - started
+
+    assert (response.status_code, response.json()) == (503, UNAVAILABLE)
+    assert took < 2.0
+    assert bucket.puts == []
+
+
+def test_the_apis_storage_client_has_short_bounds() -> None:
+    """#635 Gatekeeper (2): the API's client (get_storage) uses S3_REQUEST_* (the worker keeps
+    its long ones for transfers)."""
+    settings = make_settings(
+        **TEST_STORAGE_SETTINGS,
+        s3_request_connect_timeout_seconds=1.5,
+        s3_request_read_timeout_seconds=4.0,
+        s3_request_max_attempts=2,
+    )
+    app = FastAPI()
+    app.state.settings = settings
+    built = get_storage(Request({"type": "http", "app": app}))
+    assert isinstance(built, S3Storage)
+    api = built._client.meta.config
+    worker = S3Storage.from_settings(settings)._client.meta.config  # the worker's (worker.py)
+
+    assert (api.connect_timeout, api.read_timeout) == (1.5, 4.0)
+    assert api.retries == {"total_max_attempts": 2, "mode": "standard"}  # 1 call + 1 retry
+    assert (worker.connect_timeout, worker.read_timeout) == (
+        settings.s3_connect_timeout_seconds,
+        settings.s3_read_timeout_seconds,
+    )
+
+
+class FailingGrants:
+    async def admit(
+        self,
+        user_id: uuid.UUID,
+        key: str,
+        size_bytes: int,
+        *,
+        stored_bytes: int,
+        landed: Sequence[str],
+        now: datetime,
+    ) -> bool:
+        raise RedisConnectionError("redis is down")
+
+
+async def test_a_redis_outage_gives_no_url(db_session: AsyncSession, bucket: FakeBucket) -> None:
+    """#635 Gatekeeper (3): the grants cannot be read or written: 503, never a URL."""
+    settings = make_settings()
+    app = make_app(settings)
+    app.dependency_overrides[get_storage] = lambda: bucket
+    grants = FailingGrants()
+    app.dependency_overrides[get_upload_grants] = lambda: grants
+
+    async def test_session() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = test_session
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        ana = await make_caller(db_session, UserRole.CUSTOMER)
+        response = await ask_upload(client, ana, "request_media", "image/jpeg", 1_000)
+
+    assert (response.status_code, response.json()) == (503, UNAVAILABLE)
+    assert bucket.puts == []
+
+
+async def test_thousands_of_files_are_checked_a_page_at_a_time(
+    db_session: AsyncSession, bucket: FakeBucket
+) -> None:
+    """#635 Gatekeeper (4): 6,000 files (six pages) in one account. Checked in one statement
+    they would pass the driver's 32,767 arguments (six per key) and fail every URL."""
+    async with client_for(make_settings(), bucket, db_session) as client:
+        ana = await make_caller(db_session, UserRole.CUSTOMER)
+        for index in range(6_000):
+            bucket.store(f"u/{ana.id}/request_media/{index:05}.jpg", 1, NOW)
+        response = await ask_upload(client, ana, "request_media", "image/jpeg", 1_000)
+
+    assert response.status_code == 201
 
 
 def test_the_decided_values_are_the_defaults() -> None:

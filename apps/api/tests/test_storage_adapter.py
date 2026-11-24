@@ -270,7 +270,7 @@ def test_a_failing_listing_is_unavailable_and_keyless(
 ) -> None:
     class Paginator:
         def paginate(self, **params: object) -> Iterator[dict[str, object]]:
-            yield {"Contents": [{"Key": KEY, "LastModified": CUT - timedelta(days=2)}]}
+            yield {"Contents": [{"Key": KEY, "LastModified": CUT - timedelta(days=2), "Size": 3}]}
             raise failure
 
     monkeypatch.setattr(storage._client, "get_paginator", lambda name: Paginator())
@@ -282,6 +282,25 @@ def test_a_failing_listing_is_unavailable_and_keyless(
 
     assert KEY not in str(error.value)
     assert error.value.__suppress_context__
+
+
+@pytest.mark.parametrize("size", [{}, {"Size": None}, {"Size": -1}, {"Size": "12"}])
+def test_an_entry_without_a_size_is_unavailable_not_zero(
+    storage: S3Storage, monkeypatch: pytest.MonkeyPatch, size: dict[str, object]
+) -> None:
+    """#635 Gatekeeper (5): the pending uploads' ceiling counts stored sizes; an entry without
+    one is the storage's error (503), never free bytes."""
+
+    class Paginator:
+        def paginate(self, **params: object) -> Iterator[dict[str, object]]:
+            yield {"Contents": [{"Key": KEY, "LastModified": CUT - timedelta(days=2), **size}]}
+
+    monkeypatch.setattr(storage._client, "get_paginator", lambda name: Paginator())
+
+    with pytest.raises(StorageUnavailableError) as error:
+        list(storage.list_older_than("u/", CUT))
+
+    assert KEY not in str(error.value)
 
 
 def test_delete_many_sends_batches_of_at_most_1000_and_counts_errors(storage: S3Storage) -> None:

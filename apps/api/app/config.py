@@ -226,6 +226,13 @@ class Settings(BaseSettings):
     # The worker's own transfers (#173): seconds to connect, and to wait for each read.
     s3_connect_timeout_seconds: float = Field(default=10.0, gt=0)
     s3_read_timeout_seconds: float = Field(default=60.0, gt=0)
+    # The API's own calls (#529: the pending uploads' listing, inside a request): short, with
+    # few attempts, so a stalled storage answers 503 fast and frees its thread. And the most
+    # one listing may take in all, whatever its pages.
+    s3_request_connect_timeout_seconds: float = Field(default=2.0, gt=0)
+    s3_request_read_timeout_seconds: float = Field(default=5.0, gt=0)
+    s3_request_max_attempts: int = Field(default=2, ge=1)
+    upload_pending_list_timeout_seconds: float = Field(default=10.0, gt=0)
     upload_url_ttl_seconds: int = Field(default=300, gt=0)
     download_url_ttl_seconds: int = Field(default=300, gt=0)
     upload_max_image_bytes: int = Field(default=10 * MIB, gt=0)

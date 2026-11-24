@@ -115,36 +115,60 @@ class RedisUploadGrants:
         return bool(answer)
 
 
-def _listed(storage: Storage, prefix: str) -> list[StoredObject]:
-    return [item for page in storage.list_older_than(prefix, _ALL) for item in page.objects]
+def _listed(storage: Storage, prefix: str) -> list[list[StoredObject]]:
+    """The caller's objects, a listing page at a time (S3's pages hold at most 1,000)."""
+    return [list(page.objects) for page in storage.list_older_than(prefix, _ALL)]
 
 
 class PendingUploads:
-    def __init__(self, session: AsyncSession, storage: Storage, grants: UploadGrants) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        storage: Storage,
+        grants: UploadGrants,
+        *,
+        list_timeout_seconds: float,
+    ) -> None:
+        """`list_timeout_seconds`: the most the listing may take in all
+        (UPLOAD_PENDING_LIST_TIMEOUT_SECONDS)."""
         self._session = session
         self._storage = storage
         self._grants = grants
+        self._list_timeout = list_timeout_seconds
 
     async def admit(self, user_id: uuid.UUID, key: str, size_bytes: int) -> None:
         """Lets the URL for `key` be given, or raises PendingUploadsTooLargeError (413) or
         UploadsUnavailableError (503)."""
         ids = {"user_id": str(user_id)}
+        # The request's transaction (its authentication's reads) ends here: no pooled
+        # connection waits on the storage.
+        await self._session.commit()
         try:
-            # boto3 is blocking: the listing runs in a thread, the caller's own prefix only.
-            stored = await asyncio.to_thread(_listed, self._storage, f"u/{user_id}/")
+            # boto3 is blocking: the listing runs in a thread, the caller's own prefix only,
+            # within UPLOAD_PENDING_LIST_TIMEOUT_SECONDS in all (the API's client has short
+            # timeouts and few attempts of its own, so the thread ends soon after).
+            async with asyncio.timeout(self._list_timeout):
+                pages = await asyncio.to_thread(_listed, self._storage, f"u/{user_id}/")
         except StorageUnavailableError:
             logger.error("pending_uploads_listing_failed", extra=ids)
             raise UploadsUnavailableError from None
-        held = await referenced_keys(self._session, [item.key for item in stored])
+        except TimeoutError:
+            logger.error("pending_uploads_listing_timed_out", extra=ids)
+            raise UploadsUnavailableError from None
+        stored_bytes = 0
+        for page in pages:
+            # One page's keys per statement, as the sweep checks them: a whole account's in
+            # one would pass the driver's limit on arguments.
+            held = await referenced_keys(self._session, [item.key for item in page])
+            stored_bytes += sum(item.size_bytes for item in page if item.key not in held)
         await self._session.commit()  # nothing is held while Redis answers
-        stored_bytes = sum(item.size_bytes for item in stored if item.key not in held)
         try:
             admitted = await self._grants.admit(
                 user_id,
                 key,
                 size_bytes,
                 stored_bytes=stored_bytes,
-                landed=[item.key for item in stored],
+                landed=[item.key for page in pages for item in page],
                 now=datetime.now(UTC),
             )
         except (RedisError, OSError):  # OSError includes TimeoutError
