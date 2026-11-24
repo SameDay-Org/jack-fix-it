@@ -9,12 +9,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import v1_router
+from app.body_limit import BodySizeLimitMiddleware
 from app.config import CHAT_ORIGINAL_KEY_EXPECTED_IN, Settings, get_settings
 from app.db import create_engine, create_session_factory
 from app.errors import register_error_handlers
 from app.middleware import REQUEST_ID_HEADER, NoStoreMiddleware, RequestIdMiddleware
 from app.modules.health.router import router as health_router
 from app.modules.jobs.location import location_backend
+from app.modules.webhooks.router import raw_body_limits
 from app.observability import configure_logging, init_sentry
 
 logger = logging.getLogger(__name__)
@@ -63,9 +65,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="Jack Fix It API", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
+    app.include_router(health_router)
+    app.include_router(v1_router)
 
     # Added first so it is the innermost: it only needs the route the router matched.
     app.add_middleware(NoStoreMiddleware)
+    # On the stream, before FastAPI buffers and parses a body ahead of any dependency (auth,
+    # rate limits); inside CORS and the request id, so its 413 carries both (#523).
+    app.add_middleware(
+        BodySizeLimitMiddleware,
+        max_bytes=settings.http_max_body_bytes,
+        max_bytes_by_path=raw_body_limits(app, settings),
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -76,7 +87,4 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Added last so it is the outermost user middleware and also tags CORS preflights.
     app.add_middleware(RequestIdMiddleware)
     register_error_handlers(app)
-
-    app.include_router(health_router)
-    app.include_router(v1_router)
     return app
