@@ -4,7 +4,15 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Final
 
-from sqlalchemy import CHAR, CheckConstraint, DateTime, ForeignKey, Numeric, String
+from sqlalchemy import (
+    CHAR,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base, IdTimestampsMixin, str_enum
@@ -121,3 +129,22 @@ class JobPhoto(IdTimestampsMixin, Base):
         server_default=MediaSafeStatus.PENDING.value,
     )
     safe_content_type: Mapped[str | None] = mapped_column(String(64))
+
+
+# The longest Live Activity push token kept (#596): ActivityKit's token, as hex.
+LIVE_ACTIVITY_TOKEN_MAX_LENGTH: Final = 512
+
+
+class LiveActivityToken(IdTimestampsMixin, Base):
+    """The push token of the Live Activity a customer's iPhone runs for one job (#596): the
+    APNs updates of the live view go to it. One per job and device, replaced when the activity
+    gets a new one. The device's delete takes it (a phone signed out, an account deleted)."""
+
+    __tablename__ = "live_activity_tokens"
+    __table_args__ = (UniqueConstraint("job_id", "device_id"),)
+
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"))
+    device_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("devices.id", ondelete="CASCADE"), index=True
+    )
+    token: Mapped[str] = mapped_column(String(LIVE_ACTIVITY_TOKEN_MAX_LENGTH))

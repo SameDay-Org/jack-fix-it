@@ -136,7 +136,9 @@ class ListingStorage:
         for number, start in enumerate(range(0, len(keys), self.page_size)):
             if self.list_error is not None and number == self.fail_at_page:
                 raise self.list_error
-            page = [StoredObject(k, self.objects[k]) for k in keys[start : start + self.page_size]]
+            page = [
+                StoredObject(k, self.objects[k], 1) for k in keys[start : start + self.page_size]
+            ]
             older = [o for o in page if self.ignore_before or o.last_modified < before]
             self.listed = True
             yield ObjectPage(objects=older, newer=len(page) - len(older))
@@ -583,7 +585,7 @@ async def test_the_task_without_storage_logs_and_returns(caplog: pytest.LogCaptu
         await sweep_orphan_uploads(ctx)
 
     assert [r.message for r in caplog.records] == ["orphan_upload_sweep_unconfigured"]
-    assert caplog.records[0].__dict__["mode"] == "dry_run"
+    assert caplog.records[0].__dict__["mode"] == "delete"  # the default since #529
 
 
 async def test_the_task_sweeps_with_the_settings(
@@ -848,7 +850,7 @@ def test_sweep_settings(overrides: dict[str, object], valid: bool) -> None:
         return
     settings = make_settings(**overrides)
     defaults = {
-        "orphan_upload_mode": "dry_run",
+        "orphan_upload_mode": "delete",  # the default since #529 (Cesar 2026-11-23)
         "orphan_upload_min_age_hours": 24,
         "orphan_upload_sweep_minutes": 60,
         "orphan_upload_sweep_timeout_seconds": 1_800,

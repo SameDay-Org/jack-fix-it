@@ -105,8 +105,10 @@ _RATE_LIMITED: dict[int | str, dict[str, Any]] = {
             "type or out of range), or are not empty without a category; "
             "invalid_media: a media key that "
             "is not the caller's own request_media upload, a duplicate, a key already used, "
-            "or too many; validation_error: any other invalid field (past date, intake "
-            "answers too large, address format, unknown fields such as urgency, an "
+            "or too many; upload_expired: a media upload issued more than "
+            "JOB_PHOTO_ATTACH_MAX_AGE_MINUTES (12 h) ago, which the orphan sweep may have "
+            "deleted: upload it again; validation_error: any other invalid field (past "
+            "date, intake answers too large, address format, unknown fields such as urgency, an "
             "Idempotency-Key that is not a UUID)."
         ),
         **_RATE_LIMITED,

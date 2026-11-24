@@ -13,8 +13,9 @@ from typing import Annotated, Final
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
 from app.modules.cancellations.views import CustomerJobCancellation, ProJobCancellation
+from app.modules.devices.schemas import ExpoPushToken
 from app.modules.disputes.outcomes import DisputeResolution, DisputeStatus
-from app.modules.jobs.models import JobPhotoKind, JobStatus
+from app.modules.jobs.models import LIVE_ACTIVITY_TOKEN_MAX_LENGTH, JobPhotoKind, JobStatus
 from app.modules.payments.payout_status import PayoutStatus
 from app.modules.quotes.schemas import QuotePro
 from app.modules.tips.views import TipOut
@@ -25,6 +26,11 @@ ETA_MIN_MINUTES: Final = 5
 ETA_MAX_MINUTES: Final = 240
 # A device's accuracy radius past this is not a position worth showing (#350).
 ACCURACY_MAX_M: Final = 10_000
+
+
+# A Live Activity push token (#596): hex, as ActivityKit gives it (32 bytes and up).
+LIVE_ACTIVITY_TOKEN_MIN_LENGTH: Final = 32
+LIVE_ACTIVITY_TOKEN_PATTERN: Final = "^[0-9A-Fa-f]+$"  # noqa: S105 - a format, not a secret
 
 
 class _Out(BaseModel):
@@ -382,6 +388,21 @@ class JobLiveOut(_Out):
         "working 0.75, done 1.",
     )
     updated_at: datetime = Field(description="When this view was put together (server time).")
+
+
+class LiveActivityTokenIn(BaseModel):
+    """The push token of the Live Activity the customer's iPhone started for the job (#596),
+    with the device's own Expo push token, so the API knows which device it is."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expo_push_token: ExpoPushToken
+    live_activity_token: str = Field(
+        min_length=LIVE_ACTIVITY_TOKEN_MIN_LENGTH,
+        max_length=LIVE_ACTIVITY_TOKEN_MAX_LENGTH,
+        pattern=LIVE_ACTIVITY_TOKEN_PATTERN,
+        description="ActivityKit's push token for this activity, as hex.",
+    )
 
 
 class JobPhotosIn(BaseModel):

@@ -3,7 +3,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_app_settings
@@ -13,9 +13,12 @@ from app.integrations.mapbox import RouteProvider, get_route_provider
 from app.integrations.storage import StorageProvider, get_storage_provider
 from app.middleware import NoStoreRoute
 from app.modules.auth.permissions import AppUser, CustomerUser, ProUser
+from app.modules.devices.router import get_device_service
+from app.modules.devices.service import DeviceService
 from app.modules.jobs.errors import ATTEMPTS_REMAINING_HEADER
 from app.modules.jobs.execution import JobExecutionConfig, JobExecutionService
 from app.modules.jobs.live import JobLiveConfig, JobLiveService
+from app.modules.jobs.live_tokens import LiveActivityTokenService
 from app.modules.jobs.location import (
     JobLocationStore,
     ProLocationConfig,
@@ -35,6 +38,7 @@ from app.modules.jobs.schemas import (
     JobLiveOut,
     JobPhotosIn,
     JobRouteOut,
+    LiveActivityTokenIn,
     OnTheWayIn,
     ProJob,
     ProJobPage,
@@ -123,6 +127,16 @@ def get_job_live_service(
 
 
 Lives = Annotated[JobLiveService, Depends(get_job_live_service)]
+
+
+def get_live_activity_token_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    devices: Annotated[DeviceService, Depends(get_device_service)],
+) -> LiveActivityTokenService:
+    return LiveActivityTokenService(session, devices)
+
+
+LiveTokens = Annotated[LiveActivityTokenService, Depends(get_live_activity_token_service)]
 
 
 async def limit_pro_pings(
@@ -473,3 +487,33 @@ async def get_job_live(job_id: uuid.UUID, user: AppUser, lives: Lives) -> JobLiv
     position. `eta_seconds` and `distance_meters` are null whenever they are unknown: not on
     the way, no route yet, or the pro's position is too old."""
     return await lives.view(user, job_id)
+
+
+@live_router.post(
+    "/token",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    summary="Keep my iPhone Live Activity's push token for an ongoing job",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN: _error("forbidden: only customers follow their job this way."),
+        status.HTTP_404_NOT_FOUND: _error(
+            "not_found: no job of the caller with this id. device_not_found: no device of the "
+            "caller has this Expo push token; register the device first (PUT /v1/devices)."
+        ),
+        status.HTTP_409_CONFLICT: _error(
+            "job_not_live: the job is not under way; end the activity instead."
+        ),
+        status.HTTP_422_UNPROCESSABLE_CONTENT: _error(
+            "validation_error: a push token of the wrong shape, or an unknown field."
+        ),
+    },
+)
+async def keep_live_activity_token(
+    job_id: uuid.UUID, data: LiveActivityTokenIn, user: CustomerUser, tokens: LiveTokens
+) -> Response:
+    """The token ActivityKit gave the Live Activity the customer's iPhone started for their own
+    ongoing job (#596): the live view's updates reach the activity through it while the app is
+    closed. One per job and device; sending a new one replaces it."""
+    await tokens.keep(user, job_id, data)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -1,5 +1,6 @@
 """GET /v1/requests/{request_id}/quotes: the customer compares quotes (D10.1, #188)."""
 
+import threading
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.auth import security
 from app.modules.pros.models import ProProfile, ProVerificationStatus
+from app.modules.quotes import service as quotes_service
 from app.modules.quotes.models import Quote, QuoteStatus
 from app.modules.quotes.repository import QuoteRepository
 from app.modules.quotes.schemas import CustomerQuote, CustomerQuoteList, QuotePro
@@ -23,6 +25,7 @@ from app.modules.requests.models import RequestStatus
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
 from app.queue import get_job_queue
+from app.redaction import KnownValues, RedactionResult, redact_text
 from tests.conftest import TEST_JWT_SECRET
 from tests.ratings_seed import rate
 from tests.test_opportunities_api import (
@@ -884,3 +887,28 @@ def _values(value: object) -> list[str]:
     if isinstance(value, list):
         return [text for item in value for text in _values(item)]
     return [str(value)]
+
+
+async def test_the_page_is_redacted_off_the_event_loop(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: World,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#528: the quotes' scope and approach are redacted in a worker thread, so a page of long
+    texts never holds the event loop (the thread the test, and so the app, runs on)."""
+    request_id = await make_request(db_session, world, RequestStatus.QUOTE_READY)
+    for pro in [await quoting_pro(db_session) for _ in range(2)]:
+        await add_quote(db_session, request_id, pro)
+    threads: list[int] = []
+
+    def recording(text: str, known: KnownValues) -> RedactionResult:
+        threads.append(threading.get_ident())
+        return redact_text(text, known)
+
+    monkeypatch.setattr(quotes_service, "redact_text", recording)
+    listed = await listed_ids(db_client, world, request_id)
+
+    assert len(listed) == 2
+    assert len(threads) >= 2  # one scope per quote, at least
+    assert threading.get_ident() not in threads
