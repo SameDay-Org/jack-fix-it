@@ -353,7 +353,9 @@ class ProProfileRepository:
         if stored_read is not None and stored_read > read:
             return PayoutsStored(payouts_enabled=stored, changed=False)
         changed = stored != enabled
-        values: dict[str, object] = {"payouts_read_seq": read}
+        # The column's onupdate would stamp updated_at on the read number alone: an unchanged
+        # answer keeps it as it is, set to itself (#524 round 1).
+        values: dict[str, object] = {"payouts_read_seq": read, "updated_at": ProProfile.updated_at}
         if changed:
             values |= {"payouts_enabled": enabled, "updated_at": func.now()}
         await self._session.execute(

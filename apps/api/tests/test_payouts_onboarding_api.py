@@ -421,6 +421,41 @@ async def test_record_payouts_read_keeps_the_last_read(db_session: AsyncSession)
     assert await repository.record_payouts_read(uuid.uuid4(), True, fourth + 1) is None
 
 
+async def test_record_payouts_read_touches_updated_at_only_on_a_change(
+    db_session: AsyncSession,
+) -> None:
+    """#524 round 1: the column's onupdate would stamp updated_at on every recorded read. An
+    unchanged answer and an overtaken one leave it as it was; only a change of the value moves
+    it. Set in the past first: in one transaction now() would not tell the two apart."""
+    ana = await pro(db_session, account_id=f"acct_stamp{uuid.uuid4().hex[:8]}")
+    profile = await profile_of(db_session, ana)
+    assert profile is not None
+    past = datetime(2020, 1, 1, tzinfo=UTC)
+    await db_session.execute(
+        update(ProProfile).where(ProProfile.id == profile.id).values(updated_at=past)
+    )
+    repository = ProProfileRepository(db_session)
+    older, unchanged, changed = [await repository.next_payouts_read() for _ in range(3)]
+
+    async def stamp() -> datetime | None:
+        row = await profile_of(db_session, ana)
+        assert row is not None
+        return row.updated_at
+
+    assert await repository.record_payouts_read(profile.id, False, unchanged) == PayoutsStored(
+        payouts_enabled=False, changed=False
+    )
+    assert await stamp() == past
+    assert await repository.record_payouts_read(profile.id, True, older) == PayoutsStored(
+        payouts_enabled=False, changed=False
+    )
+    assert await stamp() == past
+    assert await repository.record_payouts_read(profile.id, True, changed) == PayoutsStored(
+        payouts_enabled=True, changed=True
+    )
+    assert await stamp() != past
+
+
 @pytest.mark.parametrize("role", [UserRole.CUSTOMER, UserRole.AGENT, UserRole.ADMIN])
 async def test_payouts_role_and_auth(
     db_client: httpx.AsyncClient, db_session: AsyncSession, stripe: FakeStripe, role: UserRole
