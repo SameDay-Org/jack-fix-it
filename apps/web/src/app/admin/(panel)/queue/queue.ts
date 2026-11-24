@@ -219,16 +219,17 @@ const E164 = /^\+[1-9][0-9]{6,14}$/;
  * The links that reach a customer. A phone that is not E.164 gives no `tel:` or `sms:` link.
  * The email keeps its one `@` and has everything else encoded, so the link can carry an
  * address and nothing more (no second recipient, no subject, no header); an email without a
- * name and a domain gives no link.
+ * name and a domain, or no email at all (a deleted customer, #594), gives no link.
  */
-export function contactLinks(customer: { phone: string | null; email: string }): {
+export function contactLinks(customer: { phone: string | null; email: string | null }): {
   tel: string | null;
   sms: string | null;
   mailto: string | null;
 } {
   const phone = customer.phone && E164.test(customer.phone) ? customer.phone : null;
-  const at = customer.email.lastIndexOf("@");
-  const [name, domain] = [customer.email.slice(0, at), customer.email.slice(at + 1)];
+  const email = customer.email ?? "";
+  const at = email.lastIndexOf("@");
+  const [name, domain] = [email.slice(0, at), email.slice(at + 1)];
   return {
     tel: phone ? `tel:${phone}` : null,
     sms: phone ? `sms:${phone}` : null,

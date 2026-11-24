@@ -150,7 +150,7 @@ async def test_the_payment_receipt_is_sent_once_with_the_card_read_from_stripe(
     assert len(stripe.card_reads) == 1
     address = await db_session.scalar(select(User.email).where(User.id == world.customer.id))
     assert email.to == address
-    assert email.subject.startswith("Your Jack Fix It receipt · JF-")
+    assert email.subject.startswith("Your John Got It receipt · JF-")
     for part in (email.text, email.html):
         assert "Hi Ana," in part
         assert "Category: Plumbing" in part
@@ -182,7 +182,7 @@ async def test_the_receipt_is_in_the_customer_s_language(
     )
 
     [email] = sender.sent
-    assert email.subject.startswith("Tu recibo de Jack Fix It · JF-")
+    assert email.subject.startswith("Tu recibo de John Got It · JF-")
     assert "Hola, Ana:" in email.text
     assert "Categoría: Plomería" in email.text
     assert email.text.count("Servicio:") == 1
@@ -312,7 +312,7 @@ async def test_the_tip_receipt_is_sent_once_with_its_own_card(
 
     [email] = sender.sent
     assert sender.keys == [f"tip-receipt:{tip.id}"]
-    assert email.subject.startswith("Your Jack Fix It tip receipt · JF-")
+    assert email.subject.startswith("Your John Got It tip receipt · JF-")
     assert "Thank you for your tip for María P." in email.text
     assert f"Tip: {money(TIP)}" in email.text
     assert f"Total paid: {money(TIP)}" in email.text

@@ -728,6 +728,7 @@
         "name": "Nombre",
         "phone": "Teléfono",
         "noPhone": "Sin teléfono registrado",
+        "noEmail": "Sin correo registrado",
         "email": "Correo",
         "language": "Idioma",
         "address": "Dirección",

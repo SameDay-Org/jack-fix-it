@@ -279,7 +279,7 @@ class Settings(BaseSettings):
     # Email through Resend (D4.3, #27). Required in staging and production; without them, the
     # reset code is never sent (logged as an error).
     resend_api_key: SecretStr | None = None
-    # The sender, e.g. "Jack Fix It <no-reply@...>" on a domain verified in Resend.
+    # The sender, e.g. "John Got It <no-reply@johngotit.com>" on a domain verified in Resend.
     email_from: str | None = None
     resend_timeout_seconds: float = Field(default=5.0, gt=0)
     # Password reset by emailed code (#27): how long a code lives, how many tries it allows,
