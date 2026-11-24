@@ -21,12 +21,6 @@ class InvalidPayloadError(AppError):
     message = "The body is not a Stripe event."
 
 
-class PayloadTooLargeError(AppError):
-    status_code = 413
-    code = "payload_too_large"
-    message = "The body is too large."
-
-
 class EnqueueFailedError(AppError):
     """The event is stored but could not be queued: a 500, so Stripe delivers it again and the
     redelivery queues the pending row."""

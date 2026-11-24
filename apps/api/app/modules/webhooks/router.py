@@ -1,13 +1,12 @@
 from typing import Annotated, Any, Final
 
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Depends, FastAPI, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from app.config import Settings, get_app_settings
 from app.db import get_session
-from app.errors import ErrorResponse
-from app.modules.webhooks.errors import PayloadTooLargeError
+from app.errors import ErrorResponse, PayloadTooLargeError
 from app.modules.webhooks.schemas import WebhookReceived
 from app.modules.webhooks.service import StripeWebhookService, WebhookConfig
 from app.queue import JobQueue, get_job_queue
@@ -113,3 +112,16 @@ async def receive_stripe_connect_event(
     body = await read_body(request, settings.stripe_webhook_max_body_bytes)
     await webhooks.receive(body, stripe_signature)
     return WebhookReceived()
+
+
+RAW_BODY_ENDPOINTS: Final = frozenset({receive_stripe_event, receive_stripe_connect_event})
+
+
+def raw_body_limits(app: FastAPI, settings: Settings) -> dict[str, int]:
+    """The paths of the routes that read their raw body, each with its own cap: the app-wide
+    HTTP_MAX_BODY_BYTES (#523) gives way to it there. A route that is not mounted fails here,
+    at startup."""
+    return {
+        app.url_path_for(endpoint.__name__): settings.stripe_webhook_max_body_bytes
+        for endpoint in RAW_BODY_ENDPOINTS
+    }
