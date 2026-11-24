@@ -7,6 +7,7 @@ the platform's fee; the pro never sees the arrival code, the customer's last nam
 
 import uuid
 from datetime import datetime
+from enum import StrEnum
 from typing import Annotated, Final
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
@@ -346,6 +347,41 @@ class JobRouteOut(_Out):
         "no position yet, the address cannot be placed on the map, no road leads there, or "
         "the route is being computed right now (ask again)."
     )
+
+
+class LiveStage(StrEnum):
+    """Where an ongoing job stands, for the lock screen (#596)."""
+
+    ON_THE_WAY = "on_the_way"
+    ARRIVED = "arrived"
+    WORKING = "working"
+    DONE_WAITING_CONFIRM = "done_waiting_confirm"
+
+
+class JobLiveOut(_Out):
+    """An ongoing job as the lock screen shows it (#596): no name, address, arrival code,
+    amount or position, the same on both sides."""
+
+    job_public_code: str = Field(description="The request's code, as lock screens show it.")
+    stage: LiveStage = Field(
+        description="on_the_way until the pro checks in, arrived until the work starts, "
+        "working until the pro marks it done, done_waiting_confirm until the customer confirms."
+    )
+    eta_seconds: int | None = Field(
+        ge=0,
+        description="Seconds left to the job's address from the pro's latest position, never "
+        "negative. null when unknown: not on the way, no route, or the position is too old.",
+    )
+    distance_meters: int | None = Field(
+        ge=0, description="Meters of road left to the job's address; null when unknown, as above."
+    )
+    progress: float = Field(
+        ge=0,
+        le=1,
+        description="0 to 1: on the way 0 to 0.5 by the road left of the trip, arrived 0.5, "
+        "working 0.75, done 1.",
+    )
+    updated_at: datetime = Field(description="When this view was put together (server time).")
 
 
 class JobPhotosIn(BaseModel):
