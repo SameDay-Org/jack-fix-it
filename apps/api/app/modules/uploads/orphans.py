@@ -22,7 +22,7 @@ while the listing ran is kept. The residual: a row that attaches a key after its
 ever in that window; a fresh upload never is.
 
 Job photos (#298) close that window by disjoint ages, with no lock shared with the sweep (dispute
-photos, #75, by the same rule and setting): a
+photos, #75, and a new request's media, #529, by the same rule and setting): a
 job accepts a job_photo key issued at most JOB_PHOTO_ATTACH_MAX_AGE_MINUTES ago (the issue time
 is in the key, uploads/keys.py), at most half of ORPHAN_UPLOAD_MIN_AGE_HOURS (config.py). An
 object is last modified after its key was issued, so one this sweep deletes had its key issued
@@ -225,7 +225,7 @@ class OrphanUploadSweeper:
         async with self._sessions() as session:
             skipped = await _skipped_by_owner(session, candidates)
             checked = [key for key in candidates if key not in skipped]
-            referenced = await _referenced(session, checked)
+            referenced = await referenced_keys(session, checked)
         orphans = [key for key in checked if key not in referenced]
         counts.skipped_purpose += len(skipped)
         counts.referenced += len(checked) - len(orphans)
@@ -267,8 +267,9 @@ async def _skipped_by_owner(session: AsyncSession, candidates: Mapping[str, Uplo
     return skipped
 
 
-async def _referenced(session: AsyncSession, keys: Sequence[str]) -> set[str]:
-    """The keys among `keys` that any referencing column holds, in one query."""
+async def referenced_keys(session: AsyncSession, keys: Sequence[str]) -> set[str]:
+    """The keys among `keys` that any referencing column holds, in one query: the sweep's
+    test, and the pending uploads' (#529)."""
     if not keys:
         return set()
     statement = union_all(*(key_statement(keys) for key_statement in KEY_STATEMENTS.values()))

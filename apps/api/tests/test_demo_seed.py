@@ -233,8 +233,9 @@ def test_every_table_hanging_from_a_request_or_a_job_is_dated_or_named() -> None
     life: the timeline dates it, or it is listed here with the reason it is not."""
     import_models()
     # Not written by the seed: the chat (no seeded message) and its flags, the tips (#273:
-    # no scene tips, so no tip or keyed tip choice is seeded), and the contacts of web
-    # requests (#86: the seed makes no request without an account).
+    # no scene tips, so no tip or keyed tip choice is seeded), the contacts of web
+    # requests (#86: the seed makes no request without an account), and the Live Activity
+    # tokens (#596: an iPhone sends one when it starts an activity; the seed starts none).
     not_seeded = {
         "job_chat_reads",
         "job_messages",
@@ -242,6 +243,7 @@ def test_every_table_hanging_from_a_request_or_a_job_is_dated_or_named() -> None
         "tips",
         "tip_requests",
         "web_request_contacts",
+        "live_activity_tokens",
     }
     hanging = {
         table.name

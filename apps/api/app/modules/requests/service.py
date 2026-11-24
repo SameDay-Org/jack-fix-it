@@ -22,12 +22,13 @@ Logs carry the request id, the user id and counts: never the description, the ad
 keys or URLs.
 """
 
+import asyncio
 import base64
 import binascii
 import json
 import logging
 import uuid
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Final
@@ -58,6 +59,7 @@ from app.modules.requests.errors import (
     InvalidIntakeAnswersError,
     InvalidMediaError,
     InvalidRequestError,
+    MediaUploadExpiredError,
     ZipNotServedError,
 )
 from app.modules.requests.media_copies import enqueue_sanitize
@@ -88,12 +90,12 @@ from app.modules.requests.schemas import (
 )
 from app.modules.service_areas.schemas import zip5
 from app.modules.service_areas.service import ServiceAreaService
-from app.modules.uploads.keys import owned_upload
+from app.modules.uploads.keys import owned_upload, upload_issued_at
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.users.service import UserService
 from app.modules.users.types import ContactPoints, UserAccount
 from app.queue import JobQueue
-from app.redaction import KnownValues, redact_address_contacts, redact_text
+from app.redaction import KnownValues, RedactionResult, redact_address_contacts, redact_text
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +111,9 @@ class RequestConfig:
     idempotency_window_seconds: int
     # GEOCODE_ON_SAVE (#384): whether a new request's address is queued for its point.
     geocode_on_save: bool
+    # The oldest media upload a new request accepts, by its key's issue time (#529): the job
+    # photos' JOB_PHOTO_ATTACH_MAX_AGE_MINUTES, under the orphan sweep's age (uploads/orphans.py).
+    media_attach_max_age: timedelta
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "RequestConfig":
@@ -121,6 +126,7 @@ class RequestConfig:
             enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
             idempotency_window_seconds=settings.request_idempotency_window_seconds,
             geocode_on_save=settings.geocode_on_save,
+            media_attach_max_age=timedelta(minutes=settings.job_photo_attach_max_age_minutes),
         )
 
 
@@ -431,6 +437,10 @@ class ServiceRequestService:
                 else RequestMediaKind.PHOTO
             )
             kinds.append((key, kind))
+        # After the keys' own checks: a key that is not the caller's stays invalid_media.
+        oldest = datetime.now(UTC) - self._config.media_attach_max_age
+        if any((issued := upload_issued_at(key)) is None or issued < oldest for key in keys):
+            raise MediaUploadExpiredError
         return kinds
 
     async def _detail(self, request: ServiceRequest) -> RequestOut:
@@ -778,7 +788,7 @@ class ProRequestReader:
         streets = await self._addresses.street_lines([r.address_id for r in rows])
         if contacts is None:
             contacts = await self._users.contact_points([r.customer_id for r in rows])
-        views: dict[uuid.UUID, RequestForPro] = {}
+        page: list[_ToRedact] = []
         for row in rows:
             contact = contacts.get(row.customer_id)
             known = KnownValues(
@@ -786,8 +796,11 @@ class ProRequestReader:
                 phones=(contact.phone,) if contact and contact.phone else (),
                 streets=streets.get(row.address_id, ()),
             )
-            description = redact_text(row.description, known)
-            answers, answers_redacted = _redact_answers(row.intake_answers, known)
+            page.append(_ToRedact(row.description, row.intake_answers, known))
+        # The whole page in a worker thread (#528): the event loop serves other calls meanwhile.
+        redacted = await asyncio.to_thread(_redact_page, page)
+        views: dict[uuid.UUID, RequestForPro] = {}
+        for row, (description, answers, answers_redacted) in zip(rows, redacted, strict=True):
             views[row.id] = RequestForPro(
                 id=row.id,
                 public_code=row.public_code,
@@ -831,6 +844,27 @@ class ProRequestReader:
                 "opportunity_city_missing", extra={"service_request_id": str(request_id)}
             )
         return AddressArea(zip_code=zip_code, city=city)
+
+
+@dataclass(frozen=True)
+class _ToRedact:
+    """One row's customer text and the customer's own details, read off the ORM row on the
+    event loop: the worker thread touches no database object."""
+
+    description: str
+    intake_answers: Mapping[str, JsonValue]
+    known: KnownValues
+
+
+def _redact_page(
+    page: Sequence[_ToRedact],
+) -> list[tuple[RedactionResult, dict[str, JsonValue], bool]]:
+    """Each row's description and answers redacted, in order; pure CPU, run in a worker thread
+    (#528)."""
+    return [
+        (redact_text(row.description, row.known), *_redact_answers(row.intake_answers, row.known))
+        for row in page
+    ]
 
 
 def _redact_answers(

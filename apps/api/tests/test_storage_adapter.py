@@ -219,11 +219,14 @@ def test_list_older_than_pages_and_cuts_by_age(storage: S3Storage) -> None:
         "IsTruncated": True,
         "NextContinuationToken": "next-page",
         "Contents": [
-            {"Key": keys_of(1)[0], "LastModified": old},
-            {"Key": keys_of(1, 1)[0], "LastModified": young},
+            {"Key": keys_of(1)[0], "LastModified": old, "Size": 1234},
+            {"Key": keys_of(1, 1)[0], "LastModified": young, "Size": 5},
         ],
     }
-    second = {"IsTruncated": False, "Contents": [{"Key": keys_of(1, 2)[0], "LastModified": old}]}
+    second = {
+        "IsTruncated": False,
+        "Contents": [{"Key": keys_of(1, 2)[0], "LastModified": old, "Size": 77}],
+    }
     with Stubber(storage._client) as stub:
         stub.add_response("list_objects_v2", first, {"Bucket": BUCKET, "Prefix": "u/"})
         stub.add_response(
@@ -240,8 +243,9 @@ def test_list_older_than_pages_and_cuts_by_age(storage: S3Storage) -> None:
         stub.assert_no_pending_responses()
 
     assert pages == [
-        ObjectPage(objects=[StoredObject(keys_of(1)[0], old)], newer=1),
-        ObjectPage(objects=[StoredObject(keys_of(1, 2)[0], old)], newer=0),
+        # Each object by its stored size (#529: what the pending uploads' ceiling counts).
+        ObjectPage(objects=[StoredObject(keys_of(1)[0], old, 1234)], newer=1),
+        ObjectPage(objects=[StoredObject(keys_of(1, 2)[0], old, 77)], newer=0),
     ]
     assert empty == [ObjectPage(objects=[], newer=0)]
 
@@ -266,7 +270,7 @@ def test_a_failing_listing_is_unavailable_and_keyless(
 ) -> None:
     class Paginator:
         def paginate(self, **params: object) -> Iterator[dict[str, object]]:
-            yield {"Contents": [{"Key": KEY, "LastModified": CUT - timedelta(days=2)}]}
+            yield {"Contents": [{"Key": KEY, "LastModified": CUT - timedelta(days=2), "Size": 3}]}
             raise failure
 
     monkeypatch.setattr(storage._client, "get_paginator", lambda name: Paginator())
@@ -278,6 +282,25 @@ def test_a_failing_listing_is_unavailable_and_keyless(
 
     assert KEY not in str(error.value)
     assert error.value.__suppress_context__
+
+
+@pytest.mark.parametrize("size", [{}, {"Size": None}, {"Size": -1}, {"Size": "12"}])
+def test_an_entry_without_a_size_is_unavailable_not_zero(
+    storage: S3Storage, monkeypatch: pytest.MonkeyPatch, size: dict[str, object]
+) -> None:
+    """#635 Gatekeeper (5): the pending uploads' ceiling counts stored sizes; an entry without
+    one is the storage's error (503), never free bytes."""
+
+    class Paginator:
+        def paginate(self, **params: object) -> Iterator[dict[str, object]]:
+            yield {"Contents": [{"Key": KEY, "LastModified": CUT - timedelta(days=2), **size}]}
+
+    monkeypatch.setattr(storage._client, "get_paginator", lambda name: Paginator())
+
+    with pytest.raises(StorageUnavailableError) as error:
+        list(storage.list_older_than("u/", CUT))
+
+    assert KEY not in str(error.value)
 
 
 def test_delete_many_sends_batches_of_at_most_1000_and_counts_errors(storage: S3Storage) -> None:
