@@ -12,9 +12,10 @@ from app.errors import ErrorResponse
 from app.integrations.mapbox import RouteProvider, get_route_provider
 from app.integrations.storage import StorageProvider, get_storage_provider
 from app.middleware import NoStoreRoute
-from app.modules.auth.permissions import CustomerUser, ProUser
+from app.modules.auth.permissions import AppUser, CustomerUser, ProUser
 from app.modules.jobs.errors import ATTEMPTS_REMAINING_HEADER
 from app.modules.jobs.execution import JobExecutionConfig, JobExecutionService
+from app.modules.jobs.live import JobLiveConfig, JobLiveService
 from app.modules.jobs.location import (
     JobLocationStore,
     ProLocationConfig,
@@ -31,6 +32,7 @@ from app.modules.jobs.route import (
 from app.modules.jobs.schemas import (
     CheckInIn,
     CustomerJob,
+    JobLiveOut,
     JobPhotosIn,
     JobRouteOut,
     OnTheWayIn,
@@ -55,6 +57,9 @@ location_router = APIRouter(
 # The pro's route to the job's address (#351): it starts at the pro's position and ends at
 # the customer's address, so no HTTP cache may keep it either.
 route_router = APIRouter(prefix="/jobs/{job_id}/route", tags=["jobs"], route_class=NoStoreRoute)
+# The ongoing job at a glance, for the lock screen (#596): the customer's and the pro's. It is
+# read from the position and the route, so no HTTP cache may keep it either.
+live_router = APIRouter(prefix="/jobs/{job_id}/live", tags=["jobs"], route_class=NoStoreRoute)
 
 _UNAUTHORIZED = {"model": ErrorResponse, "description": "invalid_token: missing or expired."}
 
@@ -105,6 +110,19 @@ def get_job_route_service(
 
 
 Routes = Annotated[JobRouteService, Depends(get_job_route_service)]
+
+
+def get_job_live_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_app_settings)],
+    store: Annotated[JobLocationStore, Depends(get_job_location_store)],
+    routes: Routes,
+    clock: Annotated[Callable[[], datetime], Depends(get_location_clock)],
+) -> JobLiveService:
+    return JobLiveService(session, JobLiveConfig.from_settings(settings), store, routes, clock)
+
+
+Lives = Annotated[JobLiveService, Depends(get_job_live_service)]
 
 
 async def limit_pro_pings(
@@ -431,3 +449,27 @@ async def get_job_route(job_id: uuid.UUID, user: CustomerUser, routes: Routes) -
     in memory for that short time only, never in the database, and every response says
     `Cache-Control: no-store`."""
     return await routes.route(user, job_id)
+
+
+@live_router.get(
+    "",
+    response_model=JobLiveOut,
+    summary="Follow an ongoing job at a glance (lock screen)",
+    responses={
+        status.HTTP_401_UNAUTHORIZED: _UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN: _error("forbidden: only customers and pros have jobs."),
+        status.HTTP_404_NOT_FOUND: _error(
+            "not_found: no job with this id of which the caller is the customer or the pro."
+        ),
+        status.HTTP_409_CONFLICT: _error(
+            "job_not_live: the job is not under way: not on the way yet, or past the "
+            "customer's confirmation (or cancelled, refunded, disputed). Stop following it."
+        ),
+    },
+)
+async def get_job_live(job_id: uuid.UUID, user: AppUser, lives: Lives) -> JobLiveOut:
+    """The job's stage, the pro's ETA and road left while on the way, and a progress, for the
+    customer's and the pro's lock screens (#596). No name, address, arrival code, amount or
+    position. `eta_seconds` and `distance_meters` are null whenever they are unknown: not on
+    the way, no route yet, or the pro's position is too old."""
+    return await lives.view(user, job_id)
