@@ -536,6 +536,30 @@ async def test_a_key_older_than_the_window_makes_a_new_request(
 # Criterion 6: the contract
 
 
+async def test_a_replay_is_answered_before_the_media_age_rule(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    storage: FakeStorage,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#529: a retry of a request already made answers with it, even once its media are older
+    than JOB_PHOTO_ATTACH_MAX_AGE_MINUTES (they are attached). A new request with them is
+    refused (the rule is on)."""
+    ana = await make_caller(db_session)
+    photo = ana.media_key(".jpg")
+    key = str(uuid.uuid4())
+    first = await post(db_client, ana, key, media_keys=[photo])
+    thirteen_hours = datetime.now(UTC) - timedelta(hours=13)
+    monkeypatch.setattr(request_service, "upload_issued_at", lambda key: thirteen_hours)
+
+    retry = await post(db_client, ana, key, media_keys=[photo])
+    another = await post(db_client, ana, str(uuid.uuid4()), media_keys=[photo])
+
+    assert (first.status_code, retry.status_code) == (201, 200)
+    assert retry.json()["id"] == first.json()["id"]
+    assert (another.status_code, another.json()["error"]["code"]) == (422, "upload_expired")
+
+
 def test_openapi_documents_the_key_and_both_answers(app: FastAPI) -> None:
     operation = app.openapi()["paths"]["/v1/requests"]["post"]
 

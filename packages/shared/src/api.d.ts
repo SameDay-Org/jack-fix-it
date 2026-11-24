@@ -8575,6 +8575,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description pending_uploads_too_large: this upload would put the account's uploads that nothing uses yet over UPLOAD_PENDING_MAX_BYTES; use them, or wait for unused ones to clear (a day). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description upload_invalid: content type not allowed for the purpose, or size out of range; validation_error: malformed body. */
             422: {
                 headers: {
@@ -8589,6 +8598,15 @@ export interface operations {
                 headers: {
                     /** @description Seconds until the current limit window ends. */
                     "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description uploads_unavailable: the account's pending uploads could not be counted; retry. */
+            503: {
+                headers: {
                     [name: string]: unknown;
                 };
                 content: {
@@ -8769,7 +8787,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
-            /** @description zip_not_served: the address ZIP is outside the active service areas (offer the waitlist); invalid_category: unknown or inactive category, or one whose questions cannot be read right now (send the request without a category); invalid_intake_answers: intake_answers do not fit the category's intake_questions (an unknown key, a missing required one, a value of the wrong type or out of range), or are not empty without a category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency, an Idempotency-Key that is not a UUID). */
+            /** @description zip_not_served: the address ZIP is outside the active service areas (offer the waitlist); invalid_category: unknown or inactive category, or one whose questions cannot be read right now (send the request without a category); invalid_intake_answers: intake_answers do not fit the category's intake_questions (an unknown key, a missing required one, a value of the wrong type or out of range), or are not empty without a category; invalid_media: a media key that is not the caller's own request_media upload, a duplicate, a key already used, or too many; upload_expired: a media upload issued more than JOB_PHOTO_ATTACH_MAX_AGE_MINUTES (12 h) ago, which the orphan sweep may have deleted: upload it again; validation_error: any other invalid field (past date, intake answers too large, address format, unknown fields such as urgency, an Idempotency-Key that is not a UUID). */
             422: {
                 headers: {
                     [name: string]: unknown;

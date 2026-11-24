@@ -59,6 +59,7 @@ from app.modules.requests.errors import (
     InvalidIntakeAnswersError,
     InvalidMediaError,
     InvalidRequestError,
+    MediaUploadExpiredError,
     ZipNotServedError,
 )
 from app.modules.requests.media_copies import enqueue_sanitize
@@ -89,7 +90,7 @@ from app.modules.requests.schemas import (
 )
 from app.modules.service_areas.schemas import zip5
 from app.modules.service_areas.service import ServiceAreaService
-from app.modules.uploads.keys import owned_upload
+from app.modules.uploads.keys import owned_upload, upload_issued_at
 from app.modules.uploads.schemas import UploadPurpose
 from app.modules.users.service import UserService
 from app.modules.users.types import ContactPoints, UserAccount
@@ -110,6 +111,9 @@ class RequestConfig:
     idempotency_window_seconds: int
     # GEOCODE_ON_SAVE (#384): whether a new request's address is queued for its point.
     geocode_on_save: bool
+    # The oldest media upload a new request accepts, by its key's issue time (#529): the job
+    # photos' JOB_PHOTO_ATTACH_MAX_AGE_MINUTES, under the orphan sweep's age (uploads/orphans.py).
+    media_attach_max_age: timedelta
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "RequestConfig":
@@ -122,6 +126,7 @@ class RequestConfig:
             enqueue_timeout_seconds=settings.job_enqueue_timeout_seconds,
             idempotency_window_seconds=settings.request_idempotency_window_seconds,
             geocode_on_save=settings.geocode_on_save,
+            media_attach_max_age=timedelta(minutes=settings.job_photo_attach_max_age_minutes),
         )
 
 
@@ -432,6 +437,10 @@ class ServiceRequestService:
                 else RequestMediaKind.PHOTO
             )
             kinds.append((key, kind))
+        # After the keys' own checks: a key that is not the caller's stays invalid_media.
+        oldest = datetime.now(UTC) - self._config.media_attach_max_age
+        if any((issued := upload_issued_at(key)) is None or issued < oldest for key in keys):
+            raise MediaUploadExpiredError
         return kinds
 
     async def _detail(self, request: ServiceRequest) -> RequestOut:

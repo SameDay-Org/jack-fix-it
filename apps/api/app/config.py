@@ -226,20 +226,36 @@ class Settings(BaseSettings):
     # The worker's own transfers (#173): seconds to connect, and to wait for each read.
     s3_connect_timeout_seconds: float = Field(default=10.0, gt=0)
     s3_read_timeout_seconds: float = Field(default=60.0, gt=0)
+    # The API's own calls (#529: the pending uploads' listing, inside a request): short, with
+    # few attempts, so a stalled storage answers 503 fast and frees its thread. And the most
+    # one listing may take in all, whatever its pages.
+    s3_request_connect_timeout_seconds: float = Field(default=2.0, gt=0)
+    s3_request_read_timeout_seconds: float = Field(default=5.0, gt=0)
+    s3_request_max_attempts: int = Field(default=2, ge=1)
+    upload_pending_list_timeout_seconds: float = Field(default=10.0, gt=0)
     upload_url_ttl_seconds: int = Field(default=300, gt=0)
+    # How long after its URL ends an issued upload still counts against the pending uploads'
+    # ceiling (#529; the Foreman 2026-11-24, the Vault's N1): storage checks a URL when the
+    # upload starts, so one begun in time can still be landing. The longest the app waits for
+    # one PUT: 120 s plus the file at 128 KiB/s (apps/mobile/src/api/config.ts), about 920 s
+    # for a 100 MiB video.
+    upload_grant_grace_seconds: int = Field(default=1_200, ge=0)
     download_url_ttl_seconds: int = Field(default=300, gt=0)
     upload_max_image_bytes: int = Field(default=10 * MIB, gt=0)
     upload_max_video_bytes: int = Field(default=100 * MIB, gt=0)
     upload_max_document_bytes: int = Field(default=15 * MIB, gt=0)
-    # Upload URLs one user may get per window (#529): each lets them store up to the
-    # purpose's largest size.
+    # Upload URLs one user may get per window (#529; Cesar 2026-11-23: 30 an hour): each lets
+    # them store up to the purpose's largest size. And the most bytes of one user's uploads that
+    # nothing holds yet (stored and not attached, or issued and not landed): past it, 413.
     upload_url_limit: int = Field(default=30, gt=0)
-    upload_url_window_seconds: int = Field(default=600, gt=0)
+    upload_url_window_seconds: int = Field(default=3_600, gt=0)
+    upload_pending_max_bytes: int = Field(default=200 * MIB, gt=0)
     # The worker's sweep of uploads no row references (#191): what it does (dry_run only counts
     # and logs; delete removes them), the age an upload must reach before it may count as
     # orphaned, how often it runs (a cron, in minutes of the hour), and the longest one run may
-    # take (ARQ stops it there; the next run starts over).
-    orphan_upload_mode: OrphanUploadMode = "dry_run"
+    # take (ARQ stops it there; the next run starts over). Delete by default (#529; Cesar
+    # 2026-11-23): an upload nothing holds after 24 hours goes.
+    orphan_upload_mode: OrphanUploadMode = "delete"
     orphan_upload_min_age_hours: int = Field(default=24, ge=1)
     orphan_upload_sweep_minutes: int = Field(default=60, ge=1, le=60)
     orphan_upload_sweep_timeout_seconds: int = Field(default=1_800, gt=0)
@@ -575,7 +591,8 @@ class Settings(BaseSettings):
     # The oldest job_photo upload a job accepts, by the time its key was issued (#298). At most
     # half of ORPHAN_UPLOAD_MIN_AGE_HOURS (checked below; the api and the worker must share both
     # values): the sweep only deletes older uploads, so a key attach accepted was referenced
-    # long before the sweep can pick it (orphans.py).
+    # long before the sweep can pick it (orphans.py). A new request's media follow the same
+    # rule (#529; the Foreman 2026-11-24, the Vault's N2), as dispute photos do.
     job_photo_attach_max_age_minutes: int = Field(default=720, gt=0)
     # Job confirmation (#66, #67; Cesar 2026-10-29, epic #272): once the pro marks the job done,
     # the customer has this many hours to confirm it (or report a problem); a job still completed
@@ -926,6 +943,20 @@ class Settings(BaseSettings):
                 "MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS must cover one file: at least "
                 f"{MEDIA_SANITIZE_TIMED_STEPS} x MEDIA_SANITIZE_TIMEOUT_SECONDS + 2 x "
                 "MEDIA_SANITIZE_OVERHEAD_SECONDS + MEDIA_SANITIZE_SETTLE_SECONDS"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _pending_uploads_hold_the_largest_one(self) -> Self:
+        # A ceiling under one upload's own maximum would refuse that upload every time (#529).
+        largest = max(
+            self.upload_max_image_bytes,
+            self.upload_max_video_bytes,
+            self.upload_max_document_bytes,
+        )
+        if self.upload_pending_max_bytes < largest:
+            raise ValueError(
+                "UPLOAD_PENDING_MAX_BYTES must be at least the largest UPLOAD_MAX_*_BYTES"
             )
         return self
 

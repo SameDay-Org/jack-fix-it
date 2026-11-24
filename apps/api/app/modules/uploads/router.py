@@ -1,11 +1,15 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
+from redis.asyncio import Redis
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_app_settings
+from app.db import get_session
 from app.errors import ErrorResponse
 from app.integrations.storage import Storage, get_storage
 from app.modules.auth.permissions import AppUser
+from app.modules.uploads.pending import PendingUploads, RedisUploadGrants, UploadGrants
 from app.modules.uploads.schemas import (
     DownloadUrlRequest,
     DownloadUrlResponse,
@@ -22,11 +26,36 @@ def _error(description: str) -> dict[str, Any]:
     return {"model": ErrorResponse, "description": description}
 
 
+def get_upload_grants(
+    request: Request, settings: Annotated[Settings, Depends(get_app_settings)]
+) -> UploadGrants:
+    """The issued, not yet landed upload URLs (#529), in the app's Redis."""
+    redis: Redis = request.app.state.redis
+    return RedisUploadGrants(
+        redis,
+        ttl_seconds=settings.upload_url_ttl_seconds,
+        grace_seconds=settings.upload_grant_grace_seconds,
+        max_bytes=settings.upload_pending_max_bytes,
+        timeout_seconds=settings.rate_limit_timeout_seconds,
+    )
+
+
 def get_upload_service(
     storage: Annotated[Storage, Depends(get_storage)],
     settings: Annotated[Settings, Depends(get_app_settings)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    grants: Annotated[UploadGrants, Depends(get_upload_grants)],
 ) -> UploadService:
-    return UploadService(storage, UploadConfig.from_settings(settings))
+    return UploadService(
+        storage,
+        UploadConfig.from_settings(settings),
+        PendingUploads(
+            session,
+            storage,
+            grants,
+            list_timeout_seconds=settings.upload_pending_list_timeout_seconds,
+        ),
+    )
 
 
 _UNAUTHORIZED = _error("invalid_token: missing, invalid or expired access token.")
@@ -65,6 +94,14 @@ async def limit_upload_urls(
             "upload_invalid: content type not allowed for the purpose, or size out of range; "
             "validation_error: malformed body."
         ),
+        status.HTTP_413_CONTENT_TOO_LARGE: _error(
+            "pending_uploads_too_large: this upload would put the account's uploads that "
+            "nothing uses yet over UPLOAD_PENDING_MAX_BYTES; use them, or wait for unused ones "
+            "to clear (a day)."
+        ),
+        status.HTTP_503_SERVICE_UNAVAILABLE: _error(
+            "uploads_unavailable: the account's pending uploads could not be counted; retry."
+        ),
         status.HTTP_429_TOO_MANY_REQUESTS: {
             **_error("rate_limited: too many upload URLs for this account; retry later."),
             "headers": {
@@ -87,7 +124,7 @@ async def create_upload(
     Content-Length are signed, so any other type or size is rejected by the storage. Keep
     `key` to attach the file to a request, job or profile.
     """
-    return uploads.create_upload(user, data)
+    return await uploads.create_upload(user, data)
 
 
 @router.post(
