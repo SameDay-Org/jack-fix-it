@@ -39,6 +39,7 @@ class PresignedUpload:
 class StoredObject:
     key: str
     last_modified: datetime  # timezone-aware
+    size_bytes: int  # as stored: what the pending uploads' ceiling counts (#529)
 
 
 @dataclass(frozen=True)
@@ -210,7 +211,11 @@ class S3Storage:
         try:
             for page in pages:
                 listed = [
-                    StoredObject(key=item["Key"], last_modified=item["LastModified"])
+                    StoredObject(
+                        key=item["Key"],
+                        last_modified=item["LastModified"],
+                        size_bytes=int(item.get("Size", 0)),
+                    )
                     for item in page.get("Contents", [])
                 ]
                 older = [item for item in listed if item.last_modified < before]

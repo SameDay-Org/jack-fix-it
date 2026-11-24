@@ -225,7 +225,7 @@ class OrphanUploadSweeper:
         async with self._sessions() as session:
             skipped = await _skipped_by_owner(session, candidates)
             checked = [key for key in candidates if key not in skipped]
-            referenced = await _referenced(session, checked)
+            referenced = await referenced_keys(session, checked)
         orphans = [key for key in checked if key not in referenced]
         counts.skipped_purpose += len(skipped)
         counts.referenced += len(checked) - len(orphans)
@@ -267,8 +267,9 @@ async def _skipped_by_owner(session: AsyncSession, candidates: Mapping[str, Uplo
     return skipped
 
 
-async def _referenced(session: AsyncSession, keys: Sequence[str]) -> set[str]:
-    """The keys among `keys` that any referencing column holds, in one query."""
+async def referenced_keys(session: AsyncSession, keys: Sequence[str]) -> set[str]:
+    """The keys among `keys` that any referencing column holds, in one query: the sweep's
+    test, and the pending uploads' (#529)."""
     if not keys:
         return set()
     statement = union_all(*(key_statement(keys) for key_statement in KEY_STATEMENTS.values()))

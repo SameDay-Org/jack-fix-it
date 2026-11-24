@@ -219,11 +219,14 @@ def test_list_older_than_pages_and_cuts_by_age(storage: S3Storage) -> None:
         "IsTruncated": True,
         "NextContinuationToken": "next-page",
         "Contents": [
-            {"Key": keys_of(1)[0], "LastModified": old},
-            {"Key": keys_of(1, 1)[0], "LastModified": young},
+            {"Key": keys_of(1)[0], "LastModified": old, "Size": 1234},
+            {"Key": keys_of(1, 1)[0], "LastModified": young, "Size": 5},
         ],
     }
-    second = {"IsTruncated": False, "Contents": [{"Key": keys_of(1, 2)[0], "LastModified": old}]}
+    second = {
+        "IsTruncated": False,
+        "Contents": [{"Key": keys_of(1, 2)[0], "LastModified": old, "Size": 77}],
+    }
     with Stubber(storage._client) as stub:
         stub.add_response("list_objects_v2", first, {"Bucket": BUCKET, "Prefix": "u/"})
         stub.add_response(
@@ -240,8 +243,9 @@ def test_list_older_than_pages_and_cuts_by_age(storage: S3Storage) -> None:
         stub.assert_no_pending_responses()
 
     assert pages == [
-        ObjectPage(objects=[StoredObject(keys_of(1)[0], old)], newer=1),
-        ObjectPage(objects=[StoredObject(keys_of(1, 2)[0], old)], newer=0),
+        # Each object by its stored size (#529: what the pending uploads' ceiling counts).
+        ObjectPage(objects=[StoredObject(keys_of(1)[0], old, 1234)], newer=1),
+        ObjectPage(objects=[StoredObject(keys_of(1, 2)[0], old, 77)], newer=0),
     ]
     assert empty == [ObjectPage(objects=[], newer=0)]
 

@@ -315,7 +315,7 @@ never logs `worker_started`. Use the same values as api.
 | `PUBLIC_API_URL`                   | same as api                                                                             | no              | D7.1 (#39)  |
 | `EXPO_ACCESS_TOKEN`                | optional; set it only if Expo enhanced push security is on                              | yes             | D10.3 (#54) |
 | `ORPHAN_UPLOAD_MIN_AGE_HOURS`      | same as api (shared variable)                                                           | no              | #191, #298  |
-| `ORPHAN_UPLOAD_MODE`               | optional; `dry_run` by default; `delete` once the dry-run counts look right (see below) | no              | #191, #529  |
+| `ORPHAN_UPLOAD_MODE`               | optional; `delete` by default (#529); in `dry_run`, it only counts and logs (see below) | no              | #191, #529  |
 | `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` | same as api (shared variable)                                                           | no              | #298        |
 | `GEOCODE_ON_SAVE`                  | same as api (shared variable); see "Geocode on save"                                    | no              | #384        |
 | `MAPBOX_ACCESS_TOKEN`              | same as api; only needed with `GEOCODE_ON_SAVE=true`                                    | yes             | #384        |
@@ -326,11 +326,13 @@ orphan sweep deletes only uploads older than the minimum age. Each service check
 (window at most half the minimum age) against its own values only, so set both as shared
 variables, or the sweep can delete a photo a job just attached (#298).
 
-`ORPHAN_UPLOAD_MODE` is `dry_run` by default, so the sweep only counts and logs
-(`orphan_uploads_swept`). Until it is `delete`, every upload no row references stays in the bucket.
-The upload URL limit (`UPLOAD_URL_LIMIT` per `UPLOAD_URL_WINDOW_SECONDS`, #529) bounds how fast one
-account can add them, not how many stay. **Cesar (ops):** check a few dry-run counts on staging,
-then set `ORPHAN_UPLOAD_MODE=delete` on the worker, staging first, then production.
+`ORPHAN_UPLOAD_MODE` is `delete` by default (#529; Cesar 2026-11-23): an upload no row
+references is deleted once it is `ORPHAN_UPLOAD_MIN_AGE_HOURS` old (24). `dry_run` only counts
+and logs (`orphan_uploads_swept`). The api bounds what one account can leave behind: 30 upload
+URLs an hour (`UPLOAD_URL_LIMIT` per `UPLOAD_URL_WINDOW_SECONDS`), and at most
+`UPLOAD_PENDING_MAX_BYTES` (200 MiB) of uploads nothing holds yet (413 past it). **Cesar (ops):**
+a worker that has `ORPHAN_UPLOAD_MODE=dry_run` set by hand keeps it: delete the variable (or set
+`delete`), staging first, then production.
 
 The worker makes the transfers to the pros (D13.3, #68) with the same `STRIPE_SECRET_KEY` it
 cancels unpaid payments with: a task queued when a job is confirmed, and the

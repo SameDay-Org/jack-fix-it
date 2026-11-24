@@ -35,6 +35,7 @@ from app.modules.uploads.keys import (
     SizeClass,
     make_key,
 )
+from app.modules.uploads.pending import PendingUploads
 from app.modules.uploads.schemas import (
     DownloadUrlResponse,
     UploadRequest,
@@ -65,11 +66,16 @@ class UploadConfig:
 
 
 class UploadService:
-    def __init__(self, storage: Storage, config: UploadConfig) -> None:
+    def __init__(
+        self, storage: Storage, config: UploadConfig, pending: PendingUploads | None = None
+    ) -> None:
+        """`pending`: the ceiling on the caller's pending uploads (#529); the API's route always
+        has it."""
         self._storage = storage
         self._config = config
+        self._pending = pending
 
-    def create_upload(self, user: UserAccount, data: UploadRequest) -> UploadResponse:
+    async def create_upload(self, user: UserAccount, data: UploadRequest) -> UploadResponse:
         rule = PURPOSES[data.purpose]
         if user.role not in rule.roles:
             raise UploadForbiddenError
@@ -77,6 +83,8 @@ class UploadService:
         if size_class is None or not 0 < data.size_bytes <= self._config.max_bytes[size_class]:
             raise UploadInvalidError
         key = make_key(user.id, data.purpose, data.content_type)
+        if self._pending is not None:
+            await self._pending.admit(user.id, key, data.size_bytes)
         ttl = self._config.upload_url_ttl_seconds
         expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
         upload = self._storage.presign_put(key, data.content_type, data.size_bytes, ttl)

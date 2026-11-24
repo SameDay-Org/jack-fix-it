@@ -231,15 +231,18 @@ class Settings(BaseSettings):
     upload_max_image_bytes: int = Field(default=10 * MIB, gt=0)
     upload_max_video_bytes: int = Field(default=100 * MIB, gt=0)
     upload_max_document_bytes: int = Field(default=15 * MIB, gt=0)
-    # Upload URLs one user may get per window (#529): each lets them store up to the
-    # purpose's largest size.
+    # Upload URLs one user may get per window (#529; Cesar 2026-11-23: 30 an hour): each lets
+    # them store up to the purpose's largest size. And the most bytes of one user's uploads that
+    # nothing holds yet (stored and not attached, or issued and not landed): past it, 413.
     upload_url_limit: int = Field(default=30, gt=0)
-    upload_url_window_seconds: int = Field(default=600, gt=0)
+    upload_url_window_seconds: int = Field(default=3_600, gt=0)
+    upload_pending_max_bytes: int = Field(default=200 * MIB, gt=0)
     # The worker's sweep of uploads no row references (#191): what it does (dry_run only counts
     # and logs; delete removes them), the age an upload must reach before it may count as
     # orphaned, how often it runs (a cron, in minutes of the hour), and the longest one run may
-    # take (ARQ stops it there; the next run starts over).
-    orphan_upload_mode: OrphanUploadMode = "dry_run"
+    # take (ARQ stops it there; the next run starts over). Delete by default (#529; Cesar
+    # 2026-11-23): an upload nothing holds after 24 hours goes.
+    orphan_upload_mode: OrphanUploadMode = "delete"
     orphan_upload_min_age_hours: int = Field(default=24, ge=1)
     orphan_upload_sweep_minutes: int = Field(default=60, ge=1, le=60)
     orphan_upload_sweep_timeout_seconds: int = Field(default=1_800, gt=0)
@@ -924,6 +927,20 @@ class Settings(BaseSettings):
                 "MEDIA_SANITIZE_JOB_TIMEOUT_SECONDS must cover one file: at least "
                 f"{MEDIA_SANITIZE_TIMED_STEPS} x MEDIA_SANITIZE_TIMEOUT_SECONDS + 2 x "
                 "MEDIA_SANITIZE_OVERHEAD_SECONDS + MEDIA_SANITIZE_SETTLE_SECONDS"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _pending_uploads_hold_the_largest_one(self) -> Self:
+        # A ceiling under one upload's own maximum would refuse that upload every time (#529).
+        largest = max(
+            self.upload_max_image_bytes,
+            self.upload_max_video_bytes,
+            self.upload_max_document_bytes,
+        )
+        if self.upload_pending_max_bytes < largest:
+            raise ValueError(
+                "UPLOAD_PENDING_MAX_BYTES must be at least the largest UPLOAD_MAX_*_BYTES"
             )
         return self
 
