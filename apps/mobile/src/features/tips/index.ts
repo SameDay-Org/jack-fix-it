@@ -1,0 +1,1 @@
+export { TipCard } from "./TipCard";

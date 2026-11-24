@@ -1,6 +1,6 @@
 {
   "brand": {
-    "name": "Jack Fix It"
+    "name": "John Got It"
   },
   "common": {
     "loading": "Loading",
@@ -19,19 +19,19 @@
     }
   },
   "welcome": {
-    "support": "Tell Jack. We'll take care of the rest.",
+    "support": "Tell John. We'll take care of the rest.",
     "getStarted": "Get started",
     "haveAccount": "I already have an account",
     "partialCleanup": "Signed out. Some data couldn't be cleared from this device."
   },
   "offline": {
-    "title": "Can't reach Jack right now",
+    "title": "Can't reach John right now",
     "body": "Check your connection, then try again.",
     "retry": "Try again",
     "otherAccount": "Log in with another account"
   },
   "role": {
-    "title": "How will you use Jack?",
+    "title": "How will you use John?",
     "customerTitle": "I need help at home",
     "customerDescription": "Tell us what happened and we'll find a local pro.",
     "proTitle": "I'm a pro",
@@ -71,7 +71,7 @@
       "yours": "Your photo",
       "uploading": "Uploading your photo",
       "blockedTitle": "Camera access is off",
-      "blockedBody": "Turn it on for Jack in Settings, or choose a photo from this phone.",
+      "blockedBody": "Turn it on for John in Settings, or choose a photo from this phone.",
       "unavailableTitle": "The camera couldn't start",
       "unavailableBody": "Choose a photo from this phone instead."
     },
@@ -129,7 +129,7 @@
     "phone": "Phone",
     "phoneVerified": "Verified",
     "headline": "What's going on at <accent>home</accent>?",
-    "support": "Pick a category and Jack takes care of the rest.",
+    "support": "Pick a category and John takes care of the rest.",
     "categoriesTitle": "Categories",
     "categoriesLoading": "Loading categories",
     "categoriesFailed": "We couldn't load the categories.",
@@ -199,8 +199,8 @@
       },
       "refreshFailed": "Couldn't refresh. Check your connection and try again.",
       "banner": {
-        "received": "Jack got your request",
-        "findingPro": "Jack is finding a pro",
+        "received": "John got your request",
+        "findingPro": "John is finding a pro",
         "quoteReady": "Quote ready",
         "compare": "compare",
         "hint": "Opens your request"
@@ -286,7 +286,7 @@
       "invalidTitle": "Check the address",
       "invalidBody": "We couldn't use this address. Fix the marked fields, then send it again.",
       "notServedTitle": "We're not in this area yet",
-      "notServedBody": "Jack serves a few areas for now. Try another address.",
+      "notServedBody": "John serves a few areas for now. Try another address.",
       "savedFailed": "We couldn't load your saved addresses.",
       "savedRetry": "Try again"
     },
@@ -334,7 +334,7 @@
       "rejectedBody": "Go back over your answers and try again."
     },
     "sent": {
-      "title": "Jack is on it",
+      "title": "John is on it",
       "summary": "{{category}} at {{place}}",
       "codeLabel": "Your request code",
       "next": "Pros nearby will send you quotes. We'll notify you.",
@@ -593,10 +593,10 @@
     "itemRemove": "Remove {{name}}"
   },
   "permissions": {
-    "camera": "Jack uses the camera to take your profile photo and photos of what needs fixing.",
-    "photos": "Jack uses the photos you choose to show what needs fixing.",
-    "motion": "Jack uses your phone's motion to tilt your ID card as you move it.",
-    "location": "Jack Fix It uses your location while you're on the way to a job, so the customer can see you coming, and when you check in, so they know you've arrived."
+    "camera": "John uses the camera to take your profile photo and photos of what needs fixing.",
+    "photos": "John uses the photos you choose to show what needs fixing.",
+    "motion": "John uses your phone's motion to tilt your ID card as you move it.",
+    "location": "John Got It uses your location while you're on the way to a job, so the customer can see you coming, and when you check in, so they know you've arrived."
   },
   "quotes": {
     "title": "Your quotes",
@@ -615,8 +615,10 @@
     "expired": "Expired",
     "accepted": "Accepted",
     "acceptedNote": "Quote accepted. Payment comes next.",
-    "proFallback": "Jack pro",
-    "verified": "Verified by Jack Fix It",
+    "acceptedPaid": "Quote accepted and paid.",
+    "acceptedOnly": "Quote accepted.",
+    "proFallback": "John pro",
+    "verified": "Verified by John Got It",
     "nameVerified": "{{name}}, verified",
     "ratingNew": "New",
     "rated": "Rated {{rating}}",
@@ -654,14 +656,14 @@
         "years_other": "years of experience"
       },
       "newPro": {
-        "named": "{{name}} is new to Jack Fix It.",
-        "unnamed": "This pro is new to Jack Fix It.",
+        "named": "{{name}} is new to John Got It.",
+        "unnamed": "This pro is new to John Got It.",
         "joined": "They joined in {{month}} and haven't completed a job here yet.",
-        "verified": "Like every pro on Jack Fix It, they were verified before they could send you a quote."
+        "verified": "Like every pro on John Got It, they were verified before they could send you a quote."
       },
       "about": "About",
       "services": "What they do",
-      "trust": "Verified by Jack Fix It: our team reviewed the information and documents this pro provided and approved their profile before they could send you a quote.",
+      "trust": "Verified by John Got It: our team reviewed the information and documents this pro provided and approved their profile before they could send you a quote.",
       "accept": "Accept for {{price}}",
       "backToQuotes": "Back to quotes",
       "gone": {
@@ -802,6 +804,7 @@
       "sent": "Sent",
       "description": "What's going on",
       "redacted": "Contact details were hidden.",
+      "answers": "Their answers",
       "sendQuote": "Send a quote"
     },
     "media": {
@@ -838,7 +841,9 @@
       "refreshFailed": "We couldn't refresh your jobs.",
       "retry": "Try again",
       "row": "{{status}}. {{when}}. {{what}}.",
-      "for": "{{category}} for {{name}}"
+      "for": "{{category}} for {{name}}",
+      "startedTime": "Started {{time}}",
+      "startedWhen": "Started {{day}}, {{time}}"
     },
     "day": {
       "today": "Today",
@@ -919,7 +924,7 @@
     "failure": {
       "changed": "This job changed. Here's where it stands now.",
       "gone": "This job is no longer available.",
-      "offline": "We couldn't reach Jack Fix It. Check your connection and try again.",
+      "offline": "We couldn't reach John Got It. Check your connection and try again.",
       "failed": "Something went wrong. Please try again."
     },
     "eta": {
@@ -951,11 +956,11 @@
       "notNow": "Not now",
       "ask": {
         "title": "Share your location to check in",
-        "body": "Jack Fix It checks your location once, when you check in, so {{name}} knows you've arrived. It's used only for this check-in.",
+        "body": "John Got It checks your location once, when you check in, so {{name}} knows you've arrived. It's used only for this check-in.",
         "continue": "Continue"
       },
       "blocked": {
-        "title": "Location is off for Jack Fix It",
+        "title": "Location is off for John Got It",
         "body": "Checking in needs your location so {{name}} knows you've arrived. Turn it on in Settings, then come back here.",
         "settings": "Open Settings"
       },
@@ -1031,13 +1036,13 @@
     "sharing": {
       "prompt": {
         "title": "Share your location on the way",
-        "body_one": "While you're on the way, Jack Fix It shares your location with {{name}} every {{count}} second, so they can see you coming.",
-        "body_other": "While you're on the way, Jack Fix It shares your location with {{name}} every {{count}} seconds, so they can see you coming.",
-        "stops": "It stops as soon as you check in, or if the job is cancelled. Jack Fix It doesn't keep a history of where you've been.",
+        "body_one": "While you're on the way, John Got It shares your location with {{name}} every {{count}} second, so they can see you coming.",
+        "body_other": "While you're on the way, John Got It shares your location with {{name}} every {{count}} seconds, so they can see you coming.",
+        "stops": "It stops as soon as you check in, or if the job is cancelled. John Got It doesn't keep a history of where you've been.",
         "continue": "Continue",
         "notNow": "Not now",
         "settings": "Open Settings",
-        "blocked": "Location is off for Jack Fix It. Turn it on in Settings, then come back here and tap Continue."
+        "blocked": "Location is off for John Got It. Turn it on in Settings, then come back here and tap Continue."
       },
       "note": {
         "message": "Your location isn't shared with {{name}} on the way.",
@@ -1059,11 +1064,11 @@
       "required": "Enter your price.",
       "invalid": "Enter a price like 120 or 120.50.",
       "aboveMax": "The maximum quote is {{amount}}.",
-      "aboveCap": "Above the most Jack allows for one quote."
+      "aboveCap": "Above the most John allows for one quote."
     },
     "payout": {
       "receive": "You'll receive {{amount}}",
-      "fee": "Jack's fee {{rate}}: {{amount}}"
+      "fee": "John's fee {{rate}}: {{amount}}"
     },
     "scope": {
       "label": "What's included",
@@ -1086,7 +1091,7 @@
       "moreMinutes": "{{count}} minutes more",
       "required": "Add how long the job takes.",
       "aboveMax": "The longest job you can quote is {{duration}}.",
-      "aboveCap": "Above the most Jack allows for one quote."
+      "aboveCap": "Above the most John allows for one quote."
     },
     "start": {
       "title": "Proposed start",
@@ -1141,7 +1146,7 @@
   "idCard": {
     "hello": "Hello, I'm:",
     "pro": "PRO",
-    "brand": "Jack Fix It",
+    "brand": "John Got It",
     "memberSince": "Member since",
     "code": "Member code",
     "support": "Support when you need it",
@@ -1199,7 +1204,7 @@
     "intro": "Answers to common questions about requests, payments and jobs.",
     "contact": {
       "title": "Still need help?",
-      "action": "Talk to Jack"
+      "action": "Talk to John"
     },
     "sections": {
       "booking": "Booking and quotes",
@@ -1222,7 +1227,7 @@
       },
       "cancel": {
         "question": "Can I cancel after I've booked?",
-        "answer": "Plans change. Write to us from Talk to Jack, at the end of this page. For now, the Jack Fix It team reviews every cancellation individually, and what happens with your payment is decided case by case."
+        "answer": "Plans change. Write to us from Talk to John, at the end of this page. For now, the John Got It team reviews every cancellation individually, and what happens with your payment is decided case by case."
       },
       "whenPay": {
         "question": "When do I pay?",
@@ -1230,7 +1235,7 @@
       },
       "payMethods": {
         "question": "How can I pay?",
-        "answer": "By card, or with Apple Pay or Google Pay where your phone offers them. The payment runs on Stripe's secure checkout, so Jack Fix It never stores your card number."
+        "answer": "By card, or with Apple Pay or Google Pay where your phone offers them. The payment runs on Stripe's secure checkout, so John Got It never stores your card number."
       },
       "payFailed": {
         "question": "What if my payment doesn't go through?",
@@ -1238,7 +1243,7 @@
       },
       "proPaid": {
         "question": "When does the pro get paid?",
-        "answer": "After you confirm the job is done, or once it is confirmed automatically at the end of the confirmation period, Jack Fix It pays the pro."
+        "answer": "After you confirm the job is done, or once it is confirmed automatically at the end of the confirmation period, John Got It pays the pro."
       },
       "follow": {
         "question": "How do I follow my job?",
@@ -1250,11 +1255,11 @@
       },
       "chat": {
         "question": "How do I contact my pro?",
-        "answer": "Through the chat on your job page, which opens as soon as you've booked. Phone numbers, emails and links are hidden in messages, so the whole conversation stays in one place: Jack Fix It."
+        "answer": "Through the chat on your job page, which opens as soon as you've booked. Phone numbers, emails and links are hidden in messages, so the whole conversation stays in one place: John Got It."
       },
       "problem": {
         "question": "What if something isn't right with the job?",
-        "answer": "Tell your pro in the chat first: it's the fastest way to sort things out. If that doesn't settle it, write to us from Talk to Jack, at the end of this page. Our team reviews it and gets back to you."
+        "answer": "Tell your pro in the chat first: it's the fastest way to sort things out. If that doesn't settle it, write to us from Talk to John, at the end of this page. Our team reviews it and gets back to you."
       },
       "verified": {
         "question": "How are pros verified?",
@@ -1275,8 +1280,8 @@
     }
   },
   "support": {
-    "title": "Talk to Jack",
-    "intro": "Tell us what's going on. The Jack Fix It team reads every message.",
+    "title": "Talk to John",
+    "intro": "Tell us what's going on. The John Got It team reads every message.",
     "topic": {
       "label": "What is it about?",
       "account": "My account",
@@ -1295,7 +1300,7 @@
     },
     "message": {
       "label": "Your message",
-      "hint": "Only the Jack Fix It team reads it. Leave out passwords and card numbers.",
+      "hint": "Only the John Got It team reads it. Leave out passwords and card numbers.",
       "tooLong_one": "Your message is {{count}} character too long.",
       "tooLong_other": "Your message is {{count}} characters too long."
     },
@@ -1321,7 +1326,7 @@
     },
     "sent": {
       "title": "We got your message",
-      "body": "The Jack Fix It team will review it. You can follow where it stands under Your messages.",
+      "body": "The John Got It team will review it. You can follow where it stands under Your messages.",
       "another": "New message"
     },
     "mine": {
@@ -1475,7 +1480,7 @@
       "body": "Tap Confirm when {{name}} has finished the job.",
       "confirm": "Confirm",
       "notYet": "Not yet",
-      "offline": "We couldn't reach Jack Fix It. Check your connection and try again.",
+      "offline": "We couldn't reach John Got It. Check your connection and try again.",
       "failed": "We couldn't confirm the job. Please try again.",
       "changed": "This job changed. Here's where it stands now.",
       "gone": "This job is no longer available."
@@ -1546,7 +1551,7 @@
     "loading": "Loading messages",
     "empty": {
       "title": "Say hello to {{name}}",
-      "body": "Ask about the job, the time or anything you need to know. Your messages stay in Jack Fix It.",
+      "body": "Ask about the job, the time or anything you need to know. Your messages stay in John Got It.",
       "closedTitle": "No messages here",
       "closedBody": "Nothing was sent in this chat before it closed."
     },
@@ -1581,7 +1586,7 @@
       "retryHint": "Sends it again",
       "refused": "Not sent"
     },
-    "redacted": "We hid contact details. Keep the conversation in Jack Fix It.",
+    "redacted": "We hid contact details. Keep the conversation in John Got It.",
     "receipt": {
       "sent": "Sent",
       "delivered": "Delivered",
@@ -1904,7 +1909,7 @@
     },
     "not_started": {
       "title": "Set up how you get paid",
-      "body": "Jack Fix It pays you through Stripe. You need a payout account before requests can reach you."
+      "body": "John Got It pays you through Stripe. You need a payout account before requests can reach you."
     },
     "incomplete": {
       "title": "Stripe needs more information",
@@ -1925,7 +1930,7 @@
       "title": "What Stripe will ask for",
       "bank": "A bank account, where your payouts go",
       "identity": "Your identity, to confirm it's you",
-      "privacy": "Stripe collects and keeps these details. Jack Fix It never sees them."
+      "privacy": "Stripe collects and keeps these details. John Got It never sees them."
     },
     "action": {
       "start": "Set up payouts",
@@ -2013,13 +2018,13 @@
     },
     "closed": {
       "title": "This job can't be cancelled now",
-      "body": "Once the work has started, a job can't be cancelled. If something's wrong, talk to Jack."
+      "body": "Once the work has started, a job can't be cancelled. If something's wrong, talk to John."
     },
     "review": {
       "title": "We need to look at this job first",
-      "body": "Something about its payment needs our team. Talk to Jack and we'll sort it out."
+      "body": "Something about its payment needs our team. Talk to John and we'll sort it out."
     },
-    "talkToJack": "Talk to Jack",
+    "talkToJack": "Talk to John",
     "loadFailed": {
       "title": "We couldn't load this",
       "body": "Check your connection and try again."
@@ -2117,7 +2122,7 @@
       "send": "Send report",
       "retrySend": "Try again",
       "home": "Go to Home",
-      "talkToJack": "Talk to Jack",
+      "talkToJack": "Talk to John",
       "retry": "Try again",
       "gone": {
         "title": "This job isn't available",
@@ -2125,7 +2130,7 @@
       },
       "closed": {
         "title": "Reporting is closed for this job",
-        "body": "A problem can be reported while a finished job waits for your confirmation. If you still need help, write to us from Talk to Jack."
+        "body": "A problem can be reported while a finished job waits for your confirmation. If you still need help, write to us from Talk to John."
       },
       "loadFailed": {
         "title": "We couldn't load this job",
@@ -2165,7 +2170,7 @@
       "loadFailed": "We couldn't load the report.",
       "replyTitle": "Your reply",
       "replyLabel": "Your reply",
-      "replyHint": "Only the Jack Fix It team reads it. You can send one reply.",
+      "replyHint": "Only the John Got It team reads it. You can send one reply.",
       "replyMissing": "Write your reply.",
       "replySend": "Send reply"
     }
@@ -2207,7 +2212,8 @@
       "noCategory": "Job",
       "paidOn": "Paid on {{date}}",
       "completed": "Completed {{date}}",
-      "confirmedBy": "Usually confirmed by {{date}}"
+      "confirmedBy": "Usually confirmed by {{date}}",
+      "tip": "+ {{amount}} tip"
     },
     "empty": {
       "title": "No earnings yet",
@@ -2239,6 +2245,65 @@
       "title": "Set up payouts to get paid",
       "body": "Connect a payout account with Stripe so we can send you your earnings.",
       "action": "Set up payouts"
+    }
+  },
+  "tips": {
+    "title": "Add a tip for {{name}}?",
+    "body": "Tips are optional. {{name}} gets 100% of it.",
+    "group": "Tip amount",
+    "none": "No tip",
+    "percent": "{{percent}}% · {{amount}}",
+    "custom": "Custom",
+    "customLabel": "Tip amount",
+    "customHint": "From {{min}} to {{max}}",
+    "customOutOfRange": "Enter an amount from {{min}} to {{max}}.",
+    "customInvalid": "Enter an amount, like 10 or 12.50.",
+    "pay": "Tip {{amount}}",
+    "payNoAmount": "Tip",
+    "done": "You tipped {{name}} {{amount}}. Thank you!",
+    "skipped": "No tip added",
+    "failed": "The tip didn't go through. Your job is still confirmed.",
+    "offline": "You're offline. Your job is still confirmed; try the tip again when you're back online.",
+    "generic": "Something went wrong with the tip. Your job is still confirmed.",
+    "delayed": "We're still confirming your tip. It shows here soon.",
+    "rateLimited": "Too many tries in a short time. Wait a moment, then try again. Your job is still confirmed.",
+    "inProgress": "This tip is already being processed. It shows here soon.",
+    "needsReview": "Our support team is checking this tip. Your job is still confirmed; you don't need to do anything."
+  },
+  "receipt": {
+    "title": "Receipt",
+    "number": "Receipt {{code}}",
+    "paidOn": "Paid on {{date}}",
+    "service": "Service",
+    "serviceOf": "{{category}} service",
+    "tax": "Tax",
+    "tip": "Tip for {{name}}",
+    "tipNoName": "Tip",
+    "returned": "Returned to your payment method",
+    "total": "Total paid",
+    "paidWith": "Paid with {{method}}",
+    "paidByCard": "Paid by card",
+    "pro": "With {{name}}",
+    "done": "Done {{date}}",
+    "scheduled": "Scheduled for {{date}}",
+    "thanks": "Thank you for using John Got It.",
+    "questions": "Questions? {{email}}",
+    "status": {
+      "paid": "Paid",
+      "under_review": "Under review",
+      "partly_returned": "Partly returned",
+      "returned": "Returned"
+    },
+    "see": "See receipt",
+    "share": "Share",
+    "shareDialog": "Share your receipt",
+    "shareFailed": "We couldn't share the receipt. Try again.",
+    "addTip": "Add a tip",
+    "loading": "Loading your receipt",
+    "notYet": "Your receipt shows here once the payment goes through.",
+    "error": {
+      "title": "We couldn't load your receipt",
+      "retry": "Try again"
     }
   }
 }

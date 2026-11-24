@@ -13,7 +13,7 @@ const FAQ_ORDER = FAQ.map((item) => item.id);
 
 /**
  * Help (#274): the FAQ, grouped by the moment a question comes up, then the way to write to the
- * team ("Talk to Jack", `features/support`). A question opens in place, one at a time, so its
+ * team ("Talk to John", `features/support`). A question opens in place, one at a time, so its
  * neighbors stay in view and nothing navigates; the content is `faq.ts` and the catalogs, never
  * this file.
  */

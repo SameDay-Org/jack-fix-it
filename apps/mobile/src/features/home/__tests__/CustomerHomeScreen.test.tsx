@@ -58,7 +58,7 @@ describe("CustomerHomeScreen", () => {
     await renderWithQuery(<CustomerHomeScreen />);
     await screen.findByRole("button", { name: "Painting" });
 
-    expect(screen.getByText("Pick a category and Jack takes care of the rest.")).toBeTruthy();
+    expect(screen.getByText("Pick a category and John takes care of the rest.")).toBeTruthy();
     expect(screen.queryByTestId("home-tell-jack")).toBeNull();
     expect(screen.queryByRole("button", { name: /tell jack/i })).toBeNull();
     expect(screen.queryByText(/tell jack/i)).toBeNull();
@@ -77,9 +77,9 @@ describe("CustomerHomeScreen", () => {
     const at = (text: string) => runs.indexOf(text);
     expect(at("What's going on at ")).toBeGreaterThan(-1); // the headline's first run
     expect(at("What's going on at ")).toBeLessThan(
-      at("Pick a category and Jack takes care of the rest."),
+      at("Pick a category and John takes care of the rest."),
     );
-    expect(at("Pick a category and Jack takes care of the rest.")).toBeLessThan(at("Categories"));
+    expect(at("Pick a category and John takes care of the rest.")).toBeLessThan(at("Categories"));
     expect(at("Categories")).toBeLessThan(at("House Cleaning")); // the first card
   });
 
@@ -89,7 +89,7 @@ describe("CustomerHomeScreen", () => {
     await screen.findByRole("button", { name: "Pintura" });
 
     expect(screen.getByRole("header", { name: "¿Qué está pasando en casa?" })).toBeTruthy();
-    expect(screen.getByText("Elige una categoría y Jack se encarga del resto.")).toBeTruthy();
+    expect(screen.getByText("Elige una categoría y John se encarga del resto.")).toBeTruthy();
     expect(screen.getByRole("header", { name: "Categorías" })).toBeTruthy();
     expect(screen.queryByTestId("home-tell-jack")).toBeNull();
     expect(screen.queryByText(/dile a jack/i)).toBeNull();
@@ -213,7 +213,7 @@ describe("CustomerHomeScreen", () => {
     await waitFor(() => expect(screen.queryByTestId("home-categories")).toBeNull());
     expect(screen.queryByText("Categories")).toBeNull();
     expect(screen.getByRole("header", { name: "What's going on at home?" })).toBeTruthy();
-    expect(screen.getByText("Pick a category and Jack takes care of the rest.")).toBeTruthy();
+    expect(screen.getByText("Pick a category and John takes care of the rest.")).toBeTruthy();
   });
 
   it("customer home has no AccountButton: Account is a tab (#213)", async () => {

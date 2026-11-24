@@ -157,6 +157,7 @@ class ProReviewService:
                 StaffProItem(
                     id=profile.id,
                     name=names.get(profile.user_id),
+                    pro_deleted=names.is_deleted(profile.user_id),
                     verification_status=profile.verification_status,
                     payouts_enabled=profile.payouts_enabled,
                     categories=[c for c in categories if c.id in own],  # by slug
@@ -353,6 +354,7 @@ class ProReviewService:
             user_id=profile.user_id,
             name=names.get(profile.user_id),
             legal_name=await self._users.legal_name(profile.user_id),
+            pro_deleted=names.is_deleted(profile.user_id),
             payouts_enabled=profile.payouts_enabled,
             bio=profile.bio,
             years_of_experience=profile.years_of_experience,

@@ -1,6 +1,6 @@
 {
   "brand": {
-    "name": "Jack Fix It"
+    "name": "John Got It"
   },
   "common": {
     "loading": "Cargando",
@@ -19,19 +19,19 @@
     }
   },
   "welcome": {
-    "support": "Cuéntaselo a Jack. Nosotros nos encargamos del resto.",
+    "support": "Cuéntaselo a John. Nosotros nos encargamos del resto.",
     "getStarted": "Empezar",
     "haveAccount": "Ya tengo una cuenta",
     "partialCleanup": "Sesión cerrada. Algunos datos no se pudieron borrar de este dispositivo."
   },
   "offline": {
-    "title": "No podemos conectar con Jack ahora",
+    "title": "No podemos conectar con John ahora",
     "body": "Revisa tu conexión y vuelve a intentarlo.",
     "retry": "Reintentar",
     "otherAccount": "Entrar con otra cuenta"
   },
   "role": {
-    "title": "¿Cómo vas a usar Jack?",
+    "title": "¿Cómo vas a usar John?",
     "customerTitle": "Necesito ayuda en casa",
     "customerDescription": "Cuéntanos qué pasó y buscamos un profesional cerca de ti.",
     "proTitle": "Soy profesional",
@@ -71,7 +71,7 @@
       "yours": "Tu foto",
       "uploading": "Subiendo tu foto",
       "blockedTitle": "El acceso a la cámara está desactivado",
-      "blockedBody": "Actívalo para Jack en Configuración, o elige una foto de este teléfono.",
+      "blockedBody": "Actívalo para John en Configuración, o elige una foto de este teléfono.",
       "unavailableTitle": "No se pudo iniciar la cámara",
       "unavailableBody": "Elige una foto de este teléfono."
     },
@@ -129,7 +129,7 @@
     "phone": "Teléfono",
     "phoneVerified": "Verificado",
     "headline": "¿Qué está pasando en <accent>casa</accent>?",
-    "support": "Elige una categoría y Jack se encarga del resto.",
+    "support": "Elige una categoría y John se encarga del resto.",
     "categoriesTitle": "Categorías",
     "categoriesLoading": "Cargando categorías",
     "categoriesFailed": "No pudimos cargar las categorías.",
@@ -199,8 +199,8 @@
       },
       "refreshFailed": "No se pudo actualizar. Revisa tu conexión e inténtalo de nuevo.",
       "banner": {
-        "received": "Jack recibió tu solicitud",
-        "findingPro": "Jack busca un profesional",
+        "received": "John recibió tu solicitud",
+        "findingPro": "John busca un profesional",
         "quoteReady": "Presupuesto listo",
         "compare": "comparar",
         "hint": "Abre tu solicitud"
@@ -286,7 +286,7 @@
       "invalidTitle": "Revisa la dirección",
       "invalidBody": "No pudimos usar esta dirección. Corrige los campos marcados y vuelve a enviarla.",
       "notServedTitle": "Aún no llegamos a esta zona",
-      "notServedBody": "Por ahora Jack atiende pocas zonas. Prueba con otra dirección.",
+      "notServedBody": "Por ahora John atiende pocas zonas. Prueba con otra dirección.",
       "savedFailed": "No pudimos cargar tus direcciones guardadas.",
       "savedRetry": "Intentar de nuevo"
     },
@@ -334,7 +334,7 @@
       "rejectedBody": "Repasa tus respuestas y vuelve a intentarlo."
     },
     "sent": {
-      "title": "Jack ya está en ello",
+      "title": "John ya está en ello",
       "summary": "{{category}} en {{place}}",
       "codeLabel": "Tu código de solicitud",
       "next": "Los profesionales cercanos te enviarán presupuestos. Te avisaremos.",
@@ -593,10 +593,10 @@
     "itemRemove": "Quitar {{name}}"
   },
   "permissions": {
-    "camera": "Jack usa la cámara para tomar tu foto de perfil y fotos de lo que hay que arreglar.",
-    "photos": "Jack usa las fotos que eliges para mostrar lo que hay que arreglar.",
-    "motion": "Jack usa el movimiento del teléfono para inclinar tu tarjeta de identificación al moverlo.",
-    "location": "Jack Fix It usa tu ubicación mientras vas en camino a un trabajo, para que el cliente vea que vas llegando, y cuando registras tu llegada, para que sepa que llegaste."
+    "camera": "John usa la cámara para tomar tu foto de perfil y fotos de lo que hay que arreglar.",
+    "photos": "John usa las fotos que eliges para mostrar lo que hay que arreglar.",
+    "motion": "John usa el movimiento del teléfono para inclinar tu tarjeta de identificación al moverlo.",
+    "location": "John Got It usa tu ubicación mientras vas en camino a un trabajo, para que el cliente vea que vas llegando, y cuando registras tu llegada, para que sepa que llegaste."
   },
   "quotes": {
     "title": "Tus presupuestos",
@@ -615,8 +615,10 @@
     "expired": "Vencido",
     "accepted": "Aceptado",
     "acceptedNote": "Presupuesto aceptado. Lo siguiente es el pago.",
-    "proFallback": "Profesional de Jack",
-    "verified": "Verificado por Jack Fix It",
+    "acceptedPaid": "Presupuesto aceptado y pagado.",
+    "acceptedOnly": "Presupuesto aceptado.",
+    "proFallback": "Profesional de John",
+    "verified": "Verificado por John Got It",
     "nameVerified": "{{name}}, verificado",
     "ratingNew": "Nuevo",
     "rated": "Calificación {{rating}}",
@@ -654,14 +656,14 @@
         "years_other": "años de experiencia"
       },
       "newPro": {
-        "named": "{{name}} se está estrenando en Jack Fix It.",
-        "unnamed": "Este profesional se está estrenando en Jack Fix It.",
+        "named": "{{name}} se está estrenando en John Got It.",
+        "unnamed": "Este profesional se está estrenando en John Got It.",
         "joined": "Se unió en {{month}} y todavía no ha completado ningún trabajo aquí.",
-        "verified": "Como todos los profesionales de Jack Fix It, pasó la verificación antes de poder enviarte un presupuesto."
+        "verified": "Como todos los profesionales de John Got It, pasó la verificación antes de poder enviarte un presupuesto."
       },
       "about": "Presentación",
       "services": "Qué hace",
-      "trust": "Verificado por Jack Fix It: nuestro equipo revisó la información y los documentos que este profesional presentó y aprobó su perfil antes de que pudiera enviarte un presupuesto.",
+      "trust": "Verificado por John Got It: nuestro equipo revisó la información y los documentos que este profesional presentó y aprobó su perfil antes de que pudiera enviarte un presupuesto.",
       "accept": "Aceptar por {{price}}",
       "backToQuotes": "Ver presupuestos",
       "gone": {
@@ -802,6 +804,7 @@
       "sent": "Enviada",
       "description": "Qué pasa",
       "redacted": "Los datos de contacto se ocultaron.",
+      "answers": "Sus respuestas",
       "sendQuote": "Enviar una cotización"
     },
     "media": {
@@ -838,7 +841,9 @@
       "refreshFailed": "No pudimos actualizar tus trabajos.",
       "retry": "Intentar de nuevo",
       "row": "{{status}}. {{when}}. {{what}}.",
-      "for": "{{category}} para {{name}}"
+      "for": "{{category}} para {{name}}",
+      "startedTime": "Empezó {{time}}",
+      "startedWhen": "Empezó {{day}}, {{time}}"
     },
     "day": {
       "today": "Hoy",
@@ -919,7 +924,7 @@
     "failure": {
       "changed": "Este trabajo cambió. Así está ahora.",
       "gone": "Este trabajo ya no está disponible.",
-      "offline": "No pudimos conectar con Jack Fix It. Revisa tu conexión e inténtalo de nuevo.",
+      "offline": "No pudimos conectar con John Got It. Revisa tu conexión e inténtalo de nuevo.",
       "failed": "Algo salió mal. Inténtalo de nuevo."
     },
     "eta": {
@@ -951,11 +956,11 @@
       "notNow": "Ahora no",
       "ask": {
         "title": "Comparte tu ubicación para registrar tu llegada",
-        "body": "Jack Fix It revisa tu ubicación una vez, al registrar tu llegada, para que {{name}} sepa que llegaste. Solo se usa para este registro.",
+        "body": "John Got It revisa tu ubicación una vez, al registrar tu llegada, para que {{name}} sepa que llegaste. Solo se usa para este registro.",
         "continue": "Continuar"
       },
       "blocked": {
-        "title": "La ubicación está desactivada para Jack Fix It",
+        "title": "La ubicación está desactivada para John Got It",
         "body": "Para registrar tu llegada necesitamos tu ubicación, así {{name}} sabe que llegaste. Actívala en Configuración y vuelve aquí.",
         "settings": "Abrir Configuración"
       },
@@ -1031,13 +1036,13 @@
     "sharing": {
       "prompt": {
         "title": "Comparte tu ubicación en camino",
-        "body_one": "Mientras vas en camino, Jack Fix It comparte tu ubicación con {{name}} cada {{count}} segundo, para que vea que vas llegando.",
-        "body_other": "Mientras vas en camino, Jack Fix It comparte tu ubicación con {{name}} cada {{count}} segundos, para que vea que vas llegando.",
-        "stops": "Se detiene en cuanto registras tu llegada o si se cancela el trabajo. Jack Fix It no guarda un historial de dónde has estado.",
+        "body_one": "Mientras vas en camino, John Got It comparte tu ubicación con {{name}} cada {{count}} segundo, para que vea que vas llegando.",
+        "body_other": "Mientras vas en camino, John Got It comparte tu ubicación con {{name}} cada {{count}} segundos, para que vea que vas llegando.",
+        "stops": "Se detiene en cuanto registras tu llegada o si se cancela el trabajo. John Got It no guarda un historial de dónde has estado.",
         "continue": "Continuar",
         "notNow": "Ahora no",
         "settings": "Abrir Configuración",
-        "blocked": "La ubicación está desactivada para Jack Fix It. Actívala en Configuración, luego vuelve aquí y toca Continuar."
+        "blocked": "La ubicación está desactivada para John Got It. Actívala en Configuración, luego vuelve aquí y toca Continuar."
       },
       "note": {
         "message": "Tu ubicación no se comparte con {{name}} mientras vas en camino.",
@@ -1059,11 +1064,11 @@
       "required": "Escribe tu precio.",
       "invalid": "Escribe un precio como 120 o 120.50.",
       "aboveMax": "La cotización máxima es de {{amount}}.",
-      "aboveCap": "Supera lo máximo que Jack permite por cotización."
+      "aboveCap": "Supera lo máximo que John permite por cotización."
     },
     "payout": {
       "receive": "Recibirás {{amount}}",
-      "fee": "Comisión de Jack {{rate}}: {{amount}}"
+      "fee": "Comisión de John {{rate}}: {{amount}}"
     },
     "scope": {
       "label": "Qué incluye",
@@ -1086,7 +1091,7 @@
       "moreMinutes": "{{count}} minutos más",
       "required": "Indica cuánto tarda el trabajo.",
       "aboveMax": "El trabajo más largo que puedes cotizar es de {{duration}}.",
-      "aboveCap": "Supera lo máximo que Jack permite por cotización."
+      "aboveCap": "Supera lo máximo que John permite por cotización."
     },
     "start": {
       "title": "Inicio propuesto",
@@ -1141,7 +1146,7 @@
   "idCard": {
     "hello": "Hola, soy:",
     "pro": "PRO",
-    "brand": "Jack Fix It",
+    "brand": "John Got It",
     "memberSince": "Miembro desde",
     "code": "Código de miembro",
     "support": "Apoyo cuando lo necesites",
@@ -1199,7 +1204,7 @@
     "intro": "Respuestas a preguntas frecuentes sobre solicitudes, pagos y trabajos.",
     "contact": {
       "title": "¿Aún necesitas ayuda?",
-      "action": "Habla con Jack"
+      "action": "Habla con John"
     },
     "sections": {
       "booking": "Reservas y presupuestos",
@@ -1222,7 +1227,7 @@
       },
       "cancel": {
         "question": "¿Puedo cancelar después de reservar?",
-        "answer": "Los planes cambian. Escríbenos desde Habla con Jack, al final de esta página. Por ahora, el equipo de Jack Fix It revisa cada cancelación de forma individual, y lo que pasa con tu pago se decide caso por caso."
+        "answer": "Los planes cambian. Escríbenos desde Habla con John, al final de esta página. Por ahora, el equipo de John Got It revisa cada cancelación de forma individual, y lo que pasa con tu pago se decide caso por caso."
       },
       "whenPay": {
         "question": "¿Cuándo pago?",
@@ -1230,7 +1235,7 @@
       },
       "payMethods": {
         "question": "¿Cómo puedo pagar?",
-        "answer": "Con tarjeta, o con Apple Pay o Google Pay si tu teléfono los ofrece. El pago se hace en la plataforma segura de Stripe, así que Jack Fix It nunca guarda el número de tu tarjeta."
+        "answer": "Con tarjeta, o con Apple Pay o Google Pay si tu teléfono los ofrece. El pago se hace en la plataforma segura de Stripe, así que John Got It nunca guarda el número de tu tarjeta."
       },
       "payFailed": {
         "question": "¿Qué pasa si mi pago no se completa?",
@@ -1238,7 +1243,7 @@
       },
       "proPaid": {
         "question": "¿Cuándo recibe su pago el profesional?",
-        "answer": "Cuando confirmas que el trabajo está terminado, o cuando se confirma automáticamente al final del período de confirmación, Jack Fix It le paga al profesional."
+        "answer": "Cuando confirmas que el trabajo está terminado, o cuando se confirma automáticamente al final del período de confirmación, John Got It le paga al profesional."
       },
       "follow": {
         "question": "¿Cómo sigo mi trabajo?",
@@ -1250,11 +1255,11 @@
       },
       "chat": {
         "question": "¿Cómo me comunico con mi profesional?",
-        "answer": "Por el chat de la página de tu trabajo, que se abre en cuanto reservas. Los teléfonos, correos y enlaces se ocultan en los mensajes, así que toda la conversación queda en un solo lugar: Jack Fix It."
+        "answer": "Por el chat de la página de tu trabajo, que se abre en cuanto reservas. Los teléfonos, correos y enlaces se ocultan en los mensajes, así que toda la conversación queda en un solo lugar: John Got It."
       },
       "problem": {
         "question": "¿Y si algo no sale bien con el trabajo?",
-        "answer": "Díselo primero a tu profesional por el chat: es la forma más rápida de resolverlo. Si eso no lo soluciona, escríbenos desde Habla con Jack, al final de esta página. Nuestro equipo lo revisa y te responde."
+        "answer": "Díselo primero a tu profesional por el chat: es la forma más rápida de resolverlo. Si eso no lo soluciona, escríbenos desde Habla con John, al final de esta página. Nuestro equipo lo revisa y te responde."
       },
       "verified": {
         "question": "¿Cómo se verifica a los profesionales?",
@@ -1275,8 +1280,8 @@
     }
   },
   "support": {
-    "title": "Habla con Jack",
-    "intro": "Cuéntanos qué pasa. El equipo de Jack Fix It lee cada mensaje.",
+    "title": "Habla con John",
+    "intro": "Cuéntanos qué pasa. El equipo de John Got It lee cada mensaje.",
     "topic": {
       "label": "¿De qué se trata?",
       "account": "Mi cuenta",
@@ -1295,7 +1300,7 @@
     },
     "message": {
       "label": "Tu mensaje",
-      "hint": "Solo lo lee el equipo de Jack Fix It. No incluyas contraseñas ni números de tarjeta.",
+      "hint": "Solo lo lee el equipo de John Got It. No incluyas contraseñas ni números de tarjeta.",
       "tooLong_one": "A tu mensaje le sobra {{count}} carácter.",
       "tooLong_other": "A tu mensaje le sobran {{count}} caracteres."
     },
@@ -1321,7 +1326,7 @@
     },
     "sent": {
       "title": "Recibimos tu mensaje",
-      "body": "El equipo de Jack Fix It lo revisará. Puedes seguir cómo va en Tus mensajes.",
+      "body": "El equipo de John Got It lo revisará. Puedes seguir cómo va en Tus mensajes.",
       "another": "Otro mensaje"
     },
     "mine": {
@@ -1475,7 +1480,7 @@
       "body": "Toca Confirmar cuando {{name}} haya terminado el trabajo.",
       "confirm": "Confirmar",
       "notYet": "Todavía no",
-      "offline": "No pudimos conectar con Jack Fix It. Revisa tu conexión e inténtalo de nuevo.",
+      "offline": "No pudimos conectar con John Got It. Revisa tu conexión e inténtalo de nuevo.",
       "failed": "No pudimos confirmar el trabajo. Inténtalo de nuevo.",
       "changed": "Este trabajo cambió. Así está ahora.",
       "gone": "Este trabajo ya no está disponible."
@@ -1546,7 +1551,7 @@
     "loading": "Cargando mensajes",
     "empty": {
       "title": "Saluda a {{name}}",
-      "body": "Pregunta por el trabajo, el horario o lo que necesites saber. Tus mensajes se quedan en Jack Fix It.",
+      "body": "Pregunta por el trabajo, el horario o lo que necesites saber. Tus mensajes se quedan en John Got It.",
       "closedTitle": "No hay mensajes aquí",
       "closedBody": "No se envió ningún mensaje antes de que se cerrara este chat."
     },
@@ -1581,7 +1586,7 @@
       "retryHint": "Lo envía de nuevo",
       "refused": "No se envió"
     },
-    "redacted": "Ocultamos datos de contacto. Mantén la conversación en Jack Fix It.",
+    "redacted": "Ocultamos datos de contacto. Mantén la conversación en John Got It.",
     "receipt": {
       "sent": "Enviado",
       "delivered": "Entregado",
@@ -1904,7 +1909,7 @@
     },
     "not_started": {
       "title": "Configura cómo recibes tus pagos",
-      "body": "Jack Fix It te paga a través de Stripe. Necesitas una cuenta de pagos para que te lleguen solicitudes."
+      "body": "John Got It te paga a través de Stripe. Necesitas una cuenta de pagos para que te lleguen solicitudes."
     },
     "incomplete": {
       "title": "Stripe necesita más información",
@@ -1925,7 +1930,7 @@
       "title": "Qué te pedirá Stripe",
       "bank": "Una cuenta bancaria, donde llegan tus pagos",
       "identity": "Tu identidad, para confirmar que eres tú",
-      "privacy": "Stripe recopila y guarda estos datos. Jack Fix It nunca los ve."
+      "privacy": "Stripe recopila y guarda estos datos. John Got It nunca los ve."
     },
     "action": {
       "start": "Configurar pagos",
@@ -2013,13 +2018,13 @@
     },
     "closed": {
       "title": "Este trabajo ya no se puede cancelar",
-      "body": "Un trabajo no se puede cancelar una vez que empezó. Si algo anda mal, habla con Jack."
+      "body": "Un trabajo no se puede cancelar una vez que empezó. Si algo anda mal, habla con John."
     },
     "review": {
       "title": "Primero tenemos que revisar este trabajo",
-      "body": "Algo de su pago necesita a nuestro equipo. Habla con Jack y lo resolvemos."
+      "body": "Algo de su pago necesita a nuestro equipo. Habla con John y lo resolvemos."
     },
-    "talkToJack": "Hablar con Jack",
+    "talkToJack": "Hablar con John",
     "loadFailed": {
       "title": "No pudimos cargar esto",
       "body": "Revisa tu conexión e inténtalo de nuevo."
@@ -2117,7 +2122,7 @@
       "send": "Enviar reporte",
       "retrySend": "Reintentar",
       "home": "Ir a Inicio",
-      "talkToJack": "Habla con Jack",
+      "talkToJack": "Habla con John",
       "retry": "Reintentar",
       "gone": {
         "title": "Este trabajo no está disponible",
@@ -2125,7 +2130,7 @@
       },
       "closed": {
         "title": "Ya no puedes reportar un problema en este trabajo",
-        "body": "Puedes reportar un problema mientras un trabajo terminado espera tu confirmación. Si aún necesitas ayuda, escríbenos desde Habla con Jack."
+        "body": "Puedes reportar un problema mientras un trabajo terminado espera tu confirmación. Si aún necesitas ayuda, escríbenos desde Habla con John."
       },
       "loadFailed": {
         "title": "No pudimos cargar este trabajo",
@@ -2165,7 +2170,7 @@
       "loadFailed": "No pudimos cargar el reporte.",
       "replyTitle": "Tu respuesta",
       "replyLabel": "Tu respuesta",
-      "replyHint": "Solo el equipo de Jack Fix It la lee. Puedes enviar una sola respuesta.",
+      "replyHint": "Solo el equipo de John Got It la lee. Puedes enviar una sola respuesta.",
       "replyMissing": "Escribe tu respuesta.",
       "replySend": "Enviar respuesta"
     }
@@ -2207,7 +2212,8 @@
       "noCategory": "Trabajo",
       "paidOn": "Pagado el {{date}}",
       "completed": "Completado el {{date}}",
-      "confirmedBy": "Suele confirmarse para el {{date}}"
+      "confirmedBy": "Suele confirmarse para el {{date}}",
+      "tip": "+ {{amount}} de propina"
     },
     "empty": {
       "title": "Aún no hay ganancias",
@@ -2239,6 +2245,65 @@
       "title": "Configura tus pagos para cobrar",
       "body": "Conecta una cuenta de pagos con Stripe para que podamos enviarte tus ganancias.",
       "action": "Configurar pagos"
+    }
+  },
+  "tips": {
+    "title": "¿Quieres dejarle una propina a {{name}}?",
+    "body": "Las propinas son opcionales. {{name}} recibe el 100%.",
+    "group": "Monto de la propina",
+    "none": "Sin propina",
+    "percent": "{{percent}}% · {{amount}}",
+    "custom": "Otra cantidad",
+    "customLabel": "Monto de la propina",
+    "customHint": "De {{min}} a {{max}}",
+    "customOutOfRange": "Ingresa un monto de {{min}} a {{max}}.",
+    "customInvalid": "Ingresa un monto, como 10 o 12.50.",
+    "pay": "Dar {{amount}} de propina",
+    "payNoAmount": "Dar propina",
+    "done": "Le diste {{amount}} de propina a {{name}}. ¡Gracias!",
+    "skipped": "Sin propina",
+    "failed": "La propina no se procesó. Tu trabajo sigue confirmado.",
+    "offline": "Estás sin conexión. Tu trabajo sigue confirmado; intenta la propina de nuevo cuando vuelvas.",
+    "generic": "Algo salió mal con la propina. Tu trabajo sigue confirmado.",
+    "delayed": "Seguimos confirmando tu propina. Aparecerá aquí pronto.",
+    "rateLimited": "Demasiados intentos en poco tiempo. Espera un momento y vuelve a intentarlo. Tu trabajo sigue confirmado.",
+    "inProgress": "Esta propina ya se está procesando. Aparecerá aquí pronto.",
+    "needsReview": "Nuestro equipo de soporte está revisando esta propina. Tu trabajo sigue confirmado; no necesitas hacer nada."
+  },
+  "receipt": {
+    "title": "Recibo",
+    "number": "Recibo {{code}}",
+    "paidOn": "Pagado el {{date}}",
+    "service": "Servicio",
+    "serviceOf": "Servicio de {{category}}",
+    "tax": "Impuestos",
+    "tip": "Propina para {{name}}",
+    "tipNoName": "Propina",
+    "returned": "Devuelto a tu método de pago",
+    "total": "Total pagado",
+    "paidWith": "Pagado con {{method}}",
+    "paidByCard": "Pagado con tarjeta",
+    "pro": "Con {{name}}",
+    "done": "Terminado el {{date}}",
+    "scheduled": "Programado para el {{date}}",
+    "thanks": "Gracias por usar John Got It.",
+    "questions": "¿Preguntas? {{email}}",
+    "status": {
+      "paid": "Pagado",
+      "under_review": "En revisión",
+      "partly_returned": "Devuelto en parte",
+      "returned": "Devuelto"
+    },
+    "see": "Ver recibo",
+    "share": "Compartir",
+    "shareDialog": "Comparte tu recibo",
+    "shareFailed": "No pudimos compartir el recibo. Inténtalo de nuevo.",
+    "addTip": "Dejar propina",
+    "loading": "Cargando tu recibo",
+    "notYet": "Tu recibo aparece aquí cuando se complete el pago.",
+    "error": {
+      "title": "No pudimos cargar tu recibo",
+      "retry": "Intentar de nuevo"
     }
   }
 }

@@ -77,7 +77,7 @@ from app.modules.support.schemas import (
     SupportTicketIn,
 )
 from app.modules.users.service import UserService
-from app.modules.users.types import UserAccount, UserRole
+from app.modules.users.types import PartyNames, UserAccount, UserRole
 
 logger = logging.getLogger(__name__)
 
@@ -245,10 +245,7 @@ class SupportTicketService:
         names = await self._users.first_names({ticket.user_id for ticket in page})
         requests = await self._job_requests(page)
         return StaffSupportTicketPage(
-            items=[
-                _item(ticket, names.get(ticket.user_id), _request_of(ticket, requests))
-                for ticket in page
-            ],
+            items=[_item(ticket, names, _request_of(ticket, requests)) for ticket in page],
             next_cursor=_encode_cursor(page[-1]) if more and page else None,
         )
 
@@ -304,7 +301,7 @@ class SupportTicketService:
         names = await self._users.first_names({ticket.user_id})
         request = _request_of(ticket, await self._job_requests([ticket]))
         return StaffSupportTicketOut(
-            **_item(ticket, names.get(ticket.user_id), request).model_dump(),
+            **_item(ticket, names, request).model_dump(),
             message=ticket.message,
             closed_at=ticket.closed_at,
             app_version=ticket.app_version,
@@ -330,12 +327,13 @@ def _request_of(ticket: SupportTicket, requests: dict[uuid.UUID, JobRequest]) ->
 
 
 def _item(
-    ticket: SupportTicket, first_name: str | None, request: JobRequest | None
+    ticket: SupportTicket, names: PartyNames, request: JobRequest | None
 ) -> StaffSupportTicketItem:
     return StaffSupportTicketItem(
         id=ticket.id,
         user_id=ticket.user_id,
-        user_first_name=first_name,
+        user_first_name=names.get(ticket.user_id),
+        user_deleted=names.is_deleted(ticket.user_id),
         role=ticket.role,
         topic=ticket.topic,
         job_id=ticket.job_id,

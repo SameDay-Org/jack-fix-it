@@ -16,8 +16,8 @@ FOLLOWUP_NOTE_MAX_LENGTH: Final = 500
 
 class RequestNote(IdTimestampsMixin, Base):
     """A staff member's note on a request: plain text, kept as written (staff text: the chat
-    redactor does not apply), appended only. The app has no path that changes or deletes
-    one."""
+    redactor does not apply), appended only. Nothing changes or deletes one, but the deletion
+    of the customer's account, which replaces its text (#97, ops.erasure)."""
 
     __tablename__ = "request_notes"
     __table_args__ = (

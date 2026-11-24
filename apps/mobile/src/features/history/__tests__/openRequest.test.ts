@@ -45,9 +45,9 @@ describe("pickOpenRequest (#474)", () => {
 
 describe("requestBannerParts (#474)", () => {
   it.each([
-    ["received", "Jack got your request"],
-    ["reviewing", "Jack got your request"],
-    ["finding_pro", "Jack is finding a pro"],
+    ["received", "John got your request"],
+    ["reviewing", "John got your request"],
+    ["finding_pro", "John is finding a pro"],
   ] as const)("%s: one short line, nothing to do", (status, line) => {
     expect(requestBannerParts(i18n.t, request(1, status))).toEqual({
       main: line,
@@ -70,7 +70,7 @@ describe("requestBannerParts (#474)", () => {
       "Presupuesto listo · comparar",
     );
     expect(requestBannerParts(i18n.t, request(1, "finding_pro")).main).toBe(
-      "Jack busca un profesional",
+      "John busca un profesional",
     );
   });
 });

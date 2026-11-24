@@ -105,6 +105,8 @@ async def test_register_customer_returns_tokens_and_user(
         "home_state": None,
         "photo": None,
         "member_since": user.created_at.astimezone(UTC).date().isoformat(),
+        # No legal document has a version in these settings (#97).
+        "terms_required": False,
     }
     assert body["token_type"] == "bearer"
     assert body["expires_in"] == 900

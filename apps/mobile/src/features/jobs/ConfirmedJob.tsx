@@ -14,6 +14,7 @@ import { ControlIcon } from "@/components/icons";
 import { ChatEntry } from "@/features/chat";
 import { hasReport, ReportStatus } from "@/features/disputes/ReportStatus";
 import { RateEntry } from "@/features/reviews";
+import { TipCard } from "@/features/tips";
 import { tokens } from "@/theme";
 
 import { BeforePhotos, PhotoThumbs } from "./AfterPhotos";
@@ -90,7 +91,9 @@ export function ConfirmedJob({
             {text.support}
           </Text>
         </View>
-        {/* The one thing still asked of the customer, and only once (#77). */}
+        {/* Confirm, then the tip (#273, optional, never holding the confirmation back), then
+            the rating (#77): the order Cesar set for the end of a job (epic #272). */}
+        <TipCard requestId={requestId} job={job} />
         <RateEntry jobId={job.id} requestId={requestId} side="customer" />
         <PhotoThumbs
           photos={job.photos.after}
@@ -106,7 +109,7 @@ export function ConfirmedJob({
           unread={job.unread_messages}
         />
         {hasReport(job) ? <ReportStatus job={job} /> : null}
-        <PaidRow job={job} />
+        <PaidRow job={job} requestId={requestId} />
         <BeforePhotos photos={job.photos} updatedAt={updatedAt} refetch={refetch} />
         <JobTimeline items={timelineOf(t, job, now)} />
       </Sheet>

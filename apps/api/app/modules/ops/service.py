@@ -76,6 +76,7 @@ from app.modules.requests.queue import (
     QueueFilters,
     QueueRules,
     QueueSources,
+    RequestOrigin,
     RequestQueueReader,
     RequestStatus,
 )
@@ -84,6 +85,7 @@ from app.modules.service_areas.schemas import zip5
 from app.modules.support.service import SupportTicketService
 from app.modules.users.service import UserService
 from app.modules.users.types import UserAccount, UserRole
+from app.modules.web_requests.service import WebRequestContacts
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +316,10 @@ class OpsQueueService:
     async def _items(self, rows: list[QueuedRequest]) -> list[QueueItem]:
         requests = rows
         names = await self._users.public_names({request.customer_id for request in requests})
+        # A web request's guest has no name: the one the visitor gave is its contact's (#86).
+        contacts = await WebRequestContacts(self._session).of_requests(
+            [request.id for request in requests if request.origin is RequestOrigin.WEB]
+        )
         agents = await self._agents({request.assigned_agent_id for request in requests})
         categories = {
             category.id: category
@@ -325,7 +331,10 @@ class OpsQueueService:
         return [
             self._item(
                 row,
-                customer_name=names.get(row.customer_id),
+                customer_name=contacts[row.id].first_name
+                if row.id in contacts
+                else names.get(row.customer_id),
+                customer_deleted=names.is_deleted(row.customer_id),
                 category=categories.get(row.category_id) if row.category_id else None,
                 agent=agents.get(row.assigned_agent_id) if row.assigned_agent_id else None,
                 media_count=media.get(row.id, 0),
@@ -338,6 +347,7 @@ class OpsQueueService:
         row: QueuedRequest,
         *,
         customer_name: str | None,
+        customer_deleted: bool,
         category: CategorySummary | None,
         agent: QueueAgent | None,
         media_count: int,
@@ -347,6 +357,7 @@ class OpsQueueService:
             id=request.id,
             public_code=request.public_code,
             customer_name=customer_name,
+            customer_deleted=customer_deleted,
             category=category,
             zip_code=zip5(row.zip_code),
             status=request.status,
@@ -368,6 +379,8 @@ class OpsQueueService:
         address = await self._addresses.get(request.address_id)
         if customer is None or address is None:  # pragma: no cover - foreign keys hold both
             raise QueueRequestNotFoundError
+        contacts = await WebRequestContacts(self._session).of_requests([request.id])
+        contact = contacts.get(request.id)
         ttl = self._config.url_ttl_seconds
         expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
         safe = await self._media.safe_media(request.id)
@@ -393,12 +406,27 @@ class OpsQueueService:
             **item.model_dump(),
             customer=CardCustomer(
                 id=customer.id,
-                first_name=customer.first_name,
-                last_name=customer.last_name,
+                # A deleted account's name is never shown, even one a late write left before
+                # the second erasure: the card's customer_deleted says so (#590, 3B).
+                first_name=None if item.customer_deleted else customer.first_name,
+                last_name=None if item.customer_deleted else customer.last_name,
                 phone=customer.phone,
                 email=customer.email,
                 language=request.language,
+                has_account=True,
+            )
+            if contact is None
+            else CardCustomer(
+                # A web request's guest (#86): who to call is the contact the visitor gave.
+                id=customer.id,
+                first_name=contact.first_name,
+                last_name=None,
+                phone=contact.phone,
+                email=contact.email,
+                language=request.language,
+                has_account=False,
             ),
+            utm=request.utm,
             address=address,
             description=request.description,
             intake_answers=request.intake_answers,
@@ -411,6 +439,7 @@ class OpsQueueService:
                 CardQuote(
                     id=quote.id,
                     pro_name=pros[quote.pro_id].name if quote.pro_id in pros else None,
+                    pro_deleted=quote.pro_id in pros and pros[quote.pro_id].deleted,
                     amount_cents=quote.amount_cents,
                     status=quote.status,
                     proposed_start_at=quote.proposed_start_at,

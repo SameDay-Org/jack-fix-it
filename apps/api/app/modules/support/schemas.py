@@ -19,6 +19,7 @@ from app.modules.support.models import (
     TicketStatus,
     TicketTopic,
 )
+from app.modules.users.schemas import deleted_party
 
 Message = Annotated[
     str,
@@ -93,6 +94,7 @@ class StaffSupportTicketItem(_Out):
         description="The writer's first name alone; null when they have none or it shows a "
         "contact detail."
     )
+    user_deleted: bool = deleted_party("writer")
     role: TicketRole = Field(description="The writer's role when they wrote the ticket.")
     topic: TicketTopic
     job_id: uuid.UUID | None = Field(description="The job the ticket is about, if any.")

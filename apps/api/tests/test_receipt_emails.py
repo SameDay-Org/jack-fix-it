@@ -20,10 +20,10 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.email_layout import EmailContent, SenderIdentity
 from app.integrations.email import EmailUnavailableError
 from app.integrations.stripe_errors import StripeUnavailableError
 from app.integrations.stripe_payments import CardFacts, TipIntentFacts
-from app.modules.auth.email_copy import EmailContent
 from app.modules.jobs.models import Job, JobStatus
 from app.modules.payments.models import Payment
 from app.modules.payments.reconciliation import JobBooked
@@ -161,7 +161,8 @@ async def test_the_payment_receipt_is_sent_once_with_the_card_read_from_stripe(
         assert f"Tax: {money(TAX)}" in part
         assert f"Total paid: {money(PRICE + TAX)}" in part
         assert "Visa •••• 4242" in part
-        assert "Fixture Legal Name LLC · support@fixture.invalid · 1 Fixture Way" in part
+        assert "Questions? Write to support@fixture.invalid or open Help in the app." in part
+        assert "Fixture Legal Name LLC · 1 Fixture Way, Orlando FL" in part
         # Never the street, the fee, the payout or a Stripe id.
         for leak in (LINE1, LINE2, money(FEE), money(PAYOUT), "pi_probe68"):
             assert leak not in part, leak
@@ -492,7 +493,11 @@ def test_every_value_is_html_escaped_in_the_html_part(
         lines=(("Service", 10_000),),
         total_cents=10_000,
         card=None,
-        issuer=("Fixture LLC", f"1 Main St {HOSTILE}"),
+        sender=SenderIdentity(
+            legal_name="Fixture LLC",
+            support_email="support@fixture.invalid",
+            mailing_address=f"1 Main St {HOSTILE}",
+        ),
     )
 
     email = build(facts)

@@ -19,8 +19,8 @@ export const ID_CARD_ASPECT = 85.6 / 54;
  *     │ │ photo│  City, ST                     │
  *     │ │      │  phone                        │
  * 146 │ └─PRO──┘                               │  PRO straddles the plate's bottom edge
- * 160 │ ·JACK FIX IT·JACK FIX IT·JACK FIX IT·  │  microtext rule
- * 166 │ MEMBER SINCE              ▬ Jack Fix It│  footer (26)
+ * 160 │ ·JOHN GOT IT·JOHN GOT IT·JOHN GOT IT·  │  microtext rule
+ * 166 │ MEMBER SINCE              ▬ John Got It│  footer (26)
  * 202 └───────────────────────────────────────┘
  */
 export const ID_CARD_BASE = {

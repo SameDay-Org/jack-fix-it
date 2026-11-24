@@ -34,7 +34,7 @@ jest.mock(
 
 const CONFIRM = "/v1/requests/{request_id}/job/confirm";
 const PINNED = { auth: true, generation: 1, params: { request_id: REQUEST_ID } };
-const OFFLINE = "We couldn't reach Jack Fix It. Check your connection and try again.";
+const OFFLINE = "We couldn't reach John Got It. Check your connection and try again.";
 const FINISHED = customerJob();
 const CONFIRMED = confirmedJob();
 

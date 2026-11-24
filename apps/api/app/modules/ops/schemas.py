@@ -24,6 +24,7 @@ from app.modules.requests.queue import (
     RequestOrigin,
     RequestStatus,
 )
+from app.modules.users.schemas import deleted_party
 from app.modules.users.types import UserRole
 
 
@@ -60,6 +61,7 @@ class QueueItem(BaseModel):
         description='First name and last initial ("Ana P."); null when a name is missing or '
         "shows a contact detail."
     )
+    customer_deleted: bool = deleted_party("customer")
     category: CategorySummary | None = Field(description="Null until the request is classified.")
     zip_code: str = Field(description="The 5-digit ZIP of the address.")
     status: RequestStatus
@@ -110,6 +112,11 @@ class CardCustomer(BaseModel):
     phone: str | None = Field(description="E.164, when the account has one.")
     email: str
     language: str = Field(description="The language the request was written in, e.g. en or es.")
+    has_account: bool = Field(
+        description="False for a request made on the web without an account (#86): the name, "
+        "email and phone are the ones the visitor gave, and the customer cannot sign in; such "
+        "a request is never sent to a pro."
+    )
 
 
 class CardMedia(BaseModel):
@@ -124,6 +131,7 @@ class CardMedia(BaseModel):
 class CardQuote(BaseModel):
     id: uuid.UUID
     pro_name: str | None = Field(description='The pro\'s first name and last initial ("María P.").')
+    pro_deleted: bool = deleted_party("pro")
     amount_cents: int = Field(description="The quote's price in USD cents.")
     status: QuoteStatus
     proposed_start_at: datetime
@@ -153,6 +161,10 @@ class RequestCard(QueueItem):
     asked, the media, the quotes and the job. Reading it is recorded in the audit log."""
 
     customer: CardCustomer
+    utm: dict[str, str] | None = Field(
+        description="The campaign the request came from (source, medium, campaign, term, "
+        "content), as stored (#86)."
+    )
     address: AddressOut = Field(description="As the customer typed it.")
     description: str = Field(description="As the customer typed it: it may hold contacts.")
     intake_answers: dict[str, JsonValue]

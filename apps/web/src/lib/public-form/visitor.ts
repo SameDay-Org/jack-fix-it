@@ -13,13 +13,15 @@ export const WEB_KEY_HEADER = "x-jfi-web-key";
  * The visitor's address as the edge saw it: ONE header, named by CLIENT_IP_HEADER (which one
  * Railway's edge sets reliably is checked on staging before a public form goes on), and only
  * its last value, the one the edge itself added; whatever a client put before it is ignored.
- * Null without the setting or without a valid address: then nothing is forwarded.
+ * Null without the setting or without a valid address: then nothing is forwarded. A setting
+ * that names one of our own `x-jfi-*` headers is ignored: only a browser could have sent that
+ * one, and its value is never passed on (#530).
  */
 export function visitorIp(
   request: Headers,
   headerName: string | undefined = process.env.CLIENT_IP_HEADER,
 ): string | null {
-  if (!headerName) return null;
+  if (!headerName || headerName.trim().toLowerCase().startsWith("x-jfi-")) return null;
   const value = request.get(headerName);
   const last = value?.split(",").at(-1)?.trim() ?? "";
   return isIP(last) ? last : null;

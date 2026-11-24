@@ -44,6 +44,9 @@ export { sheetOptions } from "./sheet";
 export type { SheetDetents } from "./sheet";
 export { SheetContent } from "./SheetContent";
 export type { SheetContentProps } from "./SheetContent";
+export { ShareRender } from "./ShareRender";
+export type { ShareRenderProps } from "./ShareRender";
+export type { ShareCapture, ShareHandle } from "./shareCapture";
 export { Skeleton, useSkeletonPulse } from "./Skeleton";
 export {
   accessoryLines,

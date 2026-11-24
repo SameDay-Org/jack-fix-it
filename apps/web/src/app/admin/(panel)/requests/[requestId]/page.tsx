@@ -1,3 +1,4 @@
+import type { components } from "@jack/shared";
 import type { TFunction } from "i18next";
 import { ArrowLeft, ExternalLink, Mail, MessageSquare, Phone } from "lucide-react";
 import Link from "next/link";
@@ -35,6 +36,7 @@ import {
 import { classifiable, dayIn } from "../ops";
 import { followupMaxDays } from "../ops-server";
 import { ClaimControl } from "./claim-control";
+import { intakeAnswerRows } from "./intake-answers";
 import { ActionBar } from "./ops-controls";
 import { actionBarText, FollowupsSection, NotesThread, opsText } from "./ops-sections";
 
@@ -42,22 +44,26 @@ const CONTACT_LINK =
   "inline-flex h-11 items-center gap-2 rounded-pill bg-green-500 px-5 text-sm font-semibold text-navy-900 outline-none hover:bg-green-700 hover:text-white focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2";
 const FILE_LINK =
   "inline-flex items-center gap-1 self-start rounded-pill text-sm font-semibold text-navy-900 underline outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2";
+type CatalogCategory = components["schemas"]["CategoryOut"];
+
 const TERM = "text-gray-500";
-const FACTS = "grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-3 text-sm";
+/**
+ * A card's label and value pairs. The label column fits its text up to 40% of the card, then
+ * wraps (#593): an `auto` column let a long intake question take the whole row at 390 px, which
+ * squeezed its answer to one letter per line and scrolled the page sideways.
+ */
+const FACTS = "grid grid-cols-[fit-content(40%)_minmax(0,1fr)] gap-x-6 gap-y-3 text-sm";
 
 /**
- * The active categories, named in the reader's language; none when the API cannot say. The
- * list is public and the same for every reader, so it is read at most once an hour, as the
- * landing's services grid reads it (a card view must not spend the public endpoint's rate limit;
- * a category retired meanwhile is refused by the API: category_inactive).
+ * The active categories with their intake questions; none when the API cannot say. They name
+ * Classify's choices and the card's answers (#546). The list is public and the same for every
+ * reader, so it is read at most once an hour, as the landing's services grid reads it (a card
+ * view must not spend the public endpoint's rate limit; a category retired meanwhile is refused
+ * by the API: category_inactive).
  */
-async function loadCategories(locale: string): Promise<{ id: string; name: string }[]> {
+async function loadCategories(): Promise<CatalogCategory[]> {
   try {
-    const categories = await apiGet("/v1/categories", { next: { revalidate: 3600 } });
-    return categories.map((category) => ({
-      id: category.id,
-      name: categoryName(category, locale),
-    }));
+    return await apiGet("/v1/categories", { next: { revalidate: 3600 } });
   } catch {
     return [];
   }
@@ -108,13 +114,6 @@ function customerStatus(t: TFunction, key: string): string {
   return labels[key] ?? key;
 }
 
-/** An intake answer as text: what the customer picked or typed, shown as it is stored. */
-function answerText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value.map(answerText).join(", ");
-  return JSON.stringify(value);
-}
-
 /**
  * A request's card for the BDC (D16.2, #81): who to call and how (the `tel:`, `sms:` and
  * `mailto:` links are built here from the customer's phone and email), where, what was asked,
@@ -145,23 +144,34 @@ export default async function RequestPage({ params }: { params: Promise<{ reques
   }
 
   const links = contactLinks(card.customer);
-  const name =
-    [card.customer.first_name, card.customer.last_name].filter(Boolean).join(" ") ||
-    t("admin.queue.noName");
+  // A deleted account (#97) has no name any more: the API flags it and the card says so.
+  const name = card.customer_deleted
+    ? t("admin.deletedUser")
+    : [card.customer.first_name, card.customer.last_name].filter(Boolean).join(" ") ||
+      t("admin.queue.noName");
   const holder = card.assigned_agent;
   const mine = holder?.id === user.id;
   const mayRelease = holder !== null && (mine || user.role === "admin");
-  const answers = Object.entries(card.intake_answers);
   // The BDC's actions (#82): shown only when the API says this reader may act on the request.
   const zone = businessTimeZone();
   const maxDays = followupMaxDays();
   const canClassify = card.actions_allowed && classifiable(card.status);
-  const [categories, staff] = await Promise.all([
-    canClassify ? loadCategories(locale) : Promise.resolve([]),
+  const hasAnswers = Object.keys(card.intake_answers).length > 0;
+  const [catalog, staff] = await Promise.all([
+    canClassify || hasAnswers ? loadCategories() : Promise.resolve([]),
     card.actions_allowed && user.role === "admin"
       ? loadStaff(await staffAuth())
       : Promise.resolve(null),
   ]);
+  const categories = canClassify
+    ? catalog.map((category) => ({ id: category.id, name: categoryName(category, locale) }))
+    : [];
+  // The answers in the category's own words (#546); as stored when the catalog lacks them.
+  const questions = catalog.find((category) => category.id === card.category?.id);
+  const answers = intakeAnswerRows(card.intake_answers, questions?.intake_questions ?? [], locale, {
+    yes: t("admin.requests.request.yes"),
+    no: t("admin.requests.request.no"),
+  });
   const claimText = {
     claim: t("admin.requests.assignment.claim"),
     release: t("admin.requests.assignment.release"),
@@ -361,10 +371,10 @@ export default async function RequestPage({ params }: { params: Promise<{ reques
                 </dd>
               </>
             ) : null}
-            {answers.map(([question, answer]) => (
-              <div key={question} className="contents">
-                <dt className={`${TERM} break-words`}>{question}</dt>
-                <dd className="break-words whitespace-pre-wrap">{answerText(answer)}</dd>
+            {answers.map((row) => (
+              <div key={row.key} className="contents">
+                <dt className={`${TERM} break-words`}>{row.question}</dt>
+                <dd className="break-words whitespace-pre-wrap">{row.answer}</dd>
               </div>
             ))}
           </dl>
@@ -416,7 +426,9 @@ export default async function RequestPage({ params }: { params: Promise<{ reques
               >
                 <span className="flex min-w-0 flex-col">
                   <span className="font-semibold break-words">
-                    {quote.pro_name ?? t("admin.queue.noName")}
+                    {quote.pro_deleted
+                      ? t("admin.deletedUser")
+                      : (quote.pro_name ?? t("admin.queue.noName"))}
                   </span>
                   <span className="text-gray-500">
                     {t("admin.requests.quotes.starts")}{" "}

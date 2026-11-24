@@ -115,6 +115,14 @@ rules apply.
   reason (each its own 409 in `ops/errors.py`), and never sends a request to a pro twice. No
   other module inserts a `request_dispatches` row. The eligible list (`eligible-pros`) names
   pros by first name and last initial only.
+- **Web requests and guests (#86).** A request made on the web without an account belongs to a
+  guest customer: `users.status = guest`, no name or phone, an `@guest.invalid` email, a
+  hash nothing verifies; the sign-in refuses it by status too. Its contact (first name,
+  email, phone, consent) lives only in `web_request_contacts`, which only the BDC card reads
+  (`customer.has_account` false). A guest's request is never dispatched in the MVP: the
+  automatic dispatch returns `no_account`, the sweep leaves it out (`UserService.guest_ids`),
+  and a manual assignment refuses with 409 `request_without_account`. Code that lists,
+  counts, notifies or charges customers must leave guests out.
 - **Offers read the pro under locks (#511).** The request's row lock does not cover a pro's
   eligibility, so every offer (by hand or automatic) reads the pro again in the writing
   transaction, FOR SHARE until the commit, in this order: the request (FOR UPDATE), the ZIP's
@@ -200,6 +208,9 @@ them idempotent: they can run twice.
 
 - **Media copies (#173).** `sanitize_request_media` makes a privacy-safe copy of each request
   photo and video (no EXIF, GPS, XMP or video tags) under an opaque `m/<32 hex><ext>` key.
+  A video's copy also drops every SEI unit from its bitstream (a drone's or dashcam's GPS,
+  #182), and one whose HEVC decoder configuration still holds user data fails; a codec
+  without a SEI filter in `sanitize.py` is never copied, whatever `MEDIA_VIDEO_CODECS` says.
   Only a `ready` copy may ever be shown to a pro; a `failed` one never is. Videos need the
   ffmpeg binary: the Docker image installs it, and so does CI. Locally the video tests skip
   without it. ARQ ends a job at its timeout for good (no retry), so every step of the job is
@@ -215,6 +226,38 @@ them idempotent: they can run twice.
   categories or areas changed), that module queues one `redispatch_for_pro` after its commit
   (`dispatch/kicks.py`, job id `redispatch-pro:<pro id>`); a kick that cannot be queued is
   logged and never fails the change. A request with any row stays with the existing flow.
+- **Account deletion (#97).** `POST /v1/me/delete` (accounts) anonymises the caller's account
+  in place, in one transaction, confirmed with the current password and rate-limited per user;
+  staff are refused (their accounts are made by script). The users row stays (jobs, payments,
+  reviews and the audit log point at it): status `deleted`, email `deleted-<hex>@deleted.invalid`
+  (the real one is free for a new account), no password, phone, names, home or photo, a new card
+  code, every session revoked. Refused with a 409 per reason while something is in flight
+  (accounts.errors), a tip included (`tips.erasure`: being paid, or still owed to the pro);
+  a customer's open requests are cancelled instead. Every module erases its own part in its
+  `erasure.py`, over its own tables (`accounts.eraser` runs them). A new table that holds a
+  person's data gets its part there, or is named as kept, and `plant_everything` in
+  `tests/test_account_deletion.py` plants a row of it: the sweep there finds only the values the
+  test planted, so a table no test plants is not checked. A `launch_interest` row with the
+  account's email goes too (`interest/erasure.py`, #590). Locks: the customer's cancellable
+  requests, then the user's row FOR UPDATE (a payment's order); the checks read each stage
+  before the next. A request the account sent before the deletion may still write after its
+  commit: the worker erases the account again after `ACCOUNT_DELETION_SETTLE_SECONDS`. Kept
+  untouched: jobs, payments, transfers, refunds, cancellations, disputes, reviews, quotes and the
+  audit log. The shared name readers (`UserService.public_names`, `first_names`, `legal_name`)
+  show "Deleted user", and a deleted pro is never hireable. The files' rows go at once; the
+  worker deletes the files from storage (those rows named, and every other upload under
+  `u/<user id>/` but the job and dispute photos; the last pass comes after the upload URLs'
+  lifetime, any media copy and the second erasure) and detaches the cards in Stripe
+  (`accounts.cleanup`: a task after the commit and the
+  `retry_account_cleanups` sweep, through the `account_deletions` row), never through the orphan
+  sweep. A request address keeps its city, state and ZIP and loses its street and point
+  (`AddressRepository.erase_for_user`, the one other write `tests/test_address_geocode_guard.py`
+  allows). Ids and counts only in the audit row and the logs.
+- **Terms (#97).** `TERMS_VERSION`, `PRIVACY_VERSION` and `PRO_AGREEMENT_VERSION` name the legal
+  texts in force (the apps hold the texts); unset, nothing of that kind is required. Customers
+  accept terms and privacy, pros also the pro agreement (`terms.types.KINDS_BY_ROLE`).
+  `GET /v1/me/terms`, `POST /v1/me/terms-acceptance` (idempotent per user, kind and version) and
+  `UserOut.terms_required`, which every `UserOut` carries (register, login, refresh, `/me`).
 - **Orphan uploads (#191).** The cron `sweep_orphan_uploads` (`uploads/orphans.py`) lists `u/`
   and deletes uploads older than `ORPHAN_UPLOAD_MIN_AGE_HOURS` that no row references.
   `ORPHAN_UPLOAD_MODE` is `off`, `dry_run` (the default: counts only, in the
@@ -286,10 +329,15 @@ them idempotent: they can run twice.
   `/reviews`) shows only an approved pro with an active account, the same 404 for every other
   case, and never the photo (#53).
 - **The web service (#409).** Routes the web app's server calls on a visitor's behalf
-  (`POST /v1/interest`, and #86's to come) take `app.web_service.WebService`: `X-JFI-Web-Key` =
+  (`POST /v1/interest`, `POST /v1/web/requests`) take `app.web_service.WebService`: `X-JFI-Web-Key` =
   `WEB_SERVICE_KEY` (constant-time compare, else 401 `invalid_service_key`), and only then the
   visitor's address from `X-JFI-Client-IP` for per-address limits. Never read a client's
   `X-Forwarded-For`; both headers are scrubbed from Sentry (`observability._CREDENTIAL_HEADERS`).
+  Public routes the app and the web both call (the ZIP check, the waitlist join) count
+  `caller_ip` (`app.web_service`, as the auth routes do): the forwarded address behind a valid
+  key, else the socket's, never a 401.
+  `POST /v1/web/requests` checks the key and caps the body (`Content-Length`,
+  `WEB_REQUEST_MAX_BODY_BYTES`) before FastAPI reads it (`WebServiceBodyRoute`).
 
 ## Stripe webhooks (#40, #280)
 

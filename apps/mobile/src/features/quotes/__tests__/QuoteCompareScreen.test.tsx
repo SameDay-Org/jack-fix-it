@@ -56,11 +56,13 @@ jest.mock("../RequestPreferred", () => {
   };
 });
 // The accepted card's payment has its own suite (features/payments): here it is a stand-in that
-// shows the note and records what the list handed it.
+// shows the note and records what the list handed it, and the summary's payment line is the
+// unpaid one (what it says in each state is in paidRequest.test.tsx, #373).
 jest.mock("@/features/payments", () => {
   const { Text } = jest.requireActual<typeof import("react-native")>("react-native");
   return {
     requestAutoPay: jest.fn(),
+    usePaymentLine: jest.fn(() => "next"),
     PaymentPanel: jest.fn(({ testID }: { testID: string }) => (
       <Text
         accessibilityElementsHidden
@@ -162,15 +164,15 @@ describe("QuoteCompareScreen", () => {
     await renderWithQuery(<App />);
     await screen.findByText("$250");
 
-    expect(card(WITHHELD).getByText(sealed("Jack pro"))).toBeTruthy();
+    expect(card(WITHHELD).getByText(sealed("John pro"))).toBeTruthy();
     expect(card(MARIA).getByText(/^New · /)).toBeTruthy();
     expect(card(MARIA).getByLabelText(/, No ratings yet, /)).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Accept the quote from Jack pro for $180.50" }),
+      screen.getByRole("button", { name: "Accept the quote from John pro for $180.50" }),
     ).toBeTruthy();
 
     await act(() => i18n.changeLanguage("es"));
-    expect(card(WITHHELD).getByText(sealed("Profesional de Jack"))).toBeTruthy();
+    expect(card(WITHHELD).getByText(sealed("Profesional de John"))).toBeTruthy();
     expect(card(MARIA).getByText(/^Nuevo · 12 trabajos · 8 años de experiencia$/)).toBeTruthy();
   });
 
@@ -221,7 +223,7 @@ describe("QuoteCompareScreen", () => {
     expect(router.push).toHaveBeenCalledTimes(2);
 
     // Named as the card names the pro: the neutral label when the API withholds the name.
-    expect(card(WITHHELD).getByRole("button", { name: "View Jack pro's profile" })).toBeTruthy();
+    expect(card(WITHHELD).getByRole("button", { name: "View John pro's profile" })).toBeTruthy();
     await act(() => i18n.changeLanguage("es"));
     expect(card(MARIA).getByRole("button", { name: "Ver el perfil de María P." })).toBeTruthy();
     expect(card(MARIA).getByText("Ver perfil")).toBeTruthy();
@@ -274,7 +276,7 @@ describe("QuoteCompareScreen", () => {
     const summary = screen.getByTestId(`quote-${MARIA.id}-summary`);
     expect(summary.props.accessible).toBe(true);
     expect(String(summary.props.accessibilityLabel).replaceAll("\u00A0", " ")).toMatch(
-      /^María P\., Verified by Jack Fix It, \$250, Starts .+, About 1 h 30 min, No ratings yet, 12 jobs, 8 years of experience, Expires in 2 h$/,
+      /^María P\., Verified by John Got It, \$250, Starts .+, About 1 h 30 min, No ratings yet, 12 jobs, 8 years of experience, Expires in 2 h$/,
     );
     // The footer's expiry is in that label already: a screen reader does not read it twice.
     expect(screen.queryByText("Expires in 2 h")).toBeNull();
@@ -285,7 +287,7 @@ describe("QuoteCompareScreen", () => {
     jest.mocked(apiPost).mockReturnValue(answer.promise);
     await renderWithQuery(<App />);
     const accept = await screen.findByRole("button", {
-      name: "Accept the quote from Jack pro for $180.50",
+      name: "Accept the quote from John pro for $180.50",
     });
 
     await fireEvent.press(accept);
@@ -300,10 +302,10 @@ describe("QuoteCompareScreen", () => {
     const sheet = within(screen.getByTestId("accept-quote-sheet"));
     expect(sheet.getByText("Accept this quote?")).toBeTruthy();
     expect(sheet.getByText("$180.50")).toBeTruthy();
-    expect(sheet.getByLabelText("From Jack pro, verified")).toBeTruthy();
+    expect(sheet.getByLabelText("From John pro, verified")).toBeTruthy();
 
     // Its name starts with what it shows, so voice control finds it by "Accept quote".
-    const confirm = sheet.getByRole("button", { name: "Accept quote from Jack pro for $180.50" });
+    const confirm = sheet.getByRole("button", { name: "Accept quote from John pro for $180.50" });
     await fireEvent.press(confirm);
     await fireEvent.press(confirm);
     expect(apiPost).toHaveBeenCalledTimes(1);
@@ -344,7 +346,7 @@ describe("QuoteCompareScreen", () => {
       requestId: REQUEST_ID,
       quoteId: WITHHELD.id,
       amountCents: WITHHELD.amount_cents,
-      pro: "Jack pro",
+      pro: "John pro",
       testID: `quote-${WITHHELD.id}-payment`,
     });
     expect(screen.getAllByTestId(/-payment$/, { includeHiddenElements: true })).toHaveLength(1);

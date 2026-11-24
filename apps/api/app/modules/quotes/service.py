@@ -354,6 +354,7 @@ class QuoteService:
                     pro=QuotePro(
                         id=card.pro_id,
                         name=card.name,
+                        pro_deleted=card.deleted,
                         rating_avg=ratings[card.pro_id].text,
                         rating_count=ratings[card.pro_id].count,
                         jobs_count=ratings[card.pro_id].jobs_completed,

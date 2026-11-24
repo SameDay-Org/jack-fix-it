@@ -51,7 +51,7 @@ jest.mock(
 
 const POST = "/v1/pros/me/opportunities/{dispatch_id}/quote";
 const SCOPE = "Paint the hallway and two bedrooms, two coats.";
-const CAP = "Above the most Jack allows for one quote.";
+const CAP = "Above the most John allows for one quote.";
 const NBSP = " ";
 const HIDDEN = { includeHiddenElements: true };
 const PART = { exact: false };
@@ -242,10 +242,10 @@ describe("QuoteFormScreen: the form", () => {
     expect(receive()).toHaveTextContent("You'll receive $8.50");
     await typeInto("quote-price", "100");
     expect(receive()).toHaveTextContent("You'll receive $85.00");
-    expect(fee()).toHaveTextContent("Jack's fee 15%: $15.00");
+    expect(fee()).toHaveTextContent("John's fee 15%: $15.00");
     await typeInto("quote-price", "99.99");
     expect(receive()).toHaveTextContent("You'll receive $84.99");
-    expect(fee()).toHaveTextContent("Jack's fee 15%: $15.00");
+    expect(fee()).toHaveTextContent("John's fee 15%: $15.00");
 
     for (const invalid of ["abc", "100.555", "0", "21474836.48", "99,999,999,999,999", ""]) {
       await typeInto("quote-price", invalid);
@@ -264,7 +264,7 @@ describe("QuoteFormScreen: the form", () => {
     await typeInto("quote-price", "0.10");
     // 10 cents at 12.5% is a 1.25-cent fee: 1 cent, payout 9.
     expect(screen.getByTestId("quote-payout-receive")).toHaveTextContent("You'll receive $0.09");
-    expect(screen.getByTestId("quote-payout-fee")).toHaveTextContent("Jack's fee 12.5%: $0.01");
+    expect(screen.getByTestId("quote-payout-fee")).toHaveTextContent("John's fee 12.5%: $0.01");
   });
 
   it("writes a valid price with two decimals when the field is left", async () => {
@@ -285,6 +285,36 @@ describe("QuoteFormScreen: the form", () => {
     expect(screen.getByTestId("quote-preferred")).toHaveTextContent(
       "The customer prefers Fri, Oct 30.",
     );
+  });
+
+  it.each([
+    ["morning", "The customer prefers Fri, Oct 30 · Morning."],
+    ["evening", "The customer prefers Fri, Oct 30 · Evening."],
+    ["flexible", "The customer prefers Fri, Oct 30."],
+  ] as const)(
+    "names the customer's preferred period after the day: %s (#360)",
+    async (period, text) => {
+      const client = seededClient();
+      client.setQueryData(opportunityQueryKey(DISPATCH_ID), detail({ preferred_period: period }));
+      jest.mocked(apiGet).mockResolvedValue(detail({ preferred_period: period }));
+      await renderForm(client);
+      expect(screen.getByTestId("quote-preferred")).toHaveTextContent(text);
+    },
+  );
+
+  it("names the preferred period in Spanish too (#360)", async () => {
+    const client = seededClient();
+    client.setQueryData(opportunityQueryKey(DISPATCH_ID), detail({ preferred_period: "morning" }));
+    jest.mocked(apiGet).mockResolvedValue(detail({ preferred_period: "morning" }));
+    await act(() => i18n.changeLanguage("es"));
+    try {
+      await renderForm(client);
+      expect(screen.getByTestId("quote-preferred")).toHaveTextContent(
+        /^El cliente prefiere el .+ · Por la mañana\.$/,
+      );
+    } finally {
+      await act(() => i18n.changeLanguage("en"));
+    }
   });
 
   it("opens on the next whole hour when the preferred day is past, and never steps back past now", async () => {

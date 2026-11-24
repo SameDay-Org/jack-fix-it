@@ -184,11 +184,11 @@ describe("the explanation (/jobs/[id]/share-location)", () => {
 
     expect(screen.getByText("Share your location on the way")).toBeTruthy();
     expect(screen.getByTestId("share-location-body").props.children).toBe(
-      "While you're on the way, Jack Fix It shares your location with Maria every 10 seconds, " +
+      "While you're on the way, John Got It shares your location with Maria every 10 seconds, " +
         "so they can see you coming.",
     );
     expect(screen.getByTestId("share-location-stops").props.children).toBe(
-      "It stops as soon as you check in, or if the job is cancelled. Jack Fix It doesn't keep " +
+      "It stops as soon as you check in, or if the job is cancelled. John Got It doesn't keep " +
         "a history of where you've been.",
     );
     expect(screen.getByTestId("share-location-continue").props.accessibilityLabel).toBe("Continue");
@@ -279,7 +279,7 @@ describe("the explanation (/jobs/[id]/share-location)", () => {
     const task = await explain("blocked");
 
     expect(await screen.findByTestId("share-location-blocked")).toHaveTextContent(
-      "Location is off for Jack Fix It. Turn it on in Settings, then come back here and tap Continue.",
+      "Location is off for John Got It. Turn it on in Settings, then come back here and tap Continue.",
     );
     expect(screen.queryByTestId("share-location-continue")).toBeNull();
     await press("share-location-settings");

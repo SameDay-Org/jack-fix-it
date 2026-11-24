@@ -37,7 +37,7 @@ export function useOpenRequest(wanted: boolean): OpenRequestState {
 }
 
 /**
- * The tabs' line about a request still before its job (#474): "Jack is finding a pro", or "Quote
+ * The tabs' line about a request still before its job (#474): "John is finding a pro", or "Quote
  * ready · compare" with the action in green. A tap opens the request's quotes. The job banner
  * takes this place once a job exists.
  */

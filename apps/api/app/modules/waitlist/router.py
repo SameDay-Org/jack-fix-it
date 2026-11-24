@@ -15,11 +15,11 @@ from app.modules.waitlist.service import WaitlistService
 from app.rate_limit import (
     IdentifierHasher,
     RateLimiter,
-    client_ip,
     enforce_limit,
     get_identifier_hasher,
     get_rate_limiter,
 )
+from app.web_service import caller_ip
 
 router = APIRouter(prefix="/waitlist", tags=["waitlist"])
 
@@ -48,8 +48,9 @@ async def limit_waitlist_join(
     hasher: Annotated[IdentifierHasher, Depends(get_identifier_hasher)],
     settings: Annotated[Settings, Depends(get_app_settings)],
 ) -> None:
-    """Per IP, then per contact; a contact enters the key only as a keyed hash."""
-    identifiers = [("ip", client_ip(request))]
+    """Per visitor address (the web service's forwarded one behind its key, #86; else the
+    caller's), then per contact; a contact enters the key only as a keyed hash."""
+    identifiers = [("ip", caller_ip(request, settings))]
     identifiers += [("contact", hasher(contact)) for contact in (data.email, data.phone) if contact]
     for kind, identifier in identifiers:
         await enforce_limit(

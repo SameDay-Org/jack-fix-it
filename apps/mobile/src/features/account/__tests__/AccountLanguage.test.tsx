@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render } from "@testing-library/react-native";
+import { act, render, waitFor } from "@testing-library/react-native";
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Text } from "react-native";
@@ -12,7 +12,9 @@ import {
   callPath,
   installFetchMock,
   jsonResponse,
+  LANGUAGE_HINT_KEY,
   resetSecureStore,
+  secureStoreMock,
   seedRefreshToken,
   user,
   type FetchMock,
@@ -239,16 +241,100 @@ describe("the app's language follows the account", () => {
   });
 });
 
+describe("the account's language is kept for the next launch (#378)", () => {
+  const hint = () => secureStoreMock.getItem(LANGUAGE_HINT_KEY);
+
+  it("a restore keeps the account's saved language; a sign-out removes it", async () => {
+    seedRefreshToken("refresh-0");
+    serveAccount("es");
+    await withApp(restoreSession);
+    await waitFor(() => expect(hint()).toBe("es"));
+
+    await act(async () => {
+      await logout();
+    });
+    await waitFor(() => expect(hint()).toBeNull());
+  });
+
+  it("follows the account's language as it is saved, and keeps none the app is not written in", async () => {
+    serveAccount("en");
+    await withApp(() => login(CREDENTIALS));
+    await waitFor(() => expect(hint()).toBe("en"));
+
+    await act(async () => {
+      setSessionUser({ ...user, locale: "es" });
+    });
+    await waitFor(() => expect(hint()).toBe("es"));
+
+    await act(async () => {
+      setSessionUser({ ...user, locale: "pt" });
+    });
+    await waitFor(() => expect(hint()).toBeNull());
+  });
+
+  it("the launch keeps the language it started in until the restore answers", async () => {
+    // Started in the last account's Spanish on an English device; the restore is still out.
+    await i18n.changeLanguage("es");
+    seedRefreshToken("refresh-0");
+    let answer: (response: Response) => void = () => undefined;
+    fetchMock.mockImplementation(() => new Promise<Response>((resolve) => (answer = resolve)));
+    await render(<App />);
+    const restoring = restoreSession();
+    await act(async () => undefined);
+    expect(sessionStore.getState().status).toBe("restoring");
+    expect(activeLanguage()).toBe("es");
+
+    // The account comes back in English: the app follows it.
+    await act(async () => {
+      answer(jsonResponse(200, { ...authResponse(1), user: { ...user, locale: "en" } }));
+      await restoring;
+    });
+    expect(sessionStore.getState().status).toBe("signedIn");
+    expect(activeLanguage()).toBe("en");
+  });
+
+  it("a launch that finds nobody signed in goes to the device's language and keeps nothing", async () => {
+    await i18n.changeLanguage("es"); // the last account's, kept on this English device
+    await withApp(restoreSession);
+
+    expect(sessionStore.getState().status).toBe("signedOut");
+    expect(activeLanguage()).toBe("en");
+    await waitFor(() => expect(hint()).toBeNull());
+  });
+});
+
 describe("the language the app starts in", () => {
-  // A fresh copy of the i18n module, loaded on a device in that language.
-  function startedOn(languageCode: string): string | undefined {
+  // A fresh copy of the i18n module, loaded on a device in that language, with the language the
+  // last account kept on it (#378), if any; `unreadable` makes that read fail.
+  function startedOn(
+    languageCode: string,
+    kept?: string,
+    { unreadable = false }: { unreadable?: boolean } = {},
+  ): string | undefined {
     deviceIn(languageCode);
     let started: string | undefined;
     jest.isolateModules(() => {
+      // The copy of the store this fresh module reads.
+      const { getItem } =
+        jest.requireMock<typeof import("../../../api/__tests__/helpers").secureStoreMock>(
+          "expo-secure-store",
+        );
+      getItem.mockImplementationOnce(() => {
+        if (unreadable) throw new Error("keystore");
+        return kept ?? null;
+      });
       started = jest.requireActual<typeof import("@/i18n")>("@/i18n").default.language;
     });
     return started;
   }
+
+  it("is the language the last account kept on the device, the device's without one", () => {
+    expect(startedOn("en", "es")).toBe("es");
+    expect(startedOn("es", "en")).toBe("en");
+    expect(startedOn("en", "pt")).toBe("en");
+    expect(startedOn("es", "es", { unreadable: true })).toBe("es");
+    expect(startedOn("en", "es", { unreadable: true })).toBe("en");
+  });
 
   it("is the device's when the app is written in it, English otherwise", () => {
     expect(startedOn("es")).toBe("es");

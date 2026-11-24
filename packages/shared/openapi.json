@@ -457,7 +457,7 @@
             "description": "Accepted; a code is on its way by SMS."
           },
           "422": {
-            "description": "validation_error: not an E.164 number, or a country code that is not allowed.",
+            "description": "validation_error: not an E.164 number, or a country code or number range that is not allowed.",
             "content": {
               "application/json": {
                 "schema": {
@@ -486,6 +486,16 @@
                 }
               }
             },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "verification_unavailable: the daily count of codes cannot be taken; nothing was sent, retry later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5417,6 +5427,112 @@
         }
       }
     },
+    "/v1/web/requests": {
+      "post": {
+        "tags": [
+          "web"
+        ],
+        "summary": "Make a request without an account (the web service only)",
+        "description": "A request for the BDC from a web visitor who has no account (#86). Called by the web\napp's server with its key (`X-JFI-Web-Key`) and the visitor's address (`X-JFI-Client-IP`):\nthe browser never calls it. The request is received, in the BDC's queue, and never sent to\na pro: the BDC calls the customer, who continues in the app. The contact is for the BDC\nonly.",
+        "operationId": "create_web_request_v1_web_requests_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "A UUID the web service makes per visitor submit: the same key with the same body answers the same code and writes nothing.",
+              "title": "Idempotency-Key"
+            },
+            "description": "A UUID the web service makes per visitor submit: the same key with the same body answers the same code and writes nothing."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebRequestIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Received: in the BDC's queue. The same answer for a replay of the same Idempotency-Key and body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebRequestCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: a bad field (as POST /v1/requests checks them), a phone outside the allowed country codes, an unknown field, or no Idempotency-Key; invalid_category / invalid_intake_answers as POST /v1/requests answers them.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_service_key: no X-JFI-Web-Key, or not the web service's (the body is never read).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "out_of_area: the ZIP is not served; no request was made and the contact is on the ZIP's waitlist. idempotency_key_reused: the key already made a request with another body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "411": {
+            "description": "length_required: no Content-Length.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "payload_too_large: the body is over WEB_REQUEST_MAX_BODY_BYTES.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many requests from this visitor's address, or for this email or phone, in the window or the day; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/webhooks/stripe": {
       "post": {
         "tags": [
@@ -7880,7 +7996,7 @@
             }
           },
           "409": {
-            "description": "request_held: another agent holds the request. invalid_transition: the request is accepted, expired or cancelled. request_not_classified: it has no category yet. One code per reason the pro cannot take it: pro_already_offered (they have, or had, this request), pro_not_approved, pro_payouts_disabled, pro_category_mismatch, pro_out_of_area. Nothing was written.",
+            "description": "request_held: another agent holds the request. request_without_account: a web request made without an account (#86), never sent to a pro. invalid_transition: the request is accepted, expired or cancelled. request_not_classified: it has no category yet. One code per reason the pro cannot take it: pro_already_offered (they have, or had, this request), pro_not_approved, pro_payouts_disabled, pro_category_mismatch, pro_out_of_area. Nothing was written.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9866,6 +9982,200 @@
         ]
       }
     },
+    "/v1/me/terms": {
+      "get": {
+        "tags": [
+          "terms"
+        ],
+        "summary": "The legal documents I must accept",
+        "description": "The versions in force of the documents the caller's role accepts (terms and privacy;\npros also the pro agreement), and whether the caller accepted each. The texts are the\napps'; the API names each by its version id.",
+        "operationId": "get_my_terms_v1_me_terms_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/me/terms-acceptance": {
+      "post": {
+        "tags": [
+          "terms"
+        ],
+        "summary": "Accept a legal document",
+        "description": "Records that the caller accepted this version. Idempotent: accepting the same version\nagain answers the same, with the time of the first acceptance.",
+        "operationId": "accept_terms_v1_me_terms_acceptance_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TermsAcceptanceIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermsDocumentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_error: an unknown kind, a version that is not an id, an extra field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "terms_not_current: not the version in force, a document the caller's role does not accept, or one with no version published.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/me/delete": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Delete my account",
+        "description": "Deletes the caller's account, confirmed with its current password, as the stores\nrequire. The account is anonymised: the name, email, phone, addresses, photos, documents,\ndevices and saved cards go; jobs, payments and reviews stay for the other side and for tax,\nshown as \"Deleted user\". A customer's requests still open are cancelled. Every session ends\nat once. Refused while a job, a dispute, a refund, a payment, a payout or a quote is still in\nflight (409, the code says which).",
+        "operationId": "delete_my_account_v1_me_delete_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountDeletionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Deleted: every session ends now, and the email may sign up again as a new account."
+          },
+          "422": {
+            "description": "validation_error: no password, or an extra field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_token: missing or expired.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "invalid_password: not the account's password. staff_account: agents and admins are removed by an administrator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Something must settle first, one code per reason: active_job (a job in progress, waiting for confirmation, or, for a pro, for its payout), open_dispute, refund_pending, payment_in_progress, payout_pending, active_quote (a pro's quote still open or being paid).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limited: too many tries; Retry-After says when to try again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/v1/requests/{request_id}/job/tip": {
       "post": {
         "tags": [
@@ -10320,6 +10630,23 @@
   },
   "components": {
     "schemas": {
+      "AccountDeletionIn": {
+        "properties": {
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Password",
+            "description": "The account's current password: the confirmation that the holder asks."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "title": "AccountDeletionIn"
+      },
       "AddressIn": {
         "properties": {
           "line1": {
@@ -10821,6 +11148,11 @@
             "type": "string",
             "title": "Language",
             "description": "The language the request was written in, e.g. en or es."
+          },
+          "has_account": {
+            "type": "boolean",
+            "title": "Has Account",
+            "description": "False for a request made on the web without an account (#86): the name, email and phone are the ones the visitor gave, and the customer cannot sign in; such a request is never sent to a pro."
           }
         },
         "type": "object",
@@ -10830,7 +11162,8 @@
           "last_name",
           "phone",
           "email",
-          "language"
+          "language",
+          "has_account"
         ],
         "title": "CardCustomer",
         "description": "Who to call. PII: the card alone carries it."
@@ -11010,6 +11343,11 @@
             ],
             "title": "Pro Name",
             "description": "The pro's first name and last initial (\"Mar\u00eda P.\")."
+          },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
           },
           "amount_cents": {
             "type": "integer",
@@ -15302,6 +15640,11 @@
             "title": "Customer First Name",
             "description": "The customer's first name only; null when it is not set or shows a contact detail."
           },
+          "customer_deleted": {
+            "type": "boolean",
+            "title": "Customer Deleted",
+            "description": "True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "eta_at": {
             "anyOf": [
               {
@@ -15770,6 +16113,11 @@
             "title": "Name",
             "description": "The first name and the last name's initial, e.g. \"Mar\u00eda P.\"; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked."
           },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "rating_avg": {
             "anyOf": [
               {
@@ -15942,6 +16290,11 @@
             "title": "Name",
             "description": "The first name and the last name's initial, e.g. \"Mar\u00eda P.\"; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked."
           },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "rating_avg": {
             "anyOf": [
               {
@@ -16100,6 +16453,11 @@
             "title": "Reviewer",
             "description": "The reviewer's first name and last initial, e.g. \"Mar\u00eda P.\"; null when a name is missing or shows a contact detail."
           },
+          "reviewer_deleted": {
+            "type": "boolean",
+            "title": "Reviewer Deleted",
+            "description": "True when the reviewer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "created_on": {
             "type": "string",
             "format": "date",
@@ -16214,6 +16572,11 @@
             ],
             "title": "Customer Name",
             "description": "First name and last initial (\"Ana P.\"); null when a name is missing or shows a contact detail."
+          },
+          "customer_deleted": {
+            "type": "boolean",
+            "title": "Customer Deleted",
+            "description": "True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
           },
           "category": {
             "anyOf": [
@@ -16558,6 +16921,11 @@
             ],
             "title": "Name",
             "description": "The first name and the last name's initial, e.g. \"Mar\u00eda P.\"; null when the pro has not set both names, or when the name shows a contact detail (an email, a phone, a domain...): withheld before payment, never partly masked."
+          },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
           },
           "rating_avg": {
             "anyOf": [
@@ -16908,6 +17276,11 @@
             "examples": [
               "Dan R."
             ]
+          },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
           },
           "scheduled_start_at": {
             "type": "string",
@@ -17327,6 +17700,11 @@
             "title": "Customer Name",
             "description": "First name and last initial (\"Ana P.\"); null when a name is missing or shows a contact detail."
           },
+          "customer_deleted": {
+            "type": "boolean",
+            "title": "Customer Deleted",
+            "description": "True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "category": {
             "anyOf": [
               {
@@ -17411,6 +17789,21 @@
           },
           "customer": {
             "$ref": "#/components/schemas/CardCustomer"
+          },
+          "utm": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Utm",
+            "description": "The campaign the request came from (source, medium, campaign, term, content), as stored (#86)."
           },
           "address": {
             "$ref": "#/components/schemas/AddressOut",
@@ -17582,6 +17975,7 @@
           "assigned_agent",
           "media_count",
           "customer",
+          "utm",
           "address",
           "description",
           "intake_answers",
@@ -19018,6 +19412,16 @@
             ],
             "title": "Pro First Name"
           },
+          "customer_deleted": {
+            "type": "boolean",
+            "title": "Customer Deleted",
+            "description": "True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "customer_total_cents": {
             "anyOf": [
               {
@@ -19296,6 +19700,16 @@
               }
             ],
             "title": "Pro First Name"
+          },
+          "customer_deleted": {
+            "type": "boolean",
+            "title": "Customer Deleted",
+            "description": "True when the customer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
           },
           "customer_total_cents": {
             "anyOf": [
@@ -19731,6 +20145,11 @@
             "title": "Name",
             "description": "First name and last initial (\"Mar\u00eda P.\"); null when a name is missing or shows a contact detail."
           },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "verification_status": {
             "$ref": "#/components/schemas/ProVerificationStatus"
           },
@@ -19848,6 +20267,11 @@
             ],
             "title": "Legal Name",
             "description": "First and last name as on the account, to match the ID document; null when the account has neither. Only this detail carries it, never the list."
+          },
+          "pro_deleted": {
+            "type": "boolean",
+            "title": "Pro Deleted",
+            "description": "True when the pro's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
           },
           "payouts_enabled": {
             "type": "boolean",
@@ -20052,6 +20476,11 @@
             "title": "User First Name",
             "description": "The writer's first name alone; null when they have none or it shows a contact detail."
           },
+          "user_deleted": {
+            "type": "boolean",
+            "title": "User Deleted",
+            "description": "True when the writer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
+          },
           "role": {
             "$ref": "#/components/schemas/TicketRole",
             "description": "The writer's role when they wrote the ticket."
@@ -20146,6 +20575,11 @@
             ],
             "title": "User First Name",
             "description": "The writer's first name alone; null when they have none or it shows a contact detail."
+          },
+          "user_deleted": {
+            "type": "boolean",
+            "title": "User Deleted",
+            "description": "True when the writer's account was deleted (#97): the name is then null and the app shows its own words for it (\"Deleted user\", \"Usuario eliminado\"). Absent from an API older than #590: read it as false."
           },
           "role": {
             "$ref": "#/components/schemas/TicketRole",
@@ -20443,6 +20877,98 @@
           "status"
         ],
         "title": "SupportTicketStatusIn"
+      },
+      "TermsAcceptanceIn": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/TermsKind"
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+            "title": "Version",
+            "description": "The version the app showed, as GET /v1/me/terms gave it."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "version"
+        ],
+        "title": "TermsAcceptanceIn"
+      },
+      "TermsDocumentOut": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/TermsKind",
+            "description": "terms, privacy or pro_agreement (pros only)."
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "The version in force: the id of the text the app shows."
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted",
+            "description": "Whether the caller accepted this version."
+          },
+          "accepted_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At",
+            "description": "When the caller first accepted this version; null until then."
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "version",
+          "accepted",
+          "accepted_at"
+        ],
+        "title": "TermsDocumentOut"
+      },
+      "TermsKind": {
+        "type": "string",
+        "enum": [
+          "terms",
+          "privacy",
+          "pro_agreement"
+        ],
+        "title": "TermsKind"
+      },
+      "TermsOut": {
+        "properties": {
+          "terms_required": {
+            "type": "boolean",
+            "title": "Terms Required",
+            "description": "True while a document below is not accepted: the app asks for it before anything else. False when nothing is in force yet."
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/TermsDocumentOut"
+            },
+            "type": "array",
+            "title": "Documents",
+            "description": "The documents in force for the caller's role, with a version published."
+          }
+        },
+        "type": "object",
+        "required": [
+          "terms_required",
+          "documents"
+        ],
+        "title": "TermsOut"
       },
       "TextQuestion": {
         "properties": {
@@ -21052,6 +21578,11 @@
             "format": "date",
             "title": "Member Since",
             "description": "The day (UTC) the account was created."
+          },
+          "terms_required": {
+            "type": "boolean",
+            "title": "Terms Required",
+            "description": "True while a legal document in force for the account is not accepted in its version (GET /v1/me/terms): the app asks for it before anything else (#97). Absent from an API older than #97: read it as false."
           }
         },
         "type": "object",
@@ -21088,7 +21619,9 @@
         "type": "string",
         "enum": [
           "active",
-          "suspended"
+          "suspended",
+          "guest",
+          "deleted"
         ],
         "title": "UserStatus"
       },
@@ -21238,6 +21771,162 @@
           "web"
         ],
         "title": "WaitlistSource"
+      },
+      "WebContactIn": {
+        "properties": {
+          "first_name": {
+            "type": "string",
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "First Name"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "title": "Email",
+            "description": "Trimmed and lowercased."
+          },
+          "phone": {
+            "type": "string",
+            "pattern": "^\\+[1-9][0-9]{7,14}$",
+            "title": "Phone",
+            "description": "E.164, with an allowed country code."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "first_name",
+          "email",
+          "phone"
+        ],
+        "title": "WebContactIn",
+        "description": "Who the BDC calls back: staff only, never shown to a pro or in a log."
+      },
+      "WebRequestCreated": {
+        "properties": {
+          "public_code": {
+            "type": "string",
+            "title": "Public Code",
+            "description": "The code the BDC and the customer name it by."
+          },
+          "status": {
+            "type": "string",
+            "const": "received",
+            "title": "Status",
+            "description": "Always received: the BDC reviews it and calls."
+          }
+        },
+        "type": "object",
+        "required": [
+          "public_code",
+          "status"
+        ],
+        "title": "WebRequestCreated"
+      },
+      "WebRequestIn": {
+        "properties": {
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "pattern": "^[^\\x00]*$",
+            "title": "Description"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "address": {
+            "$ref": "#/components/schemas/AddressIn"
+          },
+          "preferred_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Date",
+            "description": "Today or later, as a UTC date."
+          },
+          "preferred_period": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreferredPeriod"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When in the preferred date; as POST /v1/requests takes it."
+          },
+          "intake_answers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Intake Answers",
+            "description": "Answers to the category's intake_questions, checked as POST /v1/requests checks them (the same schema and size limit)."
+          },
+          "utm": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UtmIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "contact": {
+            "$ref": "#/components/schemas/WebContactIn"
+          },
+          "consent_version": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+            "title": "Consent Version",
+            "description": "The id of the consent words the visitor saw, stored with the time: letters, digits, \".\", \"-\" and \"_\", 1 to 64 characters."
+          },
+          "locale": {
+            "type": "string",
+            "enum": [
+              "en",
+              "es"
+            ],
+            "title": "Locale",
+            "description": "The page's language.",
+            "default": "en"
+          },
+          "website": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Website",
+            "description": "The form's honeypot, hidden from people: leave it empty. A request with it filled in is answered as usual and stored nowhere.",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "description",
+          "address",
+          "contact",
+          "consent_version"
+        ],
+        "title": "WebRequestIn",
+        "description": "A request made on the web without an account (#86): what the app's create takes, without\nmedia, plus who to call and the consent the visitor gave."
       },
       "WebhookReceived": {
         "properties": {

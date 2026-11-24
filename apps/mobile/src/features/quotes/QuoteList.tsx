@@ -5,13 +5,13 @@ import { FlatList, RefreshControl, View } from "react-native";
 
 import { SessionExpiredError } from "@/api";
 import { showToast } from "@/components/ui";
-import { PaymentPanel } from "@/features/payments";
+import { PaymentPanel, usePaymentLine } from "@/features/payments";
 import { tokens } from "@/theme";
 
 import { useExpiryClock } from "./expiry";
 import { acceptHref, profileHref, useGuardedPush } from "./navigation";
 import { QuoteCard, QuoteCardSkeleton } from "./QuoteCard";
-import { proName, quoteStateOf } from "./quoteText";
+import { proName, quoteStateOf, type QuoteState } from "./quoteText";
 import { StateCard } from "./StateCard";
 import {
   isNotFound,
@@ -27,6 +27,42 @@ export type QuoteListProps = {
   header?: ReactElement;
   testID?: string;
 };
+
+type QuoteRowProps = {
+  requestId: string;
+  quote: CustomerQuote;
+  state: QuoteState;
+  now: number;
+  onAccept: (quote: CustomerQuote) => void;
+  onViewProfile: (quote: CustomerQuote) => void;
+};
+
+/** One quote's card; an accepted one carries its payment, and its summary says where it stands. */
+function QuoteRow({ requestId, quote, state, now, onAccept, onViewProfile }: QuoteRowProps) {
+  const { t } = useTranslation();
+  const paymentLine = usePaymentLine(requestId, quote.id);
+  return (
+    <QuoteCard
+      quote={quote}
+      state={state}
+      now={now}
+      onAccept={onAccept}
+      onViewProfile={onViewProfile}
+      paymentLine={paymentLine}
+      payment={
+        quote.status === "accepted" ? (
+          <PaymentPanel
+            requestId={requestId}
+            quoteId={quote.id}
+            amountCents={quote.amount_cents}
+            pro={proName(t, quote)}
+            testID={`quote-${quote.id}-payment`}
+          />
+        ) : undefined
+      }
+    />
+  );
+}
 
 /** About a screen's worth on a small phone; each one has the loaded card's rows. */
 const SKELETON_CARDS = 2;
@@ -76,23 +112,13 @@ export function QuoteList({ requestId, header, testID = "quote-list" }: QuoteLis
       data={items}
       keyExtractor={(quote) => quote.id}
       renderItem={({ item }) => (
-        <QuoteCard
+        <QuoteRow
+          requestId={requestId}
           quote={item}
           state={quoteStateOf(item, now, anyAccepted)}
           now={now}
           onAccept={(quote) => push(acceptHref(requestId, quote.id))}
           onViewProfile={(quote) => push(profileHref(requestId, quote.id))}
-          payment={
-            item.status === "accepted" ? (
-              <PaymentPanel
-                requestId={requestId}
-                quoteId={item.id}
-                amountCents={item.amount_cents}
-                pro={proName(t, item)}
-                testID={`quote-${item.id}-payment`}
-              />
-            ) : undefined
-          }
         />
       )}
       // Rows depend on the clock too: a passing minute or an expiry redraws them.

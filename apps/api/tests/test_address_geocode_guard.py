@@ -85,8 +85,12 @@ MODEL = "Address"
 BOOK_EDIT = (f"{ADDRESSES}/service.py", "SavedAddressService.update")
 # (file, function) -> the other table whose row it edits: code that may assign a place field.
 OTHER_ROWS = {BOOK_EDIT: "saved_addresses"}
-# (file, function): the only statement that may update `addresses`.
+# (file, function): the only statement that may update `addresses`' point alone.
 POINT_WRITE = (f"{ADDRESSES}/repository.py", "AddressRepository.set_point")
+# (file, function): an account deletion's erase of the user's request addresses (#97): the
+# only statement that may set a street, and only while it clears the point in the same write.
+ERASE_WRITE = (f"{ADDRESSES}/repository.py", "AddressRepository.erase_for_user")
+ERASE_FIELDS = frozenset({"line1", "line2"}) | POINT_FIELDS
 # Calls that change existing rows of the model they are given or chained on.
 WRITING_CALLS = frozenset({"update", "merge", "bulk_update_mappings", "on_conflict_do_update"})
 # `Update(Address)` builds the statement `update(Address)` returns.
@@ -307,6 +311,8 @@ def findings(relative: str, source: str) -> list[str]:
         fields = _set_fields(node, tree)
         if where == POINT_WRITE and fields is not None and fields <= POINT_FIELDS:
             continue
+        if where == ERASE_WRITE and fields is not None and POINT_FIELDS <= fields <= ERASE_FIELDS:
+            continue
         report(node, f"updates addresses (sets {sorted(fields) if fields else 'unknown'})")
     return found
 
@@ -343,7 +349,7 @@ def test_every_exemption_is_still_a_real_function() -> None:
     """No stale entry: each exempt function exists and still makes the write it is exempt
     for (seen once the exemption is taken away)."""
     sources = dict(scanned_files())
-    for relative, function in (*OTHER_ROWS, POINT_WRITE):
+    for relative, function in (*OTHER_ROWS, POINT_WRITE, ERASE_WRITE):
         elsewhere = findings("app/elsewhere.py", sources[relative])
         assert any(f" {function}: " in finding for finding in elsewhere), (relative, function)
 
@@ -369,6 +375,12 @@ def test_the_scan_sees_the_two_writes_it_allows() -> None:
         if "set_point" in finding
     ]
     assert point_write.endswith("updates addresses (sets ['lat', 'lng'])")
+    [erase_write] = [
+        finding
+        for finding in findings("app/elsewhere.py", sources[repository])
+        if "erase_for_user" in finding
+    ]
+    assert erase_write.endswith("updates addresses (sets ['lat', 'line1', 'line2', 'lng'])")
 
 
 IMPORT = "from app.modules.addresses.models import Address\n"
@@ -708,8 +720,34 @@ def test_the_application_scan_refuses_the_edit_the_gatekeeper_planted(tmp_path: 
 @pytest.mark.parametrize("name", ["update_values", "attribute", "bulk_update", "raw_sql"])
 def test_an_edit_planted_in_the_exempt_files_is_found_too(name: str) -> None:
     """The exemptions are one function each, not their files."""
-    for relative, _ in (BOOK_EDIT, POINT_WRITE):
+    for relative, _ in (BOOK_EDIT, POINT_WRITE, ERASE_WRITE):
         assert findings(relative, PLANTED[name]) != [], (relative, name)
+
+
+def test_the_erase_must_clear_the_point_and_may_set_nothing_but_the_street() -> None:
+    """#97: an account deletion blanks the street of the user's request addresses. The same
+    write must clear the point (a point under a blanked street is still the home), and may
+    never move the city, state or ZIP."""
+    relative, function = ERASE_WRITE
+    class_name, method = function.split(".")
+
+    def erase(values: str) -> str:
+        return (
+            "from sqlalchemy import update\n"
+            + IMPORT
+            + f"class {class_name}:\n"
+            + f"    async def {method}(self) -> None:\n"
+            + f"        await self._session.execute(update(Address).values({values}))\n"
+        )
+
+    assert findings(relative, erase("line1='x', line2=None, lat=None, lng=None")) == []
+    assert findings(relative, erase("line1='x', lat=None, lng=None")) == []
+    # The point kept: refused.
+    assert findings(relative, erase("line1='x', line2=None")) != []
+    assert findings(relative, erase("line1='x', lat=None")) != []
+    # A city, state or ZIP: refused.
+    assert findings(relative, erase("line1='x', city='y', lat=None, lng=None")) != []
+    assert findings(relative, erase("zip_code='00000', lat=None, lng=None")) != []
 
 
 @pytest.mark.parametrize("imported", ["update", "update as change"])

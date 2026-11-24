@@ -169,11 +169,11 @@ afterEach(async () => {
   await i18n.changeLanguage("en");
 });
 
-describe("Talk to Jack: the form", () => {
+describe("Talk to John: the form", () => {
   it("offers the six topics as radios and waits for a topic and some text before Send", async () => {
     await renderForm();
 
-    expect(screen.getByRole("header", { name: "Talk to Jack" })).toBeOnTheScreen();
+    expect(screen.getByRole("header", { name: "Talk to John" })).toBeOnTheScreen();
     expect(screen.getAllByRole("radio").map((chip) => chip.props.accessibilityLabel)).toEqual([
       "My account",
       "A payment",
@@ -239,7 +239,7 @@ describe("Talk to Jack: the form", () => {
     mine = [ticket({ status: "in_progress" })];
     await renderForm();
 
-    expect(screen.getByRole("header", { name: "Habla con Jack" })).toBeOnTheScreen();
+    expect(screen.getByRole("header", { name: "Habla con John" })).toBeOnTheScreen();
     expect(topic("Un pago")).toBeOnTheScreen();
     expect(screen.getByRole("button", { name: "Enviar mensaje" })).toBeDisabled();
     expect(screen.getByRole("header", { name: "Tus mensajes" })).toBeOnTheScreen();
@@ -249,7 +249,7 @@ describe("Talk to Jack: the form", () => {
   });
 });
 
-describe("Talk to Jack: sending", () => {
+describe("Talk to John: sending", () => {
   it("sends the message as typed, once, then confirms and lists it", async () => {
     await renderForm();
     await write();
@@ -477,7 +477,7 @@ describe("Talk to Jack: sending", () => {
   });
 });
 
-describe("Talk to Jack: the person's messages", () => {
+describe("Talk to John: the person's messages", () => {
   it("lists them with their status", async () => {
     mine = [
       ticket({ id: "a", topic: "job", status: "open" }),
@@ -512,7 +512,7 @@ describe("Talk to Jack: the person's messages", () => {
   });
 });
 
-describe("Talk to Jack: a message that went before the list came", () => {
+describe("Talk to John: a message that went before the list came", () => {
   const row = () => screen.queryByTestId(`contact-ticket-${ticket().id}`);
 
   /** Holds back the first `count` reads of the list for the test to answer; the rest answer as usual. */
@@ -598,7 +598,7 @@ describe("Talk to Jack: a message that went before the list came", () => {
   });
 });
 
-describe("Talk to Jack: privacy", () => {
+describe("Talk to John: privacy", () => {
   it("keeps the message out of every log, on success and on failure", async () => {
     const spies = (["log", "info", "warn", "error", "debug"] as const).map((method) =>
       jest.spyOn(console, method).mockImplementation(),
