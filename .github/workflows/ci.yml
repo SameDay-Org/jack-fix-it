@@ -86,10 +86,34 @@ jobs:
         if: matrix.shard == 1
         run: uv run alembic upgrade head && uv run alembic downgrade base && uv run alembic upgrade head
       # The media copy tests run ffmpeg and ffprobe (#173); in CI they fail without them.
+      # Their .deb files are cached per runner image (#626): with the cache, nothing comes from
+      # the apt mirror, which has timed out on both shards (#364, #613). A new runner image
+      # misses the cache once and fetches as below; a cached install that fails also falls
+      # back to the fetch.
+      - name: ffmpeg cache key
+        id: ffmpeg-key
+        run: echo "key=ffmpeg-debs-${ImageOS:-unknown}-${ImageVersion:-unknown}-v1" >> "$GITHUB_OUTPUT"
+      - name: Restore the ffmpeg packages
+        id: ffmpeg-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/ffmpeg-debs
+          key: ${{ steps.ffmpeg-key.outputs.key }}
+      - name: Install ffmpeg from the cache
+        id: ffmpeg-cached
+        if: steps.ffmpeg-cache.outputs.cache-hit == 'true'
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          sudo DEBIAN_FRONTEND=noninteractive dpkg -i ~/ffmpeg-debs/*.deb
+          dpkg-query -W ffmpeg
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
       # When the runner's Ubuntu mirror stops resolving, apt crawls for up to an hour (#364).
       # Each attempt's downloads get a time limit; a failed attempt is retried and reuses the
-      # .deb files it already downloaded.
+      # .deb files it already downloaded. A successful fetch keeps its .deb files for the cache.
       - name: Install ffmpeg
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true' || steps.ffmpeg-cached.outcome == 'failure'
         timeout-minutes: 10
         env:
           ATTEMPTS: "3"
@@ -109,6 +133,9 @@ jobs:
             { fetch_packages && install_from_cache; } || rc=$?
             if [ "$rc" -eq 0 ]; then
               dpkg-query -W ffmpeg
+              # For the cache: what apt fetched (nothing to keep if the image had it all).
+              mkdir -p ~/ffmpeg-debs
+              cp /var/cache/apt/archives/*.deb ~/ffmpeg-debs/ 2>/dev/null || true
               exit 0
             fi
             if [ "$attempt" -lt "$ATTEMPTS" ]; then
@@ -119,6 +146,15 @@ jobs:
           done
           echo "::error::Install ffmpeg failed $ATTEMPTS times (last exit $rc): the runner's apt mirror is unreachable or too slow. Re-run the job (#364)."
           exit 1
+      # Saved as soon as the fetch worked, whatever the tests do next; the shard that saves second
+      # only warns that the key is taken.
+      - name: Save the ffmpeg packages
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v6
+        with:
+          path: ~/ffmpeg-debs
+          key: ${{ steps.ffmpeg-key.outputs.key }}
       - name: Tests (half ${{ matrix.shard }} of 2)
         run: uv run pytest
 
