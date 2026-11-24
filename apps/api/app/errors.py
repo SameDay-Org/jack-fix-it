@@ -69,6 +69,14 @@ class NotFoundError(AppError):
     message = "Resource not found."
 
 
+class PayloadTooLargeError(AppError):
+    """A body past its cap: the app-wide HTTP_MAX_BODY_BYTES (#523) or a route's own."""
+
+    status_code = 413
+    code = "payload_too_large"
+    message = "The body is too large."
+
+
 class ConflictError(AppError):
     status_code = 409
     code = "conflict"
