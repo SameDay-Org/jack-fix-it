@@ -31,6 +31,8 @@ from app.modules.jobs.live_updates import (
     LiveUpdateService,
     RedisLiveUpdateGuard,
     kick_live_update,
+    send_live_update,
+    send_live_updates,
     sweep_live_updates,
 )
 from app.modules.jobs.models import Job, JobStatus, LiveActivityToken
@@ -386,3 +388,15 @@ async def test_on_my_way_kicks_the_live_update(
 
     assert response.status_code == 200, response.text
     assert queue.jobs[f"live-update:{job.id}:on_the_way"] == ("send_live_update", (str(job.id),))
+
+
+async def test_a_context_without_the_live_updates_sends_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A context the worker's startup did not build (the demo seed runs queued tasks inline):
+    the job and the cron log and return."""
+    with caplog.at_level(logging.INFO):
+        await send_live_update({}, str(uuid.uuid4()))
+        await send_live_updates({})
+
+    assert caplog.messages.count("live_updates_not_configured") == 2

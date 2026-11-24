@@ -44,7 +44,6 @@ from app.integrations.live_updates import (
     PushLiveUpdateSender,
 )
 from app.integrations.mapbox import RouteProvider, provider_from_settings
-from app.modules.devices.models import DevicePlatform
 from app.modules.devices.service import DeviceService
 from app.modules.jobs.live import JobLiveConfig, JobLiveService
 from app.modules.jobs.location import (
@@ -203,10 +202,7 @@ class LiveUpdateService:
         customer_id = await self._session.scalar(select(Job.customer_id).where(Job.id == job_id))
         if customer_id is None:
             return LiveTargets(activity_tokens=(), android_tokens=())
-        iphones = {
-            target.device_id
-            for target in await self._devices.targets_on(customer_id, DevicePlatform.IOS)
-        }
+        iphones = {target.device_id for target in await self._devices.iphones_of(customer_id)}
         tokens = (
             await self._session.scalars(
                 select(LiveActivityToken.token)
@@ -217,7 +213,7 @@ class LiveUpdateService:
             if iphones
             else None
         )
-        android = await self._devices.targets_on(customer_id, DevicePlatform.ANDROID)
+        android = await self._devices.androids_of(customer_id)
         return LiveTargets(
             activity_tokens=() if tokens is None else tuple(tokens),
             android_tokens=tuple(target.expo_push_token for target in android),
@@ -266,8 +262,10 @@ class LiveUpdateDeps:
     clock: Callable[[], datetime] = utc_now
 
     @classmethod
-    def from_context(cls, ctx: dict[str, Any]) -> "LiveUpdateDeps":
-        deps: LiveUpdateDeps = ctx["live_updates"]
+    def from_context(cls, ctx: dict[str, Any]) -> "LiveUpdateDeps | None":
+        """None in a context the worker's startup did not build (the demo seed runs queued
+        tasks inline): the live updates then send nothing."""
+        deps: LiveUpdateDeps | None = ctx.get("live_updates")
         return deps
 
 
@@ -328,6 +326,9 @@ class _NoGuard:
 async def send_live_update(ctx: dict[str, Any], job_id: str) -> None:
     """One job's update, kicked by a stage change."""
     deps = LiveUpdateDeps.from_context(ctx)
+    if deps is None:
+        logger.info("live_updates_not_configured", extra={"job_id": job_id})
+        return
     async with deps.sessions() as session:
         await _service(deps, session).update(uuid.UUID(job_id))
 
@@ -335,6 +336,9 @@ async def send_live_update(ctx: dict[str, Any], job_id: str) -> None:
 async def send_live_updates(ctx: dict[str, Any]) -> None:
     """The cron, every minute (app.worker)."""
     deps = LiveUpdateDeps.from_context(ctx)
+    if deps is None:
+        logger.info("live_updates_not_configured")
+        return
     async with deps.sessions() as session:
         jobs, dropped = await sweep_live_updates(session, _service(deps, session))
     logger.info("live_updates_swept", extra={"jobs": jobs, "tokens_dropped": dropped})

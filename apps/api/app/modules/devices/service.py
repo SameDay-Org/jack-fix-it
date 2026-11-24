@@ -86,8 +86,15 @@ class DeviceService:
             for device in await self._devices.list_for_user(user_id)
         ]
 
-    async def targets_on(self, user_id: uuid.UUID, platform: DevicePlatform) -> list[PushTarget]:
-        """The user's devices on one platform: an Android live update (#596) goes to these."""
+    async def iphones_of(self, user_id: uuid.UUID) -> list[PushTarget]:
+        """The user's iPhones: their Live Activities get the job's live updates (#596)."""
+        return await self._targets_on(user_id, DevicePlatform.IOS)
+
+    async def androids_of(self, user_id: uuid.UUID) -> list[PushTarget]:
+        """The user's Android devices: an Android live update (#596) goes to these."""
+        return await self._targets_on(user_id, DevicePlatform.ANDROID)
+
+    async def _targets_on(self, user_id: uuid.UUID, platform: DevicePlatform) -> list[PushTarget]:
         return [
             PushTarget(device_id=device.id, expo_push_token=device.expo_push_token)
             for device in await self._devices.list_for_user_on(user_id, platform)
