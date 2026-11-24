@@ -5,7 +5,7 @@ import type { Locale } from "@/i18n/config";
 import en from "@/i18n/locales/en.json";
 import es from "@/i18n/locales/es.json";
 
-import { HERO_SCREEN_IDS } from "./hero3d/choreography";
+import { cssPhoneTransform, HERO_SCREEN_IDS, poseAt } from "./hero3d/choreography";
 import { ShowcasePage } from "./showcase-page";
 
 const CATALOGS = { en, es } as const;
@@ -118,5 +118,16 @@ describe("the hero", () => {
       expect(screen).toContain(`group-data-[screen=${index + 1}]/hero:opacity-100`);
       expect(screen).toContain(`%2Fshowcase%2Fposters%2F${HERO_SCREEN_IDS[index + 1]}.webp`);
     });
+  });
+
+  it("draws the CSS phone in the story's start pose from the server's HTML, before any script", async () => {
+    const html = await hero("en");
+    const phone = tag(html, /group-data-\[gl=ready\]\/hero:opacity-0/);
+    expect(phone).toContain(`style="transform:${cssPhoneTransform(poseAt(0))}"`);
+    expect(phone).toContain("rotateY(-0.55rad)");
+    // Its box is the size container of the perspective (cqh), at the start pose's size.
+    const box = tag(html, /aspect-\[0\.519\]/);
+    expect(box).toContain("[container-type:size]");
+    expect(box).toContain(`h-[${Math.round(poseAt(0).fill * 100)}%]`);
   });
 });

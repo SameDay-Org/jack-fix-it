@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 import { accentParts } from "./accent";
 import { HeroMotion } from "./hero-motion";
-import { HERO_SCREEN_IDS } from "./hero3d/choreography";
+import { cssPhoneTransform, HERO_SCREEN_IDS, START_POSE } from "./hero3d/choreography";
 import { MascotBubble } from "./mascot-bubble";
 import { MEDIA } from "./media";
 import { PhoneFrame } from "./phone-frame";
@@ -136,8 +136,14 @@ export function Hero({ t }: { t: TFunction }) {
           </div>
           <div className="relative min-h-0 lg:h-full still:h-auto">
             <div className="relative mx-auto flex h-full items-center justify-center still:block still:h-auto">
-              <div className="relative aspect-[0.519] h-[74%] max-h-[44rem] short:h-[92%] still:mx-auto still:h-auto still:w-[min(60vw,18rem)] still:-mb-28 sm:still:w-72 lg:still:mb-0 lg:still:w-80">
-                <div className="size-full transition-opacity duration-300 motion-reduce:transition-none group-data-[gl=ready]/hero:opacity-0 still:opacity-100!">
+              {/* The size container the CSS phone's perspective is measured in (cqh). */}
+              <div className="relative aspect-[0.519] h-[74%] max-h-[44rem] [container-type:size] short:h-[92%] still:mx-auto still:h-auto still:w-[min(60vw,18rem)] still:-mb-28 sm:still:w-72 lg:still:mb-0 lg:still:w-80">
+                {/* Turned as the story starts (choreography.ts), from the first paint and as the
+                    3D phone draws it before its reveal: the hand-over shows no jump. */}
+                <div
+                  className="size-full transition-opacity duration-300 motion-reduce:transition-none group-data-[gl=ready]/hero:opacity-0 still:opacity-100!"
+                  style={{ transform: cssPhoneTransform(START_POSE) }}
+                >
                   <PhoneFrame
                     media={MEDIA.home}
                     alt={t(MEDIA.home.alt)}
