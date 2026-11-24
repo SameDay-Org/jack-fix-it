@@ -52,11 +52,11 @@ class _Copy:
 COPY: Final = MappingProxyType(
     {
         "en": _Copy(
-            payment_subject="Your Jack Fix It receipt · {code}",
-            tip_subject="Your Jack Fix It tip receipt · {code}",
+            payment_subject="Your John Got It receipt · {code}",
+            tip_subject="Your John Got It tip receipt · {code}",
             greeting="Hi {name},",
             greeting_no_name="Hi,",
-            payment_intro="Thank you for booking with Jack Fix It. Here is your receipt.",
+            payment_intro="Thank you for booking with John Got It. Here is your receipt.",
             tip_intro="Thank you for your tip for {pro}. Here is its receipt.",
             tip_intro_no_pro="Thank you for your tip. Here is its receipt.",
             receipt="Receipt {code}",
@@ -71,7 +71,7 @@ COPY: Final = MappingProxyType(
             paid_with="Paid with {method}",
             card="Card",
             in_app="See this receipt any time in the app: open your job and tap Receipt.",
-            why="You're getting this email because you booked a job with Jack Fix It.",
+            why="You're getting this email because you booked a job with John Got It.",
             months=(
                 "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -79,11 +79,11 @@ COPY: Final = MappingProxyType(
             date="{month} {day}, {year}, {time}",
         ),
         "es": _Copy(
-            payment_subject="Tu recibo de Jack Fix It · {code}",
-            tip_subject="Tu recibo de propina de Jack Fix It · {code}",
+            payment_subject="Tu recibo de John Got It · {code}",
+            tip_subject="Tu recibo de propina de John Got It · {code}",
             greeting="Hola, {name}:",
             greeting_no_name="Hola:",
-            payment_intro="Gracias por reservar con Jack Fix It. Este es tu recibo.",
+            payment_intro="Gracias por reservar con John Got It. Este es tu recibo.",
             tip_intro="Gracias por tu propina para {pro}. Este es su recibo.",
             tip_intro_no_pro="Gracias por tu propina. Este es su recibo.",
             receipt="Recibo {code}",
@@ -98,7 +98,7 @@ COPY: Final = MappingProxyType(
             paid_with="Pagado con {method}",
             card="Tarjeta",
             in_app="Consulta este recibo cuando quieras en la app: abre tu trabajo y toca Recibo.",
-            why="Recibes este correo porque reservaste un trabajo con Jack Fix It.",
+            why="Recibes este correo porque reservaste un trabajo con John Got It.",
             months=(
                 "ene", "feb", "mar", "abr", "may", "jun",
                 "jul", "ago", "sept", "oct", "nov", "dic",

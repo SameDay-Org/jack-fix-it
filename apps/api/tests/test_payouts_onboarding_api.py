@@ -754,7 +754,7 @@ async def test_return_pages(client: httpx.AsyncClient, result: str) -> None:
     page = response.text
     link = f"{APP_URL}?result={result}"
     assert f'<meta http-equiv="refresh" content="0; url={link}">' in page
-    assert f'<a href="{link}">Back to Jack Fix It</a>' in page
+    assert f'<a href="{link}">Back to John Got It</a>' in page
     assert "<script" not in page.lower()
     assert "evil" not in page
     assert "next=" not in page

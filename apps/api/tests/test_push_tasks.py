@@ -216,7 +216,7 @@ async def test_send_resolves_locale_and_sends_to_all_devices(
     [batch] = sender.sent
     assert {m.to for m in batch} == {"ExponentPushToken[m1]", "ExponentPushToken[m2]"}
     for message in batch:
-        assert message.title == "Jack Fix It"
+        assert message.title == "John Got It"
         assert message.body == "Esta es una notificación de prueba para JF-000124."
         assert message.data == {"url": DEEP_LINK}
     devices = {d.expo_push_token: d.id for d in (await db_session.scalars(select(Device))).all()}
@@ -387,7 +387,7 @@ async def test_logs_carry_ids_and_counts_only(
         await check_push_receipts(ctx)
 
     output = "\n".join(JsonFormatter().format(record) for record in caplog.records)
-    for secret in ("probe-secret", "JF-000124", "notification for", "Jack Fix It"):
+    for secret in ("probe-secret", "JF-000124", "notification for", "John Got It"):
         assert secret not in output
     messages = {record.message for record in caplog.records}
     assert {"push_sent", "push_receipts_checked"} <= messages
