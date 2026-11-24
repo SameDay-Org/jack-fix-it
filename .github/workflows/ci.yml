@@ -23,9 +23,19 @@ env:
 jobs:
   # Each job's timeout-minutes is about twice its slowest healthy green run (#364), so a
   # stuck job fails instead of blocking reviews for an hour.
+  # The API's tests run in two jobs at once, each with half of the test files (#613: one job
+  # reached its 25-minute limit). tests/sharding.py makes the split from the files alone, so
+  # both jobs agree, and tests/test_sharding.py proves the two halves are the whole suite.
+  # The checks before the tests run once, in the first job. Standard runners only.
   api:
+    name: api (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
-    timeout-minutes: 25 # green runs: median 7, slowest 12.3 min
+    timeout-minutes: 25 # one job ran all the tests: median 7, slowest 23 min (#613)
+    strategy:
+      # Both halves report even when one fails, so a review sees every failure at once.
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     defaults:
       run:
         working-directory: apps/api
@@ -50,6 +60,7 @@ jobs:
       APP_ENV: test
       DATABASE_URL: postgresql://jack:jack@127.0.0.1:5432/jack
       REDIS_URL: redis://127.0.0.1:6379/0
+      PYTEST_SHARD: ${{ matrix.shard }}/2
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0 (no moving major tag)
@@ -57,17 +68,22 @@ jobs:
           enable-cache: true
           cache-dependency-glob: apps/api/uv.lock
       - run: uv sync
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run mypy .
+      - if: matrix.shard == 1
+        run: uv run ruff check .
+      - if: matrix.shard == 1
+        run: uv run ruff format --check .
+      - if: matrix.shard == 1
+        run: uv run mypy .
       # The demo video's scripts (docs/demo-video.md) run in this environment and follow the
       # same rules; tests/test_demo_seed.py runs the seed itself.
       - name: Demo scripts (lint, format, types)
+        if: matrix.shard == 1
         run: |
           uv run ruff check ../../scripts/demo
           uv run ruff format --check ../../scripts/demo
           uv run mypy ../../scripts/demo
       - name: Migrations upgrade, downgrade, upgrade
+        if: matrix.shard == 1
         run: uv run alembic upgrade head && uv run alembic downgrade base && uv run alembic upgrade head
       # The media copy tests run ffmpeg and ffprobe (#173); in CI they fail without them.
       # When the runner's Ubuntu mirror stops resolving, apt crawls for up to an hour (#364).
@@ -103,7 +119,8 @@ jobs:
           done
           echo "::error::Install ffmpeg failed $ATTEMPTS times (last exit $rc): the runner's apt mirror is unreachable or too slow. Re-run the job (#364)."
           exit 1
-      - run: uv run pytest
+      - name: Tests (half ${{ matrix.shard }} of 2)
+        run: uv run pytest
 
   js:
     runs-on: ubuntu-latest

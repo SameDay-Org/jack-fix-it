@@ -29,7 +29,11 @@ from app.modules.pros.errors import (
     InvalidServiceAreaError,
 )
 from app.modules.pros.models import ProProfile, ProVerificationStatus
-from app.modules.pros.repository import ProDocumentRepository, ProProfileRepository
+from app.modules.pros.repository import (
+    PayoutsStored,
+    ProDocumentRepository,
+    ProProfileRepository,
+)
 from app.modules.pros.schemas import ProProfileOut, ProProfileUpdate
 from app.modules.service_areas.service import ServiceAreaService
 from app.modules.uploads.keys import owned_upload
@@ -257,10 +261,18 @@ class ProService:
         """Stores the profile's Express account id; the caller holds the row lock and commits."""
         await self._profiles.set_stripe_account_id(pro_id, account_id)
 
-    async def set_payouts_enabled(self, pro_id: uuid.UUID, enabled: bool) -> bool:
-        """Stores what Stripe says of the account's payouts; True when the value changed (only
-        then is the row written). The caller commits."""
-        return await self._profiles.set_payouts_enabled(pro_id, enabled)
+    async def next_payouts_read(self) -> int:
+        """The number of a Stripe account read about to start (#524): later reads draw higher.
+        Drawn before the read, so the order is the order the reads start in."""
+        return await self._profiles.next_payouts_read()
+
+    async def record_payouts_read(
+        self, pro_id: uuid.UUID, enabled: bool, read: int
+    ) -> PayoutsStored | None:
+        """Stores what Stripe read `read` said of the account's payouts unless a later read's
+        answer is stored (#524): the stored value and whether this answer changed it. None when
+        no profile has this id. The caller commits."""
+        return await self._profiles.record_payouts_read(pro_id, enabled, read)
 
     async def hireable_cards(self, pro_ids: Collection[uuid.UUID]) -> dict[uuid.UUID, ProCard]:
         """The public card of each pro among `pro_ids` who can still be hired, by profile id:
