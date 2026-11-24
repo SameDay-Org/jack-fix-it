@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.devices.models import DevicePlatform
 from app.modules.devices.repository import DeviceRepository
 from app.modules.devices.schemas import DeviceRegistration
 from app.modules.users.types import UserAccount
@@ -83,6 +84,13 @@ class DeviceService:
         return [
             PushTarget(device_id=device.id, expo_push_token=device.expo_push_token)
             for device in await self._devices.list_for_user(user_id)
+        ]
+
+    async def targets_on(self, user_id: uuid.UUID, platform: DevicePlatform) -> list[PushTarget]:
+        """The user's devices on one platform: an Android live update (#596) goes to these."""
+        return [
+            PushTarget(device_id=device.id, expo_push_token=device.expo_push_token)
+            for device in await self._devices.list_for_user_on(user_id, platform)
         ]
 
     async def own_device_id(self, user_id: uuid.UUID, token: str) -> uuid.UUID | None:

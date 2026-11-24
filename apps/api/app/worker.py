@@ -28,6 +28,11 @@ from app.modules.dispatch.tasks import (
     redispatch_stalled_requests,
 )
 from app.modules.disputes.tasks import dispute_photo_sanitize_task
+from app.modules.jobs.live_updates import (
+    live_update_deps,
+    send_live_update,
+    send_live_updates,
+)
 from app.modules.jobs.tasks import auto_confirm_jobs, photo_sanitize_task
 from app.modules.media.resweep import requeue_stale_media_copies
 from app.modules.notifications.push_tasks import check_push_receipts, send_push
@@ -98,6 +103,11 @@ async def startup(ctx: dict[str, Any]) -> None:
         if settings.stripe_secret_key is None
         else StripeTransfersClient.from_settings(settings)
     )
+    # The live updates (#596): the positions' Redis (as the API's), Mapbox for the ETA, and
+    # the senders (APNs not configured until #335; Expo's data-only path for Android).
+    ctx["live_updates"] = live_update_deps(
+        settings, ctx["session_factory"], ctx.get("redis"), ctx["push_sender"]
+    )
     # Sentinel looks for this line to confirm a worker deploy is healthy.
     logger.info("worker_started", extra={"app_env": settings.app_env})
 
@@ -163,9 +173,19 @@ class WorkerSettings:
             send_payment_receipt, max_tries=get_settings().receipt_email_max_attempts
         ),
         discarding_result(send_tip_receipt, max_tries=get_settings().receipt_email_max_attempts),
+        # One try: a live update is best effort, and the next one replaces it (#596).
+        discarding_result(send_live_update, max_tries=1),
     )
     # A cron job keeps no result by default (ARQ's cron keep_result is 0); stated anyway.
     cron_jobs = (
+        # The live updates while a pro is on the way (#596): every minute.
+        cron(
+            send_live_updates,
+            minute=every(1),
+            timeout=get_settings().live_update_sweep_timeout_seconds,
+            keep_result=0,
+            keep_result_forever=False,
+        ),
         cron(
             check_push_receipts,
             minute=every(get_settings().push_receipt_check_minutes),

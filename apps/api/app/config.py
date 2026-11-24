@@ -640,6 +640,12 @@ class Settings(BaseSettings):
     route_max_steps: int = Field(default=30, gt=0)
     # The live job view (#596): an ETA from a pro's position older than this is not shown.
     live_position_max_age_seconds: int = Field(default=120, gt=0)
+    # The live updates (#596 PR 2b): an ETA change in whole minutes goes out at most this often
+    # (a stage change at once); what was last sent is kept this long per job.
+    live_update_interval_seconds: int = Field(default=60, gt=0)
+    live_update_state_ttl_seconds: int = Field(default=86_400, gt=0)
+    # How long one run of the live updates' cron may take (it runs every minute).
+    live_update_sweep_timeout_seconds: int = Field(default=50, gt=0)
     # Geocode on save (#384): true gives a request's address its point once, when the request
     # is made, with Mapbox's PERMANENT geocoding (the only kind that may be stored), so its
     # route asks for no geocoding. Mapbox bills that kind apart and refuses it to an account

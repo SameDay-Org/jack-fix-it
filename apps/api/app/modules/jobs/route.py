@@ -295,7 +295,11 @@ def _decode(raw: bytes | str) -> CachedRoute | None:
 def get_job_route_cache(
     request: Request, settings: Annotated[Settings, Depends(get_app_settings)]
 ) -> JobRouteCache:
-    backend: LocationBackend | None = request.app.state.location_backend
+    return route_cache_of(request.app.state.location_backend, settings)
+
+
+def route_cache_of(backend: LocationBackend | None, settings: Settings) -> JobRouteCache:
+    """The route cache on the positions' `backend` (the app's, or the worker's, #596)."""
     if backend is None:
         return NoJobRouteCache()
     return RedisJobRouteCache(

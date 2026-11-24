@@ -20,6 +20,7 @@ from app.integrations.stripe_transfers import StripeTransfersClient
 from app.modules.accounts.tasks import retry_account_cleanups
 from app.modules.chat.tasks import purge_chat_originals
 from app.modules.dispatch.tasks import dispatch_request, redispatch_stalled_requests
+from app.modules.jobs.live_updates import send_live_updates
 from app.modules.jobs.tasks import auto_confirm_jobs
 from app.modules.media.resweep import requeue_stale_media_copies
 from app.modules.notifications.push_tasks import check_push_receipts
@@ -114,6 +115,8 @@ def test_registration_keeps_names_tries_and_timeouts() -> None:
         "refund_cancellation": (1, None),
         # One run per account deletion (#97): the sweep is its retry.
         "clean_up_deleted_account": (1, None),
+        # One try: a live update is best effort, the next one replaces it (#596).
+        "send_live_update": (1, None),
     }
 
 
@@ -125,6 +128,12 @@ def test_cron_jobs_keep_names_cadences_and_timeouts() -> None:
 
     # max_tries 1: ARQ's own default for a cron; the next run is the retry.
     assert crons == {
+        "cron:send_live_updates": (
+            send_live_updates,
+            every(1),
+            get_settings().live_update_sweep_timeout_seconds,
+            1,
+        ),
         "cron:check_push_receipts": (
             check_push_receipts,
             every(get_settings().push_receipt_check_minutes),

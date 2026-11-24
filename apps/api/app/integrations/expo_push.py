@@ -47,6 +47,15 @@ class PushMessage:
 
 
 @dataclass(frozen=True)
+class DataMessage:
+    """A data-only message (#596): no title, body or sound, so no alert; the app reads `data`
+    (an Android live update)."""
+
+    to: str
+    data: dict[str, str]
+
+
+@dataclass(frozen=True)
 class Ticket:
     """Expo's answer for one message, in the order sent: an id to check later, or an error."""
 
@@ -107,6 +116,27 @@ class ExpoPushSender:
                 raise PushUnavailableError(tickets) from None  # logged by _post
             if not isinstance(data, list) or len(data) != len(batch):
                 logger.error("expo_push_unexpected_response", extra={"operation": "send"})
+                raise PushUnavailableError(tickets)
+            tickets.extend(_ticket(item) for item in data)
+        return tickets
+
+    async def send_data(self, messages: Sequence[DataMessage]) -> list[Ticket]:
+        """Data-only messages, one ticket per message, in order: high priority and content
+        available, so the app gets them while in the background. Raises PushUnavailableError
+        as `send` does. Not part of PushSender: the alert pushes never use it."""
+        tickets: list[Ticket] = []
+        for start in range(0, len(messages), SEND_BATCH):
+            batch = messages[start : start + SEND_BATCH]
+            payload = [
+                {"to": m.to, "data": m.data, "priority": "high", "_contentAvailable": True}
+                for m in batch
+            ]
+            try:
+                data = await self._post(SEND_URL, payload, "send_data")
+            except PushUnavailableError:
+                raise PushUnavailableError(tickets) from None  # logged by _post
+            if not isinstance(data, list) or len(data) != len(batch):
+                logger.error("expo_push_unexpected_response", extra={"operation": "send_data"})
                 raise PushUnavailableError(tickets)
             tickets.extend(_ticket(item) for item in data)
         return tickets

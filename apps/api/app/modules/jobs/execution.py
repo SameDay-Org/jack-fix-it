@@ -125,6 +125,7 @@ from app.modules.jobs.errors import (
     JobPhotoUploadExpiredError,
     NotOnTheWayError,
 )
+from app.modules.jobs.live_updates import kick_live_update
 from app.modules.jobs.location import JobLocationStore, forget_position
 from app.modules.jobs.models import Job, JobEvent, JobPhoto, JobPhotoKind, JobStatus
 from app.modules.jobs.photos import JobPhotoSigner, enqueue_photo_sanitize
@@ -135,6 +136,7 @@ from app.modules.jobs.schemas import (
     JobCategory,
     JobPayout,
     JobTimelineEntry,
+    LiveStage,
     ProJob,
     ProJobPage,
 )
@@ -360,6 +362,12 @@ class JobExecutionService:
                 public_code=public_code,
                 timeout_seconds=self._config.enqueue_timeout_seconds,
             )
+            await kick_live_update(
+                queue,
+                job.id,
+                LiveStage.ON_THE_WAY,
+                timeout_seconds=self._config.enqueue_timeout_seconds,
+            )
         return await self.pro_job(user, job.id)
 
     async def check_in(
@@ -406,6 +414,12 @@ class JobExecutionService:
                 public_code=public_code,
                 timeout_seconds=self._config.enqueue_timeout_seconds,
             )
+            await kick_live_update(
+                queue,
+                job.id,
+                LiveStage.ARRIVED,
+                timeout_seconds=self._config.enqueue_timeout_seconds,
+            )
             return await self.pro_job(user, job.id)
         # A wrong code: counted under the row lock, so concurrent tries cannot pass the limit.
         job.arrival_code_attempts += 1
@@ -437,6 +451,9 @@ class JobExecutionService:
             request_id=job.request_id,
             public_code=public_code,
             timeout_seconds=self._config.enqueue_timeout_seconds,
+        )
+        await kick_live_update(
+            queue, job.id, LiveStage.WORKING, timeout_seconds=self._config.enqueue_timeout_seconds
         )
         return await self.pro_job(user, job.id)
 
@@ -525,6 +542,12 @@ class JobExecutionService:
             job_id=job.id,
             request_id=job.request_id,
             public_code=public_code,
+            timeout_seconds=self._config.enqueue_timeout_seconds,
+        )
+        await kick_live_update(
+            queue,
+            job.id,
+            LiveStage.DONE_WAITING_CONFIRM,
             timeout_seconds=self._config.enqueue_timeout_seconds,
         )
         return await self.pro_job(user, job.id)

@@ -126,7 +126,20 @@ class JobLiveService:
         stage = live_stage(job)
         if stage is None:
             raise JobNotLiveError
-        request_id = job.request_id
+        return await self._view_of(job, stage)
+
+    async def current(self, job_id: uuid.UUID) -> JobLiveOut | None:
+        """The view of any job under way, for the live updates (#596 PR 2b, the worker: no
+        caller to check); None for an unknown job or one not under way."""
+        job = await self._jobs.get(job_id)
+        stage = None if job is None else live_stage(job)
+        if job is None or stage is None:
+            await self._session.commit()
+            return None
+        return await self._view_of(job, stage)
+
+    async def _view_of(self, job: Job, stage: LiveStage) -> JobLiveOut:
+        job_id, request_id = job.id, job.request_id
         code = await self._requests.public_code(request_id)
         # Ends the read transaction: no pooled connection waits on Redis or on Mapbox.
         await self._session.commit()
