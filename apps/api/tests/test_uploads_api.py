@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.db import get_session
-from app.integrations.storage import PresignedUpload, get_storage
+from app.integrations.storage import ObjectPage, PresignedUpload, S3Storage, get_storage
 from app.modules.auth import security
 from app.modules.users.models import User
 from app.modules.users.types import UserRole
@@ -73,6 +73,10 @@ class FakeStorage:
     def presign_get(self, key: str, expires_in: int) -> str:
         self.gets.append((key, expires_in))
         return f"https://storage.example.invalid/get/{key}"
+
+    def list_older_than(self, prefix: str, before: datetime) -> Iterator[ObjectPage]:
+        """Nothing stored: the pending uploads' ceiling (#529) counts the issued URLs only."""
+        yield ObjectPage(objects=[], newer=0)
 
 
 @pytest.fixture
@@ -451,9 +455,14 @@ async def test_logs_have_no_urls_or_signatures(
     real_storage_client: httpx.AsyncClient,
     db_session: AsyncSession,
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     customer = await make_caller(db_session, UserRole.CUSTOMER)
     caplog.clear()
+    # The pending uploads' listing (#529) stays off the network: an empty bucket.
+    monkeypatch.setattr(
+        S3Storage, "list_older_than", lambda self, prefix, before: iter([ObjectPage([], 0)])
+    )
 
     # DEBUG, as an operator chasing an incident might set LOG_LEVEL.
     with caplog.at_level(logging.DEBUG):

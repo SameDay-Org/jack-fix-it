@@ -1,6 +1,7 @@
 """Role dependencies and ensure_owner, through a test-only router (#124). Never mounted in app/."""
 
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -10,7 +11,7 @@ from fastapi import APIRouter, Depends, FastAPI
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.integrations.storage import PresignedUpload, get_storage
+from app.integrations.storage import ObjectPage, PresignedUpload, get_storage
 from app.modules.auth import security
 from app.modules.auth.dependencies import CurrentUser
 from app.modules.auth.permissions import (
@@ -243,6 +244,10 @@ class FakeStorage:
 
     def presign_get(self, key: str, expires_in: int) -> str:
         return f"https://storage.example.invalid/{key}"
+
+    def list_older_than(self, prefix: str, before: datetime) -> Iterator[ObjectPage]:
+        """Nothing stored: the pending uploads' ceiling (#529) counts the issued URLs only."""
+        yield ObjectPage(objects=[], newer=0)
 
 
 @pytest.fixture

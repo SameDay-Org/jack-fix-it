@@ -3,9 +3,9 @@ import os
 import time
 import uuid
 from collections import Counter
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -25,6 +25,7 @@ from app.modules.chat.notify import ChatNotifier, get_chat_notifier
 from app.modules.chat.presence import PushClaim
 from app.modules.jobs.location import Position, get_job_location_store
 from app.modules.jobs.route import CachedRoute, Turn, get_job_route_cache
+from app.modules.uploads.router import get_upload_grants
 from app.modules.users.models import User
 from app.rate_limit import RateLimitResult, get_rate_limiter, window_position
 from tests.sharding import SHARD_ENV, parse_shard, split, weight
@@ -246,7 +247,44 @@ def make_app(settings: Settings) -> FastAPI:
     # their own (tests/test_chat_push.py).
     notifier = quiet_chat_notifier()
     app.dependency_overrides[get_chat_notifier] = lambda: notifier
+    grants = InMemoryUploadGrants(
+        ttl=timedelta(
+            seconds=settings.upload_url_ttl_seconds + settings.upload_grant_grace_seconds
+        ),
+        max_bytes=settings.upload_pending_max_bytes,
+    )
+    app.dependency_overrides[get_upload_grants] = lambda: grants
     return app
+
+
+class InMemoryUploadGrants:
+    """Test-only UploadGrants: RedisUploadGrants' rules (#529) in a dict, by the caller's
+    clock."""
+
+    def __init__(self, *, ttl: timedelta, max_bytes: int) -> None:
+        self.ttl = ttl
+        self.max_bytes = max_bytes
+        # Per user: key -> (size, expires).
+        self.grants: dict[uuid.UUID, dict[str, tuple[int, datetime]]] = {}
+
+    async def admit(
+        self,
+        user_id: uuid.UUID,
+        key: str,
+        size_bytes: int,
+        *,
+        stored_bytes: int,
+        landed: Sequence[str],
+        now: datetime,
+    ) -> bool:
+        mine = {k: v for k, v in self.grants.get(user_id, {}).items() if v[1] > now}
+        pending = stored_bytes + sum(size for k, (size, _) in mine.items() if k not in landed)
+        if pending + size_bytes > self.max_bytes:
+            self.grants[user_id] = mine
+            return False
+        mine[key] = (size_bytes, now + self.ttl)
+        self.grants[user_id] = mine
+        return True
 
 
 def _reset_sentry() -> None:

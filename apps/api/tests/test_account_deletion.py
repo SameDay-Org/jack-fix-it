@@ -1278,7 +1278,7 @@ class FakeStorage:
     def list_older_than(self, prefix: str, before: datetime) -> Iterator[ObjectPage]:
         if self.failure is not None:
             raise self.failure
-        listed = [StoredObject(key, datetime.now(UTC)) for key in sorted(self.objects)]
+        listed = [StoredObject(key, datetime.now(UTC), 1) for key in sorted(self.objects)]
         yield ObjectPage(objects=[o for o in listed if o.key.startswith(prefix)], newer=0)
 
     def presign_get(self, key: str, expires_in: int) -> str:

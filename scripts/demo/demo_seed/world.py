@@ -40,6 +40,8 @@ from app.integrations.stripe_transfers import StripeTransfers
 from app.main import create_app
 from app.modules.auth import security
 from app.modules.jobs.location import Position, get_job_location_store
+from app.modules.uploads.router import get_upload_service
+from app.modules.uploads.service import UploadConfig, UploadService
 from app.modules.users.types import UserRole
 from app.rate_limit import RateLimitResult, get_rate_limiter
 from app.worker import WorkerSettings
@@ -284,6 +286,10 @@ async def open_world(
     locations = MemoryLocations()
     app.dependency_overrides[get_rate_limiter] = lambda: limiter
     app.dependency_overrides[get_job_location_store] = lambda: locations
+    # The pending uploads' ceiling (#529) reads Redis and lists the bucket: the seed has
+    # neither, and it uploads a handful of files of its own.
+    uploads = UploadService(storage, UploadConfig.from_settings(settings))
+    app.dependency_overrides[get_upload_service] = lambda: uploads
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=True)
     try:
         async with httpx.AsyncClient(transport=transport, base_url="http://demo.seed") as http:

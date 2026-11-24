@@ -32,6 +32,16 @@ class InvalidMediaError(AppError):
     message = "The attached media is invalid."
 
 
+class MediaUploadExpiredError(AppError):
+    """A request_media upload issued more than JOB_PHOTO_ATTACH_MAX_AGE_MINUTES ago, or
+    before #298 (no issue time in its key): the orphan sweep may have deleted it, or be about
+    to (#529). The same code as a job photo's: the app uploads the file again."""
+
+    status_code = 422
+    code = "upload_expired"
+    message = "One or more photos or videos were uploaded too long ago. Upload them again."
+
+
 class ZipNotServedError(AppError):
     """The address is outside the active service areas: the client offers the waitlist."""
 
