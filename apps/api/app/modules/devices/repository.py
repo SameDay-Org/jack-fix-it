@@ -30,6 +30,13 @@ class DeviceRepository:
         statement = select(Device.user_id).where(Device.expo_push_token == token)
         return (await self._session.scalars(statement)).one_or_none()
 
+    async def own_id(self, user_id: uuid.UUID, token: str) -> uuid.UUID | None:
+        """The id of `user_id`'s device with this push token; None when it is not theirs."""
+        statement = select(Device.id).where(
+            Device.expo_push_token == token, Device.user_id == user_id
+        )
+        return (await self._session.scalars(statement)).one_or_none()
+
     async def upsert(
         self, user_id: uuid.UUID, token: str, platform: DevicePlatform, now: datetime
     ) -> uuid.UUID:

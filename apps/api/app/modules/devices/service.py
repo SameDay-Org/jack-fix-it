@@ -85,6 +85,11 @@ class DeviceService:
             for device in await self._devices.list_for_user(user_id)
         ]
 
+    async def own_device_id(self, user_id: uuid.UUID, token: str) -> uuid.UUID | None:
+        """The id of `user_id`'s own device with this push token, for what hangs off a device
+        (a Live Activity's token, #596); None when no device of theirs has it."""
+        return await self._devices.own_id(user_id, token)
+
     async def forget(self, device_id: uuid.UUID) -> None:
         """Deletes a device Expo reports as no longer registered, and commits. Idempotent."""
         if await self._devices.delete_by_id(device_id):

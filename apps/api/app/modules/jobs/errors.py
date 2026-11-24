@@ -1,6 +1,6 @@
 from typing import Final
 
-from app.errors import AppError, ConflictError
+from app.errors import AppError, ConflictError, NotFoundError
 
 
 class InvalidTransitionError(ConflictError):
@@ -32,6 +32,14 @@ class JobNotLiveError(ConflictError):
 
     code = "job_not_live"
     message = "The job is not under way."
+
+
+class LiveDeviceNotFoundError(NotFoundError):
+    """A Live Activity token sent with a push token that is no device of the caller's (#596):
+    the app registers its device first (PUT /v1/devices)."""
+
+    code = "device_not_found"
+    message = "No device of yours has this push token. Register the device first."
 
 
 class ProLocationUnavailableError(AppError):
