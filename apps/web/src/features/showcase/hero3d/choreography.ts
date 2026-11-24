@@ -1,5 +1,7 @@
 import type { MediaId } from "../media";
 
+import { PHONE } from "./phone-size";
+
 /**
  * The hero's scroll story, as plain numbers (#403 PR 2). The hero is pinned while the reader
  * scrolls through it; `p` runs from 0 (the hero's top at the viewport's top) to 1 (its end at
@@ -146,15 +148,19 @@ export function revealPose(p: number, t: number): PhonePose {
  * does); CSS's y axis points down, so the turns around x and z change sign. The perspective is
  * the camera's distance, in `cqh` of the CSS phone's box (its size container): the camera
  * stands 1 / (fill * 2 tan(fov / 2)) phone heights away when the phone takes `fill` of the
- * canvas's height (cameraDistance in phone-scene.ts).
+ * canvas's height (cameraDistance in phone-scene.ts). The last step moves the CSS face to the
+ * 3D phone's front, half its depth before the centre the phone turns around: drawn on the
+ * centre's plane, the face would slide sideways against the 3D screen as it turns.
  */
 export function cssPhoneTransform(pose: PhonePose): string {
   const span = 2 * Math.tan((CAMERA_FOV_DEGREES * Math.PI) / 360);
   const distance = Number((100 / (pose.fill * span)).toFixed(2));
+  const front = Number(((100 * PHONE.depth) / 2 / PHONE.height).toFixed(2));
   return [
     `perspective(${distance}cqh)`,
     `rotateX(${-pose.rotX}rad)`,
     `rotateY(${pose.rotY}rad)`,
     `rotateZ(${-pose.rotZ}rad)`,
+    `translateZ(${front}cqh)`,
   ].join(" ");
 }

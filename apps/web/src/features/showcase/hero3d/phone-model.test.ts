@@ -107,7 +107,9 @@ describe("the 3D scene's arithmetic", () => {
 
 /** A canvas as tall as the hero's phone column on a laptop, wide enough to frame by height. */
 const CANVAS = { width: 640, height: 800 };
-/** The phone's corners (three.js units: y up), in the plane of its screen. */
+/** The front's distance from the centre the phone turns around (phone-model.ts, `front`). */
+const FRONT = PHONE.depth / 2;
+/** The phone's corners (three.js units: y up), on its front: the plane of its screen. */
 const CORNERS = [-1, 1].flatMap((sx) =>
   [-1, 1].map((sy) => [(sx * PHONE.width) / 2, (sy * PHONE.height) / 2] as const),
 );
@@ -119,24 +121,31 @@ function drawn3d(pose: PhonePose, [x, y]: readonly [number, number]): [number, n
   camera.lookAt(0, 0, 0);
   camera.updateMatrixWorld();
   const turn = new Matrix4().makeRotationFromEuler(new Euler(pose.rotX, pose.rotY, pose.rotZ));
-  const ndc = new Vector3(x, y, 0).applyMatrix4(turn).project(camera);
+  const ndc = new Vector3(x, y, FRONT).applyMatrix4(turn).project(camera);
   return [(ndc.x * CANVAS.width) / 2, (-ndc.y * CANVAS.height) / 2];
 }
 
 /**
  * Where the browser draws the same corner of the CSS phone (a box `fill` of the canvas tall,
  * centred, its size container), read from the transform string as CSS Transforms defines its
- * functions: applied right to left around the box's centre, y down, and perspective(d)
- * dividing by 1 - z / d.
+ * functions: applied right to left around the box's centre, y down, translateZ towards the
+ * reader, and perspective(d) dividing by 1 - z / d.
  */
 function drawnCss(pose: PhonePose, [x, y]: readonly [number, number]): [number, number] {
   const box = pose.fill * CANVAS.height;
   const scale = box / PHONE.height;
   const steps = [...cssPhoneTransform(pose).matchAll(/(\w+)\((-?[\d.]+)(cqh|rad)\)/g)];
-  expect(steps.map(([, name]) => name)).toEqual(["perspective", "rotateX", "rotateY", "rotateZ"]);
+  expect(steps.map(([, name]) => name)).toEqual([
+    "perspective",
+    "rotateX",
+    "rotateY",
+    "rotateZ",
+    "translateZ",
+  ]);
   let [px, py, pz, w] = [x * scale, -y * scale, 0, 1];
   for (const [, name, value] of steps.reverse()) {
     const [c, s] = [Math.cos(Number(value)), Math.sin(Number(value))];
+    if (name === "translateZ") pz += (Number(value) / 100) * box;
     if (name === "rotateZ") [px, py] = [c * px - s * py, s * px + c * py];
     if (name === "rotateY") [px, pz] = [c * px + s * pz, -s * px + c * pz];
     if (name === "rotateX") [py, pz] = [c * py - s * pz, s * py + c * pz];
@@ -146,6 +155,15 @@ function drawnCss(pose: PhonePose, [x, y]: readonly [number, number]): [number, 
 }
 
 describe("the phone drawn in CSS", () => {
+  it("is compared on the plane the 3D screen sits on (its layers a hair in front)", () => {
+    const layers = unlit(createPhone(null).group).map((mesh) => mesh.position.z);
+    expect(layers.length).toBeGreaterThan(0);
+    for (const z of layers) {
+      expect(z).toBeGreaterThan(FRONT);
+      expect(z).toBeLessThan(FRONT + 0.015);
+    }
+  });
+
   it.each(POSE_KEYS.map(({ at, pose }) => [at, pose] as const))(
     "stands where the 3D camera draws the phone, corner for corner (pose at %s)",
     (_at, pose) => {

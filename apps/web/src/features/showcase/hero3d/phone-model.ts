@@ -12,6 +12,8 @@ import {
 } from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 
+import { PHONE } from "./phone-size";
+
 /**
  * The 3D phone of the hero, built from code: no model file is downloaded, and nothing of it
  * comes from a third party or from Apple (MODEL.md). A modern phone in the brand's light:
@@ -22,23 +24,9 @@ import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeom
  * by phone-scene.ts): no lights, no environment map and tiny shaders, so the phone is cheap to
  * prepare on a phone's CPU while still catching a highlight along its bevel as it turns.
  *
- * Units: the body is 1 wide. The screen keeps the 1:2 of the app's captures (media.ts), so a
- * capture fills it without being cut or stretched. The side buttons sit where the phone
- * drawn in CSS has them (phone-frame.tsx), so the two phones match when one replaces the
- * other.
+ * Its size and units are PHONE (phone-size.ts, which the CSS phone reads too).
  */
-export const PHONE = {
-  width: 1,
-  height: 1.9,
-  depth: 0.1,
-  /** The corner radius of the body, seen from the front. */
-  radius: 0.17,
-  /** The rounded edge of the band. */
-  bevel: 0.03,
-  screen: { width: 0.9, height: 1.8, radius: 0.125 },
-  /** The camera island, a pill below the screen's top edge. */
-  island: { width: 0.27, height: 0.075, fromTop: 0.035 },
-} as const;
+export { PHONE };
 
 /** Side buttons: `top` and `height` as shares of the body's height, as in phone-frame.tsx. */
 const BUTTONS = [
