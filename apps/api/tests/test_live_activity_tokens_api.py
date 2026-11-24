@@ -12,6 +12,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.devices.models import Device, DevicePlatform
+from app.modules.devices.service import DeviceService
 from app.modules.jobs.models import JobStatus, LiveActivityToken
 from tests.job_world import JobWorld, Party, build_world, make_job, record_pushes
 from tests.test_pro_location_api import FORBIDDEN, NOT_FOUND
@@ -181,6 +182,33 @@ async def test_the_device_must_be_the_callers(
     for expo_token in (someone_elses, "ExponentPushToken[never-registered]"):
         response = await send(db_client, job.id, world.customer, body(expo_token))
         assert (response.status_code, response.json()) == (404, DEVICE_NOT_FOUND)
+    assert await kept(db_session, job.id) == []
+
+
+async def test_a_device_deleted_mid_request_is_404(
+    db_client: httpx.AsyncClient,
+    db_session: AsyncSession,
+    world: JobWorld,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The device is found, then deleted (signed out elsewhere) before the token is written: the
+    foreign key refuses the row, and the answer is the same 404 device_not_found, nothing kept
+    (#628 Gatekeeper round 1)."""
+    job = await make_job(db_session, world, JobStatus.ON_THE_WAY)
+    iphone = await a_device(db_session, world.customer)
+    found = DeviceService.own_device_id
+
+    async def deleted_meanwhile(
+        self: DeviceService, user_id: uuid.UUID, token: str
+    ) -> uuid.UUID | None:
+        device_id = await found(self, user_id, token)
+        await db_session.execute(delete(Device).where(Device.id == device_id))
+        return device_id
+
+    monkeypatch.setattr(DeviceService, "own_device_id", deleted_meanwhile)
+    response = await send(db_client, job.id, world.customer, body(iphone))
+
+    assert (response.status_code, response.json()) == (404, DEVICE_NOT_FOUND)
     assert await kept(db_session, job.id) == []
 
 

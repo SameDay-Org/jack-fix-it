@@ -20,7 +20,8 @@ names, so set **Config-as-code file path** in every service's settings.
 | Postgres | Railway Postgres 16 | -                               | -          | -                                   | -             |
 | Redis    | Railway Redis       | -                               | -          | -                                   | -             |
 
-- **redis-location** is a second Redis, for the pros' live positions only (#350):
+- **redis-location** is a second Redis, for the pros' live positions and what comes from them
+  only (#350): routes, and each job's last live update sent (#596). api and worker use it:
   no volume, no backups, its own start command. See "Live positions" under the api variables.
 - **api** runs these as its pre-deploy command, in order, on every deploy:
 
@@ -160,9 +161,10 @@ that Redis writes the position nowhere else, so the positions get a Redis servic
 
 - No volume, no backups and no replica on that service: what it holds must end with the
   container. The API's check does not cover these three; they are the deployer's to keep.
-- Set `LOCATION_REDIS_URL` on api to
+- Set `LOCATION_REDIS_URL` on api and on worker to
   `redis://:${{redis-location.REDIS_PASSWORD}}@${{redis-location.RAILWAY_PRIVATE_DOMAIN}}:6379`.
-  Never point it at `Redis`, the queue's. The worker does not use it.
+  Never point it at `Redis`, the queue's. The worker's live updates (#596) read positions and
+  routes there, and keep each job's last update sent.
 
 The API asks that Redis what it keeps (`CONFIG GET save`, `appendonly`,
 `slowlog-log-slower-than`) before a position goes in or out, and again every
@@ -192,6 +194,21 @@ never in `Redis`: a route starts at the pro's position and ends at the customer'
 Without the token that route answers 503 `route_unavailable` (WARNING `mapbox_not_configured`)
 and nothing else changes; in the three refused states above it answers 503
 `location_unavailable` (ERROR `job_route_store_refused`).
+
+The worker's live updates of an ongoing job (#596: `send_live_update` on each stage change,
+the `send_live_updates` cron every minute) read the same positions and routes, ask Mapbox for
+the ETA, and keep in `redis-location` what each job was last sent: its stage, ETA minute and
+time, for `LIVE_UPDATE_STATE_TTL_SECONDS`. That needs `LOCATION_REDIS_URL` and
+`MAPBOX_ACCESS_TOKEN` on the worker too:
+
+| On the worker                                    | Live updates  | Log, per update (a stage change; each job on the way, each minute)                |
+| ------------------------------------------------ | ------------- | --------------------------------------------------------------------------------- |
+| `LOCATION_REDIS_URL` unset (staging, production) | none are sent | ERROR `live_update_guard_refused` (`not_configured`) and `job_live_store_refused` |
+| that Redis refused by the check above            | none are sent | ERROR `live_update_guard_refused` and `job_live_store_refused`, with the reason   |
+| `MAPBOX_ACCESS_TOKEN` unset                      | stages only   | WARNING `mapbox_not_configured`; the updates carry no ETA                         |
+
+A guard that cannot answer sends nothing, by design: an update is never worth a flood. The job
+steps and the app's own live view are not affected.
 
 Verify after the first deploy, from a shell in `redis-location` (`railway ssh --service
 redis-location`; the image has `redis-cli`, and the shell has the service's `REDIS_PASSWORD`):
@@ -318,7 +335,8 @@ never logs `worker_started`. Use the same values as api.
 | `ORPHAN_UPLOAD_MODE`               | optional; `delete` by default (#529); in `dry_run`, it only counts and logs (see below) | no              | #191, #529  |
 | `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` | same as api (shared variable)                                                           | no              | #298        |
 | `GEOCODE_ON_SAVE`                  | same as api (shared variable); see "Geocode on save"                                    | no              | #384        |
-| `MAPBOX_ACCESS_TOKEN`              | same as api; only needed with `GEOCODE_ON_SAVE=true`                                    | yes             | #384        |
+| `LOCATION_REDIS_URL`               | same as api; without it no live update is sent (see "Live positions")                   | yes (reference) | #596        |
+| `MAPBOX_ACCESS_TOKEN`              | same as api; for the live updates' ETA, and for `GEOCODE_ON_SAVE=true`                  | yes             | #384, #596  |
 
 `ORPHAN_UPLOAD_MIN_AGE_HOURS` and `JOB_PHOTO_ATTACH_MAX_AGE_MINUTES` must hold the same values
 on api and worker: the api refuses job photo uploads older than the window, and the worker's

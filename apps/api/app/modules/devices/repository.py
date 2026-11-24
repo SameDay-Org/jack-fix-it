@@ -86,6 +86,10 @@ class DeviceRepository:
         result = await self._session.execute(delete(Device).where(Device.id == device_id))
         return bool(result.rowcount)  # type: ignore[attr-defined]  # as above
 
+    async def list_for_user_on(self, user_id: uuid.UUID, platform: DevicePlatform) -> list[Device]:
+        statement = select(Device).where(Device.user_id == user_id, Device.platform == platform)
+        return list((await self._session.scalars(statement)).all())
+
     async def list_for_user(self, user_id: uuid.UUID) -> list[Device]:
         statement = select(Device).where(Device.user_id == user_id).order_by(Device.id)
         return list((await self._session.scalars(statement)).all())

@@ -284,5 +284,8 @@ async def test_arrival_code_never_logged_or_in_sentry(
     # Neither does any response to the pro.
     assert not _shows(issued, moved.text)
     # Nor the push to the customer (#65): it points to the app instead.
-    assert list(queue.jobs) == [f"push:job_on_the_way:{job.id}"]
+    assert list(queue.jobs) == [
+        f"push:job_on_the_way:{job.id}",
+        f"live-update:{job.id}:on_the_way",  # its live update (#596): the view has no code
+    ]
     assert not _shows(issued, repr(queue.jobs))

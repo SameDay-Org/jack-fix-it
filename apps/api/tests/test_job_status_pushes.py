@@ -208,6 +208,15 @@ def commits(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(AsyncSession, "commit", recorded)
 
 
+# The live view's stage each step reaches (#596): its live update's job id.
+LIVE_STAGES = {
+    "job_on_the_way": "on_the_way",
+    "job_checked_in": "arrived",
+    "job_started": "working",
+    "job_done": "done_waiting_confirm",
+}
+
+
 @pytest.mark.parametrize("step", STEPS, ids=[step.kind for step in STEPS])
 async def test_each_step_pushes_the_customer_once_after_the_commit(
     db_client: httpx.AsyncClient,
@@ -226,13 +235,15 @@ async def test_each_step_pushes_the_customer_once_after_the_commit(
     assert queue.jobs == {
         f"push:{step.kind}:{job.id}": push(
             world.customer.id, step.kind, job.id, code, f"/requests/{job.request_id}/job"
-        )
+        ),
+        # The stage's live update (#596), kicked after the same commit.
+        f"live-update:{job.id}:{LIVE_STAGES[step.kind]}": ("send_live_update", (str(job.id),)),
     }
-    assert queue.before == ["commit"]  # queued after the step's commit, once
+    assert queue.before == ["commit", "commit"]  # both queued after the step's commit, once
     # The same step again (a retry, an ETA update): no second push, not even a deduplicated one.
     again = await post(db_client, job.id, step, world.pro.headers)
     assert again.status_code == step.repeat_status, again.text
-    assert len(queue.before) == 1
+    assert len(queue.before) == 2
 
 
 async def test_refused_steps_push_nothing(
@@ -349,7 +360,7 @@ async def test_a_failed_push_enqueue_never_fails_the_step(
         response = await asyncio.wait_for(post(db_client, job.id, step, world.pro.headers), 5)
 
     assert response.status_code == 200, response.text
-    assert len(broken.before) == 1  # tried once
+    assert len(broken.before) == 2  # the push and the live update (#596), each tried once
     assert (await db_client.get(f"/v1/pros/me/jobs/{job.id}", headers=world.pro.headers)).json()[
         "status"
     ] == {
@@ -364,6 +375,12 @@ async def test_a_failed_push_enqueue_never_fails_the_step(
         "user_id": str(world.customer.id),
         "message_id": f"{step.kind}:{job.id}",
     }
+    [live] = records(caplog, "live_update_enqueue_failed")
+    assert live.levelno == logging.ERROR
+    assert (getattr(live, "job_id", None), getattr(live, "stage", None)) == (
+        str(job.id),
+        LIVE_STAGES[step.kind],
+    )
 
 
 async def test_the_arrival_code_and_eta_are_in_no_job_push(
@@ -390,12 +407,16 @@ async def test_the_arrival_code_and_eta_are_in_no_job_push(
 
     assert [s.status_code for s in (moved, checked, started, done)] == [200, 200, 200, 200]
     assert issued == "7391"
-    assert sorted(queue.jobs) == sorted(
+    pushes = {key: job_args for key, job_args in queue.jobs.items() if key.startswith("push:")}
+    assert sorted(pushes) == sorted(
         f"push:{kind}:{job.id}"
         for kind in ("job_on_the_way", "job_checked_in", "job_started", "job_done")
     )
+    # The live updates' jobs (#596) carry the job's id alone; the view they send has no code.
+    live = [job_args for key, job_args in queue.jobs.items() if key.startswith("live-update:")]
+    assert live == [("send_live_update", (str(job.id),))] * 4
     eta = moved.json()["eta_at"]
-    for _, args in queue.jobs.values():
+    for _, args in pushes.values():
         # Field by field, ids and clocks masked: the ids in the args can spell a 4-digit code
         # (#387).
         assert fields_holding(issued, args) == []

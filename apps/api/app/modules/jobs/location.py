@@ -330,7 +330,12 @@ def location_backend(settings: Settings, shared: Redis) -> LocationBackend | Non
 def get_job_location_store(
     request: Request, settings: Annotated[Settings, Depends(get_app_settings)]
 ) -> JobLocationStore:
-    backend: LocationBackend | None = request.app.state.location_backend
+    return location_store_of(request.app.state.location_backend, settings)
+
+
+def location_store_of(backend: LocationBackend | None, settings: Settings) -> JobLocationStore:
+    """The positions' store on `backend` (the app's, or the worker's for the live updates,
+    #596): behind the check of what that Redis keeps; none without a backend."""
     if backend is None:
         return NoJobLocationStore()
     timeout = settings.pro_location_timeout_seconds
