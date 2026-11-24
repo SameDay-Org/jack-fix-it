@@ -1158,6 +1158,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/jobs/{job_id}/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Follow an ongoing job at a glance (lock screen)
+         * @description The job's stage, the pro's ETA and road left while on the way, and a progress, for the
+         *     customer's and the pro's lock screens (#596). No name, address, arrival code, amount or
+         *     position. `eta_seconds` and `distance_meters` are null whenever they are unknown: not on
+         *     the way, no route yet, or the pro's position is too old.
+         */
+        get: operations["get_job_live_v1_jobs__job_id__live_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/jobs/{job_id}/messages": {
         parameters: {
             query?: never;
@@ -3966,6 +3989,41 @@ export interface components {
             };
         };
         /**
+         * JobLiveOut
+         * @description An ongoing job as the lock screen shows it (#596): no name, address, arrival code,
+         *     amount or position, the same on both sides.
+         */
+        JobLiveOut: {
+            /**
+             * Job Public Code
+             * @description The request's code, as lock screens show it.
+             */
+            job_public_code: string;
+            /** @description on_the_way until the pro checks in, arrived until the work starts, working until the pro marks it done, done_waiting_confirm until the customer confirms. */
+            stage: components["schemas"]["LiveStage"];
+            /**
+             * Eta Seconds
+             * @description Seconds left to the job's address from the pro's latest position, never negative. null when unknown: not on the way, no route, or the position is too old.
+             */
+            eta_seconds: number | null;
+            /**
+             * Distance Meters
+             * @description Meters of road left to the job's address; null when unknown, as above.
+             */
+            distance_meters: number | null;
+            /**
+             * Progress
+             * @description 0 to 1: on the way 0 to 0.5 by the road left of the trip, arrived 0.5, working 0.75, done 1.
+             */
+            progress: number;
+            /**
+             * Updated At
+             * Format: date-time
+             * @description When this view was put together (server time).
+             */
+            updated_at: string;
+        };
+        /**
          * JobPayout
          * @description The pro's payout for their job (#68), once the job is confirmed.
          */
@@ -4113,6 +4171,12 @@ export interface components {
             transfer: components["schemas"]["TransferOut"] | null;
         };
         JsonValue: unknown;
+        /**
+         * LiveStage
+         * @description Where an ongoing job stands, for the lock screen (#596).
+         * @enum {string}
+         */
+        LiveStage: "on_the_way" | "arrived" | "working" | "done_waiting_confirm";
         /** LivenessResponse */
         LivenessResponse: {
             /**
@@ -11195,6 +11259,73 @@ export interface operations {
             };
             /** @description route_unavailable: the route cannot be computed right now (the route provider is down, slow or not configured); the pro's position is still there to show. location_unavailable: the store must not hold positions (a deploy problem), as on the position's own route. */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_job_live_v1_jobs__job_id__live_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobLiveOut"];
+                };
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers and pros have jobs. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job with this id of which the caller is the customer or the pro. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description job_not_live: the job is not under way: not on the way yet, or past the customer's confirmation (or cancelled, refunded, disputed). Stop following it. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The request is invalid. */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
