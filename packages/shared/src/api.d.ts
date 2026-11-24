@@ -1181,6 +1181,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/jobs/{job_id}/live/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Keep my iPhone Live Activity's push token for an ongoing job
+         * @description The token ActivityKit gave the Live Activity the customer's iPhone started for their own
+         *     ongoing job (#596): the live view's updates reach the activity through it while the app is
+         *     closed. One per job and device; sending a new one replaces it.
+         */
+        post: operations["keep_live_activity_token_v1_jobs__job_id__live_token_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/jobs/{job_id}/messages": {
         parameters: {
             query?: never;
@@ -4171,6 +4193,23 @@ export interface components {
             transfer: components["schemas"]["TransferOut"] | null;
         };
         JsonValue: unknown;
+        /**
+         * LiveActivityTokenIn
+         * @description The push token of the Live Activity the customer's iPhone started for the job (#596),
+         *     with the device's own Expo push token, so the API knows which device it is.
+         */
+        LiveActivityTokenIn: {
+            /**
+             * Expo Push Token
+             * @description The Expo push token.
+             */
+            expo_push_token: string;
+            /**
+             * Live Activity Token
+             * @description ActivityKit's push token for this activity, as hex.
+             */
+            live_activity_token: string;
+        };
         /**
          * LiveStage
          * @description Where an ongoing job stands, for the lock screen (#596).
@@ -11325,6 +11364,75 @@ export interface operations {
                 };
             };
             /** @description The request is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    keep_live_activity_token_v1_jobs__job_id__live_token_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiveActivityTokenIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description invalid_token: missing or expired. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only customers follow their job this way. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description not_found: no job of the caller with this id. device_not_found: no device of the caller has this Expo push token; register the device first (PUT /v1/devices). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description job_not_live: the job is not under way; end the activity instead. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description validation_error: a push token of the wrong shape, or an unknown field. */
             422: {
                 headers: {
                     [name: string]: unknown;
