@@ -61,9 +61,10 @@ under its row lock, after the request's (ADR 0003: a module reaches a quote thro
 service, never the repository).
 """
 
+import asyncio
 import logging
 import uuid
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Final
@@ -326,20 +327,25 @@ class QuoteService:
         # The pros' own details, for the known-value pass only: never logged or returned.
         contacts = await self._users.contact_points({card.user_id for card in cards.values()})
         ratings = await self._ratings.of({card.pro_id: card.user_id for card in cards.values()})
+        shown = [quote for quote in quotes if quote.pro_id in cards]
+        # The whole page's pro text in a worker thread (#528): the event loop serves other calls
+        # meanwhile.
+        texts = await asyncio.to_thread(
+            _redact_quote_texts,
+            [
+                (quote.scope, quote.approach, _known(contacts.get(cards[quote.pro_id].user_id)))
+                for quote in shown
+            ],
+        )
         items: list[CustomerQuote] = []
-        for quote in quotes:
-            card = cards.get(quote.pro_id)
-            if card is None:
-                continue
-            known = _known(contacts.get(card.user_id))
+        for quote, (scope, approach) in zip(shown, texts, strict=True):
+            card = cards[quote.pro_id]
             items.append(
                 CustomerQuote(
                     id=quote.id,
                     amount_cents=quote.amount_cents,
-                    scope=redact_text(quote.scope, known).text,
-                    approach=(
-                        None if quote.approach is None else redact_text(quote.approach, known).text
-                    ),
+                    scope=scope,
+                    approach=approach,
                     duration_minutes=quote.duration_minutes,
                     proposed_start_at=quote.proposed_start_at,
                     expires_at=quote.expires_at,
@@ -396,6 +402,20 @@ def _for_pro(quote: Quote, take_rate_bps: int) -> QuoteOut:
         pro_payout_cents=split.pro_payout_cents,
         platform_fee_cents=split.platform_fee_cents,
     )
+
+
+def _redact_quote_texts(
+    page: Sequence[tuple[str, str | None, KnownValues]],
+) -> list[tuple[str, str | None]]:
+    """Each quote's scope and approach redacted, in order; pure CPU, run in a worker thread
+    (#528)."""
+    return [
+        (
+            redact_text(scope, known).text,
+            None if approach is None else redact_text(approach, known).text,
+        )
+        for scope, approach, known in page
+    ]
 
 
 def _known(contact: ContactPoints | None) -> KnownValues:

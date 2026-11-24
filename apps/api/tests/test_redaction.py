@@ -2350,6 +2350,15 @@ class CountingText(str):
         return str.__getitem__(self, key)
 
 
+@pytest.mark.parametrize("unit", ["a1", "A1", "1a"])
+def test_letter_digit_runs_are_fast(unit: str) -> None:
+    """The #240 timing cases gain the #528 runs, at 5,000 characters as round one's: quadratic,
+    "a1" * 2500 took about a second; the whole text is within the floor budget now."""
+    text = unit * 2500
+    assert len(text) >= 5000
+    assert_within_the_floor_budget(text)
+
+
 @pytest.mark.parametrize("module", [redaction, redaction_legacy], ids=["filter", "floor"])
 @pytest.mark.parametrize("text", LETTER_DIGIT_RUNS, ids=lambda text: text[:6])
 def test_the_glued_code_check_reads_each_character_about_once(
