@@ -6,14 +6,15 @@ import {
   BEAT_STARTS,
   beatAt,
   dominantScreen,
-  FRONT_POSE,
   HERO_SCREEN_IDS,
   pinProgress,
   POSE_KEYS,
   poseAt,
+  revealPose,
   SCREEN_FADE,
   SCREEN_STARTS,
   screenAt,
+  START_POSE,
   type PhonePose,
 } from "./choreography";
 
@@ -105,9 +106,9 @@ describe("phone pose", () => {
     }
   });
 
-  it("starts turned to show the band, at the CSS phone's size, and stays put outside 0 to 1", () => {
+  it("starts turned to show the band (the CSS phone's pose) and stays put outside 0 to 1", () => {
     expect(poseAt(0).rotY).toBeLessThan(-0.3);
-    expect(poseAt(0).fill).toBe(FRONT_POSE.fill);
+    expect(poseAt(0)).toEqual(START_POSE);
     expect(poseAt(-1)).toEqual(poseAt(0));
     expect(poseAt(2)).toEqual(poseAt(1));
   });
@@ -117,6 +118,43 @@ describe("phone pose", () => {
       const pose = poseAt(p);
       expect(Math.abs(pose.rotY)).toBeLessThan(0.05);
       expect(pose.fill).toBeGreaterThanOrEqual(0.9);
+    }
+  });
+
+  it("takes the CSS phone's start pose from the story's first key, turned to the left", () => {
+    expect(START_POSE).toBe(POSE_KEYS[0].pose);
+    expect(START_POSE.rotY).toBeLessThan(0);
+  });
+});
+
+describe("the 3D phone's hand-over (the reveal)", () => {
+  const SCROLLS = [0, 0.05, 0.3, 0.5, 0.8, 1];
+
+  it("starts where the CSS phone stands, whatever the scroll", () => {
+    for (const p of SCROLLS) expect(revealPose(p, 0)).toEqual(START_POSE);
+    // The reveal has not started: a negative time is the same first frame.
+    expect(revealPose(0.5, -1)).toEqual(START_POSE);
+  });
+
+  it("does not turn at all on a fresh load (no scroll yet)", () => {
+    for (const t of [0, 0.25, 0.5, 1, 2]) expect(revealPose(0, t)).toEqual(START_POSE);
+  });
+
+  it("ends on the scroll's pose and keeps it", () => {
+    // Equal up to the mix's rounding (a + (b - a) * 1 is b within 1e-16).
+    const near = (a: PhonePose, b: PhonePose) =>
+      Math.max(...(["rotX", "rotY", "rotZ", "fill"] as const).map((k) => Math.abs(a[k] - b[k])));
+    for (const p of SCROLLS) {
+      expect(near(revealPose(p, 1), poseAt(p))).toBeLessThan(1e-12);
+      expect(near(revealPose(p, 3), poseAt(p))).toBeLessThan(1e-12);
+    }
+  });
+
+  it("turns smoothly between the two, frame after frame", () => {
+    const pose = (t: number) => revealPose(0.8, t);
+    for (let t = 0.01; t <= 1; t += 0.01) {
+      const [a, b] = [pose(t - 0.01), pose(t)];
+      expect(Math.abs(a.rotY - b.rotY) + Math.abs(a.fill - b.fill)).toBeLessThan(0.03);
     }
   });
 });

@@ -1,5 +1,7 @@
 import type { MediaId } from "../media";
 
+import { PHONE } from "./phone-size";
+
 /**
  * The hero's scroll story, as plain numbers (#403 PR 2). The hero is pinned while the reader
  * scrolls through it; `p` runs from 0 (the hero's top at the viewport's top) to 1 (its end at
@@ -88,8 +90,8 @@ export function dominantScreen(p: number): number {
  */
 export type PhonePose = { rotX: number; rotY: number; rotZ: number; fill: number };
 
-/** Facing the reader, at the size of the phone drawn in CSS: where the 3D phone fades in. */
-export const FRONT_POSE: PhonePose = { rotX: 0, rotY: 0, rotZ: 0, fill: 0.74 };
+/** The 3D camera's vertical field of view, in degrees (phone-scene.ts). */
+export const CAMERA_FOV_DEGREES = 28;
 
 /**
  * Turned to show its titanium edge, then square to the reader while the camera moves in
@@ -123,4 +125,42 @@ export function poseAt(p: number): PhonePose {
       return mixPose(from.pose, to.pose, smoothstep((x - from.at) / (to.at - from.at)));
   }
   return POSE_KEYS[POSE_KEYS.length - 1].pose;
+}
+
+/**
+ * The story's first pose, turned to the left. The phone drawn in CSS shows it from the first
+ * paint, and the 3D phone draws it until its reveal, so the hand-over shows no jump.
+ */
+export const START_POSE: PhonePose = POSE_KEYS[0].pose;
+
+/**
+ * The 3D phone's pose while it takes over from the CSS one: `t` runs from 0 (the reveal has
+ * not started: the CSS phone's pose) to 1 (the reveal is over: the scroll's pose). A reader
+ * who has not scrolled yet (`p` = 0) sees no turn at all.
+ */
+export function revealPose(p: number, t: number): PhonePose {
+  return mixPose(START_POSE, poseAt(p), smoothstep(t));
+}
+
+/**
+ * `pose` as a CSS transform for the phone drawn in CSS (hero.tsx), seen as the 3D camera sees
+ * it. The rotations are the 3D phone's (three.js applies X, then Y, then Z, as this list
+ * does); CSS's y axis points down, so the turns around x and z change sign. The perspective is
+ * the camera's distance, in `cqh` of the CSS phone's box (its size container): the camera
+ * stands 1 / (fill * 2 tan(fov / 2)) phone heights away when the phone takes `fill` of the
+ * canvas's height (cameraDistance in phone-scene.ts). The last step moves the CSS face to the
+ * 3D phone's front, half its depth before the centre the phone turns around: drawn on the
+ * centre's plane, the face would slide sideways against the 3D screen as it turns.
+ */
+export function cssPhoneTransform(pose: PhonePose): string {
+  const span = 2 * Math.tan((CAMERA_FOV_DEGREES * Math.PI) / 360);
+  const distance = Number((100 / (pose.fill * span)).toFixed(2));
+  const front = Number(((100 * PHONE.depth) / 2 / PHONE.height).toFixed(2));
+  return [
+    `perspective(${distance}cqh)`,
+    `rotateX(${-pose.rotX}rad)`,
+    `rotateY(${pose.rotY}rad)`,
+    `rotateZ(${-pose.rotZ}rad)`,
+    `translateZ(${front}cqh)`,
+  ].join(" ");
 }

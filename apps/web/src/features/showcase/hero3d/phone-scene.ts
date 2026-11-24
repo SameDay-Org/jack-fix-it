@@ -11,7 +11,7 @@ import {
   WebGLRenderer,
 } from "three";
 
-import { FRONT_POSE, mixPose, poseAt, screenAt, smoothstep, type PhonePose } from "./choreography";
+import { CAMERA_FOV_DEGREES, revealPose, screenAt } from "./choreography";
 import { browserProbeHost, probeFrames } from "./frame-probe";
 import { createPhone, PHONE } from "./phone-model";
 
@@ -47,12 +47,12 @@ export type PhoneScene = {
   setProgress(p: number): void;
   /** Draws frames for a moment and says whether they come fast enough (frame-probe.ts). */
   probe(): Promise<boolean>;
-  /** Turns the phone from facing the reader (as the CSS phone does) to the scroll's pose. */
+  /** Turns the phone from the CSS phone's pose (the story's start) to the scroll's pose. */
   reveal(): void;
   dispose(): void;
 };
 
-const FOV = 28;
+const FOV = CAMERA_FOV_DEGREES;
 /** Per second: how fast the drawn pose catches up with the scroll's. */
 const SMOOTHING = 12;
 const REVEAL_MS = 900;
@@ -265,10 +265,8 @@ export async function createPhoneScene(options: PhoneSceneOptions): Promise<Phon
   }
 
   function draw(now: number) {
-    const pose: PhonePose =
-      revealStart === null
-        ? FRONT_POSE
-        : mixPose(FRONT_POSE, poseAt(drawn), smoothstep((now - revealStart) / REVEAL_MS));
+    // Before the reveal: the CSS phone's pose (the story's start), so the hand-over shows no jump.
+    const pose = revealPose(drawn, revealStart === null ? 0 : (now - revealStart) / REVEAL_MS);
     phone.group.rotation.set(pose.rotX, pose.rotY, pose.rotZ);
     camera.position.set(0, 0, cameraDistance(pose.fill, camera.aspect));
     camera.lookAt(0, 0, 0);
