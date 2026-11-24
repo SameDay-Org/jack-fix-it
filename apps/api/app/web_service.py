@@ -44,7 +44,7 @@ class InvalidServiceKeyError(AppError):
 
     status_code = 401
     code = "invalid_service_key"
-    message = "This endpoint takes calls from the Jack Fix It web service only."
+    message = "This endpoint takes calls from the John Got It web service only."
 
 
 @dataclass(frozen=True)

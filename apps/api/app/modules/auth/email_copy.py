@@ -23,13 +23,13 @@ DEFAULT_LOCALE: Final = "en"
 PASSWORD_RESET_CODE: Final = MappingProxyType(
     {
         "en": _ResetCodeCopy(
-            subject="Your Jack Fix It password reset code",
+            subject="Your John Got It password reset code",
             code_line="Your password reset code is {code}.",
             expiry_line="It expires in {minutes} minutes and works once.",
             ignore_line="If you did not ask to reset your password, you can ignore this email.",
         ),
         "es": _ResetCodeCopy(
-            subject="Tu código para restablecer la contraseña de Jack Fix It",
+            subject="Tu código para restablecer la contraseña de John Got It",
             code_line="Tu código para restablecer la contraseña es {code}.",
             expiry_line="Vence en {minutes} minutos y se puede usar una sola vez.",
             ignore_line="Si no pediste restablecer tu contraseña, puedes ignorar este correo.",

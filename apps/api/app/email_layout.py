@@ -26,7 +26,7 @@ from typing import Final
 
 from app.config import Settings
 
-BRAND: Final = "Jack Fix It"
+BRAND: Final = "John Got It"
 DEFAULT_LOCALE: Final = "en"
 
 # The app's tokens (apps/mobile/src/theme/tokens.json).
@@ -96,7 +96,7 @@ FOOTER: Final = MappingProxyType(
     {
         "en": _FooterCopy(
             service=(
-                "This is a service email about your Jack Fix It account. It is sent even if "
+                "This is a service email about your John Got It account. It is sent even if "
                 "you turned off marketing emails."
             ),
             ask_by_email="Questions? Write to {email} or open Help in the app.",
@@ -104,7 +104,7 @@ FOOTER: Final = MappingProxyType(
         ),
         "es": _FooterCopy(
             service=(
-                "Este es un correo de servicio sobre tu cuenta de Jack Fix It. Se envía aunque "
+                "Este es un correo de servicio sobre tu cuenta de John Got It. Se envía aunque "
                 "hayas desactivado los correos de marketing."
             ),
             ask_by_email="¿Preguntas? Escribe a {email} o abre Ayuda en la app.",
