@@ -206,6 +206,22 @@ async def test_an_orphan_the_sweep_deletes_frees_its_bytes(
     assert after_sweep.status_code == 201
 
 
+def test_the_decided_values_are_the_defaults() -> None:
+    """Cesar's values (2026-11-23), unset in the environment: 30 URLs an hour, 200 MiB
+    pending, orphans deleted after a day."""
+    fields = Settings.model_fields
+    assert fields["upload_url_limit"].default == 30
+    assert fields["upload_url_window_seconds"].default == 3_600
+    assert fields["upload_pending_max_bytes"].default == CEILING
+    assert fields["orphan_upload_mode"].default == "delete"
+    assert fields["orphan_upload_min_age_hours"].default == 24
+
+
+def test_the_ceiling_holds_the_largest_upload() -> None:
+    with pytest.raises(ValueError, match="UPLOAD_PENDING_MAX_BYTES"):
+        make_settings(upload_pending_max_bytes=10, upload_max_video_bytes=11)
+
+
 # The grants in Redis: the real script
 
 
