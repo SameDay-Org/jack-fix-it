@@ -9519,6 +9519,17 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description rate_limited: too many status reads; retry later. */
+            429: {
+                headers: {
+                    /** @description Seconds until the current limit window ends. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description payments_error: Stripe refused the call, e.g. for an account deleted on its side. */
             502: {
                 headers: {
