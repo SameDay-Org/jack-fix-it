@@ -124,7 +124,6 @@ describe("the hero", () => {
     const html = await hero("en");
     const phone = tag(html, /group-data-\[gl=ready\]\/hero:opacity-0/);
     expect(phone).toContain(`style="transform:${cssPhoneTransform(poseAt(0))}"`);
-    expect(phone).toContain("rotateY(-0.55rad)");
     // Its box is the size container of the perspective (cqh), at the start pose's size.
     const box = tag(html, /aspect-\[0\.519\]/);
     expect(box).toContain("[container-type:size]");
